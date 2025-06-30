@@ -27,6 +27,8 @@ function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/home" element={<Home />} />
       <Route path="/attendance" element={<Attendance />} />
+            <Route path="/attendance" element={<Attendance />} />
+          <Route path="/eac-attendance" element={<Attendance />} /> {/* Add this */}
       <Route path="/employee" element={<Employee />} />
       <Route path="/overview" element={<Overview />} />
       <Route path="/profile/:id" element={<Profile />} />
