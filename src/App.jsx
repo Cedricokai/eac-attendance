@@ -36,7 +36,6 @@ function App() {
       <Route path="/leave" element={<Leave />} />
       <Route path="/sidebar" element={<Sidebar />} />
       <Route path="/timesheets" element={<Timesheet/>} />
-      // Add this route
 <Route path="/settingspage" element={<SettingsPage />} />
 <Route path="/biometricAttendanceFeed" element={<BiometricAttendanceFeed/>} />
 <Route path="/payroll" element={< Payroll/>} />
