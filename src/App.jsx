@@ -16,7 +16,7 @@ import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed'
 import Payroll from './pages/attendance/payroll';
 import Dashboard from './pages/dashboard';
 import Reports from './pages/attendance/reports';
-import SettingsPage from './pages/attendance/settingsPage';
+import SettingsPage from './pages/attendance/SettingsPage';
 
 
 function App() {

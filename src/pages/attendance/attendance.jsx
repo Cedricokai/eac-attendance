@@ -377,8 +377,7 @@ const fetchEmployees = async () => {
     // Calculate total overtime amount
     const overtimeAmount = newAttendance.overtime * overtimeHourlyRate;
     setTotalOvertimeAmount(overtimeAmount);
-  }, [newAttendance.minimumHour, newAttendance.overtime, hourlyRate, overtimeHourlyRate]);2
-
+  }, [newAttendance.minimumHour, newAttendance.overtime, hourlyRate, overtimeHourlyRate]);
   const fetchAttendance = async () => {
     setLoading(true);
     try {
