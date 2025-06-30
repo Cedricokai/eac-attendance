@@ -3,7 +3,7 @@ import { SettingsContext } from '../context/SettingsContext';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../Sidebar';
 
-function SettingsPage() {
+function  SettingsPage() {
   const { settings, updateSettings } = useContext(SettingsContext);
   const [activeTab, setActiveTab] = useState('rates');
   const navigate = useNavigate();
