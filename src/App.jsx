@@ -10,13 +10,13 @@ import Home from "./pages/home";
 import Overtime from './pages/attendance/overtime';
 import Leave from './pages/attendance/leave';
 import Sidebar from './pages/Sidebar';
-import SettingsPage from "./pages/attendance/settingsPage";
 import { SettingsProvider } from './pages/context/SettingsContext';
 import Timesheet from './pages/attendance/timesheets';
 import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed';
 import Payroll from './pages/attendance/payroll';
 import Dashboard from './pages/dashboard';
 import Reports from './pages/attendance/reports';
+import SettingsPage from './pages/attendance/settingsPage';
 
 
 function App() {
