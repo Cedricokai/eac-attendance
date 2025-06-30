@@ -41,7 +41,6 @@ function App() {
 <Route path="/payroll" element={< Payroll/>} />
 <Route path="/dashboard" element={< Dashboard/>} />
 <Route path="/reports" element={< Reports/>} />
-<Route path="/settingscontext" element={< SettingsContext />} />
     </Routes>
     </SettingsProvider>
   );
