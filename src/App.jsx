@@ -10,7 +10,7 @@ import Home from "./pages/home";
 import Overtime from './pages/attendance/overtime';
 import Leave from './pages/attendance/leave';
 import Sidebar from './pages/Sidebar';
-import SettingsPage from "./pages/attendance/settingspage";
+import SettingsPage from "./pages/attendance/settingsPage";
 import { SettingsProvider } from './pages/context/SettingsContext';
 import Timesheet from './pages/attendance/timesheets';
 import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed';
