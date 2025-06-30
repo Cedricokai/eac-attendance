@@ -10,7 +10,7 @@ import Home from "./pages/home";
 import Overtime from './pages/attendance/overtime';
 import Leave from './pages/attendance/leave';
 import Sidebar from './pages/Sidebar';
-import { SettingsProvider } from './pages/context/SettingsContext';
+import { SettingsContext, SettingsProvider } from './pages/context/SettingsContext';
 import Timesheet from './pages/attendance/timesheets';
 import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed';
 import Payroll from './pages/attendance/payroll';
@@ -41,8 +41,7 @@ function App() {
 <Route path="/payroll" element={< Payroll/>} />
 <Route path="/dashboard" element={< Dashboard/>} />
 <Route path="/reports" element={< Reports/>} />
-
-
+<Route path="/settingscontext" element={< SettingsContext />} />
     </Routes>
     </SettingsProvider>
   );
