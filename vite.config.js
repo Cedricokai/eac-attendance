@@ -5,7 +5,7 @@ import autoprefixer from 'autoprefixer';
 
 export default defineConfig({
   plugins: [react()],
-  base: "/eac-attendance",
+  base: "/eac-attendance/",  // Fixed with trailing slash
   css: {
     postcss: {
       plugins: [
@@ -14,8 +14,11 @@ export default defineConfig({
       ],
     },
   },
+  resolve: {
+    extensions: ['.js', '.jsx', '.ts', '.tsx'], // Add this section
+  },
   define: {
-    global: 'window', // Fixes "global is not defined" in the browser
+    global: 'window',
   },
   server: {
     proxy: {
