@@ -5,7 +5,7 @@ import autoprefixer from 'autoprefixer';
 
 export default defineConfig({
   plugins: [react()],
-  base: "eac-attendance",
+  base: "/eac-attendance",
   css: {
     postcss: {
       plugins: [
