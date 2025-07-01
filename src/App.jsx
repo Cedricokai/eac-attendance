@@ -16,6 +16,7 @@ import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed'
 import Payroll from './pages/attendance/payroll';
 import Dashboard from './pages/dashboard';
 import Reports from './pages/attendance/reports';
+import SettingsPage from './pages/attendance/settingspage';
 
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
 <Route path="/payroll" element={< Payroll/>} />
 <Route path="/dashboard" element={< Dashboard/>} />
 <Route path="/reports" element={< Reports/>} />
+<Route path="/settingspage" element={< SettingsPage/>} />
     </Routes>
     </SettingsProvider>
   );
