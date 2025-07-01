@@ -36,7 +36,7 @@ function App() {
       <Route path="/leave" element={<Leave />} />
       <Route path="/sidebar" element={<Sidebar />} />
       <Route path="/timesheets" element={<Timesheet/>} />
-      <Route path="/SettingsPage" element={<SettingsPage />} />
+      <Route path="/settingspage" element={<SettingsPage />} />
  <Route path="/biometricAttendanceFeed" element={<BiometricAttendanceFeed/>} />
 <Route path="/payroll" element={< Payroll/>} />
 <Route path="/dashboard" element={< Dashboard/>} />
