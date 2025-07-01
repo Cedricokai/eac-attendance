@@ -16,7 +16,6 @@ import BiometricAttendanceFeed from './pages/attendance/BiometricAttendanceFeed'
 import Payroll from './pages/attendance/payroll';
 import Dashboard from './pages/dashboard';
 import Reports from './pages/attendance/reports';
-import SettingsPage from './pages/attendance/settingspage.jsx';
 
 
 function App() {
@@ -36,7 +35,6 @@ function App() {
       <Route path="/leave" element={<Leave />} />
       <Route path="/sidebar" element={<Sidebar />} />
       <Route path="/timesheets" element={<Timesheet/>} />
-      <Route path="/settingspage" element={<SettingsPage />} />
  <Route path="/biometricAttendanceFeed" element={<BiometricAttendanceFeed/>} />
 <Route path="/payroll" element={< Payroll/>} />
 <Route path="/dashboard" element={< Dashboard/>} />
