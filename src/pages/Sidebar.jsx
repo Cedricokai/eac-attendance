@@ -175,42 +175,11 @@ function Sidebar() {
         </div>
 
         {/* Departments Section */}
-        <div>
-          <button
-            onClick={() => toggleDropdown("departments")}
-            className={`flex justify-between items-center w-full px-4 py-3 rounded-lg transition-colors ${isActiveParent(["/departments"]) ? "bg-gray-700" : "hover:bg-gray-700"}`}
-          >
-            <div className="flex items-center gap-3">
-              <Briefcase size={18} />
-              Departments
-            </div>
-            {openDropdowns.departments ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-
-          {openDropdowns.departments && (
-            <div className="ml-8 mt-1 space-y-1">
-              <Link 
-                to="/departments"
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/departments") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
-              >
-                <Briefcase size={16} />
-                Department List
-              </Link>
-              <Link 
-                to="/departments/positions"
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/departments/positions") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
-              >
-                <User size={16} />
-                Positions
-              </Link>
-            </div>
-          )}
-        </div>
 
         {/* Settings */}
         <Link 
-          to="/settings"
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive("/settings") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+          to="/settingspage"
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive("/settingspage") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
         >
           <Settings size={18} />
           Settings
