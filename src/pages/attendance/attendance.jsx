@@ -7,6 +7,7 @@ import BiometricAttendanceFeed from "./BiometricAttendanceFeed";
 import { Client as StompClient } from '@stomp/stompjs';
 import * as XLSX from 'xlsx'; // Add this import
 
+const API_URL = "https://mysql-production-563e.up.railway.app"; 
 
 function Attendance() {
   const [query, setQuery] = useState('');
@@ -53,7 +54,7 @@ const [newAttendance, setNewAttendance] = useState({
 useEffect(() => {
   const fetchOvertimes = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/overtime');
+      const response = await fetch('${API_URL}/api/overtime');
       if (!response.ok) throw new Error('Failed to fetch overtimes');
       setOvertimes(await response.json());
     } catch (err) {
@@ -64,7 +65,7 @@ useEffect(() => {
 }, []);
 
 useEffect(() => {
-  const socket = new SockJS('http://localhost:8080/ws');
+const socket = new SockJS(`${API_URL}/ws`);
   const stompClient = new StompClient({
     webSocketFactory: () => socket,
     debug: (str) => console.log(str),
@@ -195,7 +196,7 @@ const isHoliday = (date) => {
 
   const fetchHolidays = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/holidays');
+      const response = await fetch('${API_URL}/api/holidays');
       if (!response.ok) throw new Error('Failed to fetch holidays');
       setHolidays(await response.json());
     } catch (err) {
@@ -205,7 +206,7 @@ const isHoliday = (date) => {
   
   const createHoliday = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/holidays', {
+      const response = await fetch('${API_URL}/api/holidays', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newHoliday)
@@ -255,7 +256,7 @@ useEffect(() => {
   // Add fetchLeaves
   const fetchLeaves = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/leave');
+      const response = await fetch('${API_URL}/api/leave');
       if (!response.ok) throw new Error('Failed to fetch leaves');
       setLeaves(await response.json());
     } catch (err) {
@@ -317,10 +318,10 @@ const fetchEmployees = async () => {
   try {
     // Fetch all necessary data in parallel
     const [employeesRes, attendanceRes, overtimeRes, leavesRes] = await Promise.all([
-      fetch('http://localhost:8080/api/employee'),
-      fetch('http://localhost:8080/api/attendance'),
-      fetch('http://localhost:8080/api/overtime'),
-      fetch('http://localhost:8080/api/leave')
+      fetch('${API_URL}/api/employee'),
+      fetch('${API_URL}/api/attendance'),
+      fetch('${API_URL}/api/overtime'),
+      fetch('${API_URL}/api/leave')
     ]);
 
     if (!employeesRes.ok) throw new Error('Failed to fetch employees');
@@ -381,7 +382,7 @@ const fetchEmployees = async () => {
   const fetchAttendance = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8080/api/attendance');
+      const response = await fetch('${API_URL}/api/attendance');
       if (!response.ok) throw new Error('Failed to fetch attendance');
       
       const data = await response.json();
@@ -444,7 +445,7 @@ const createAttendance = async () => {
       };
 
       try {
-        const response = await fetch('http://localhost:8080/api/attendance', {
+        const response = await fetch('${API_URL}/api/attendance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(attendanceData),
@@ -467,7 +468,7 @@ const createAttendance = async () => {
             relatedAttendanceId: attendance.id
           };
 
-          const overtimeResponse = await fetch('http://localhost:8080/api/overtime', {
+          const overtimeResponse = await fetch('${API_URL}/api/overtime', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(overtimeData),
@@ -497,7 +498,7 @@ const createAttendance = async () => {
       };
 
       try {
-        const response = await fetch('http://localhost:8080/api/attendance', {
+        const response = await fetch('${API_URL}/api/attendance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(attendanceData),
@@ -520,7 +521,7 @@ const createAttendance = async () => {
             relatedAttendanceId: attendance.id
           };
 
-          const overtimeResponse = await fetch('http://localhost:8080/api/overtime', {
+          const overtimeResponse = await fetch('${API_URL}/api/overtime', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(overtimeData),
@@ -627,7 +628,7 @@ const validateAttendance = async () => {
   }
 
   try {
-    const response = await fetch("http://localhost:8080/api/attendance/insertOverview", {
+    const response = await fetch("${API_URL}/api/attendance/insertOverview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ attendanceIds: checkedAttendanceIds })
@@ -869,7 +870,7 @@ const handleExcelImport = async () => {
     }));
 
     // Send to backend
-    const response = await fetch('http://localhost:8080/api/attendance/batch', {
+    const response = await fetch('${API_URL}/api/attendance/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(attendanceData)
