@@ -38,11 +38,34 @@ function Employee() {
 
   const createMenuRef = useRef(null);
 
+  useEffect(() => {
+  const socket = new WebSocket(`wss://mysql-production-563e.up.railway.app/ws`);
+
+  socket.onopen = () => {
+    console.log('WebSocket connected');
+  };
+
+  socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    // Handle incoming WebSocket messages
+    // For example, update employees list in real-time
+    setEmployees(prev => [...prev, data]);
+  };
+
+  socket.onclose = () => {
+    console.log('WebSocket disconnected');
+  };
+
+  return () => {
+    socket.close();
+  };
+}, []);
+
   // Fetch employees from the API
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const response = await fetch("${API_URL}/api/employee", {
+      const response = await fetch(`${API_URL}/api/employee`,{
         method: "GET",
       });
 
@@ -120,7 +143,7 @@ function Employee() {
   // Save uploaded data to the database
   const saveUploadedData = async () => {
     try {
-      const response = await fetch("${API_URL}/api/employee/bulk", {
+     const response = await fetch(`${API_URL}/api/employee/bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(uploadedData),
@@ -157,7 +180,7 @@ function Employee() {
     }
 
     try {
-      const response = await fetch("${API_URL}/api/employee", {
+      const response = await fetch(`${API_URL}/api/employee`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newEmployee),
