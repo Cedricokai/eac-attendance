@@ -42,7 +42,7 @@ function Employee() {
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const response = await fetch("http://${API_URL}/api/employee", {
+      const response = await fetch("${API_URL}/api/employee", {
         method: "GET",
       });
 
@@ -120,7 +120,7 @@ function Employee() {
   // Save uploaded data to the database
   const saveUploadedData = async () => {
     try {
-      const response = await fetch("http://${API_URL}/api/employee/bulk", {
+      const response = await fetch("${API_URL}/api/employee/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(uploadedData),
@@ -157,7 +157,7 @@ function Employee() {
     }
 
     try {
-      const response = await fetch("http://${API_URL}/api/employee", {
+      const response = await fetch("${API_URL}/api/employee", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newEmployee),
@@ -189,7 +189,7 @@ function Employee() {
     if (!editingEmployee) return;
   
     try {
-      const response = await fetch(`http://${API_URL}/api/employee/${editingEmployee.id}`, {
+      const response = await fetch(`${API_URL}/api/employee/${editingEmployee.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editingEmployee),
@@ -217,7 +217,7 @@ function Employee() {
     if (!window.confirm("Are you sure you want to delete this employee?")) return;
     
     try {
-      const response = await fetch(`http://${API_URL}/api/employee/${id}`, {
+      const response = await fetch(`${API_URL}/api/employee/${id}`, {
         method: "DELETE",
       });
 
