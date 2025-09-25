@@ -22,7 +22,8 @@ function LoginPage() {
   };
 
   // Handle login
-  const handleLogin = async (e) => {
+ // Handle login
+ const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
@@ -39,24 +40,16 @@ function LoginPage() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log("Login response:", data); // 👀 check backend shape
+        console.log("Login response:", data);
 
-        // ✅ Ensure we pick the correct JWT key
-        const jwtToken = data.token || data.accessToken || data.jwt;
+        const jwtToken = data.token;
         if (!jwtToken || jwtToken.split(".").length !== 3) {
           throw new Error("Invalid JWT token received from backend");
         }
 
-        // Save JWT + optional tokens
         localStorage.setItem("jwtToken", jwtToken);
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken);
-        }
-        if (data.role) {
-          localStorage.setItem("userRole", data.role);
-        }
+        if (data.role) localStorage.setItem("userRole", data.role);
 
-        // ✅ Redirect: Admin → Centralized, Others → EmployeeDashboard
         if (data.role === "ROLE_ADMIN") {
           navigate("/centralizedDashboard");
         } else {

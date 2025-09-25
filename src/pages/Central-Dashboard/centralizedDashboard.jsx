@@ -31,16 +31,60 @@ const CentralizedDashboard = () => {
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   // Mock user data
-  const [user] = useState({
-    name: 'Demo User',
-    role: 'admin',
-    email: 'demo@example.com'
-  });
+  const [user, setUser] = useState(null);
 
-  const logout = () => {
-    console.log('Logging out...');
-    navigate('/login');
+useEffect(() => {
+  const fetchUser = async () => {
+    try {
+     const token = localStorage.getItem("jwtToken"); // ✅ match LoginPage
+ // assuming you store JWT here
+      const res = await fetch("http://localhost:8080/auth/me", {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        },
+        credentials: "include"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser({
+          name: data.username,  // comes from backend
+          role: data.role.replace("ROLE_", "").toLowerCase(), 
+          email: data.email
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch user", err);
+    }
   };
+  fetchUser();
+}, []);
+
+
+const handleLogout = async () => {
+  try {
+    const token = localStorage.getItem("jwtToken");
+
+    await fetch("http://localhost:8080/auth/logout", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+    });
+
+    // Clear local storage
+    localStorage.removeItem("jwtToken");
+    localStorage.removeItem("userRole");
+
+    // Redirect to login
+    navigate("/LoginPage");
+  } catch (error) {
+    console.error("Logout failed:", error);
+  }
+};
+
+
 
   const dashboards = [
     { 
@@ -245,13 +289,12 @@ const CentralizedDashboard = () => {
                       <p className="text-xs text-indigo-200 capitalize">{user?.role || 'employee'}</p>
                     </div>
                   </div>
-                  <button 
-                    onClick={logout}
-                    className="p-1 rounded-md hover:bg-indigo-700 text-indigo-200"
-                    title="Logout"
-                  >
-                    <LogOut size={18} />
-                  </button>
+                     <button
+  onClick={handleLogout}
+  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+>
+  Logout
+</button>
                 </>
               ) : (
                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
@@ -330,16 +373,12 @@ const CentralizedDashboard = () => {
                       <p className="text-xs text-indigo-200 capitalize">{user?.role || 'employee'}</p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => {
-                      logout();
-                      setMobileMenuOpen(false);
-                    }}
-                    className="p-1 rounded-md hover:bg-indigo-700 text-indigo-200"
-                    title="Logout"
-                  >
-                    <LogOut size={18} />
-                  </button>
+                      <button
+  onClick={handleLogout}
+  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+>
+  Logout
+</button>
                 </div>
               </div>
             </motion.div>
@@ -367,9 +406,17 @@ const CentralizedDashboard = () => {
               >
                 <Menu size={20} />
               </button>
-              <h1 className="text-xl font-semibold text-gray-800">
-                {dashboards.find(d => d.id === activeDashboard)?.name || 'Company Dashboard'}
-              </h1>
+            <div className="flex items-center space-x-2">
+  <img 
+    src="/assets/company-logo.png"  // put logo in /public/assets/
+    alt="Company Logo" 
+    className="h-8 w-auto"
+  />
+  <span className="text-xl font-semibold text-gray-800">
+    {dashboards.find(d => d.id === activeDashboard)?.name || 'Dashboard'}
+  </span>
+</div>
+
             </div>
             <div className="flex items-center space-x-4">
               <div className="relative">
@@ -425,13 +472,13 @@ const CentralizedDashboard = () => {
                         <Settings size={16} className="mr-2" />
                         Settings
                       </button>
-                      <button
-                        onClick={logout}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center"
-                      >
-                        <LogOut size={16} className="mr-2" />
-                        Logout
-                      </button>
+                    <button
+  onClick={handleLogout}
+  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+>
+  Logout
+</button>
+
                     </motion.div>
                   )}
                 </AnimatePresence>
