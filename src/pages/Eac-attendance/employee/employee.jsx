@@ -107,6 +107,15 @@ function Employee() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [openMenuId]);
 
+
+  const parseExcelDate = (value) => {
+  if (!value || value === '-' || value === 'null') return null;
+
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+};
+
+
   // Handle displaying the selected file's contents in a popup
   // Handle displaying the selected file's contents in a popup
 const handleDisplayFile = () => {
@@ -155,6 +164,55 @@ const handleDisplayFile = () => {
           case 'rate':
             employee.minimumRate = row[index] || '';
             break;
+                case 'ssnitnumber':
+      employee.ssnitNumber = row[index] || '';
+      break;
+    case 'tinnumber':
+      employee.tinNumber = row[index] || '';
+      break;
+    case 'tagnumber':
+      employee.tagNumber = row[index] || '';
+      break;
+ case 'dateofbirth':
+  employee.dateOfBirth = parseExcelDate(row[index]);
+  break;
+    case 'emergencycontact':
+      employee.emergencyContact = row[index] || '';
+      break;
+    case 'accountnumber':
+      employee.accountNumber = row[index] || '';
+      break;
+    case 'employeeid':
+      employee.employeeId = row[index] || '';
+      break;
+    case 'department':
+      employee.department = row[index] || '';
+      break;
+    case 'startdate':
+  employee.startDate = parseExcelDate(row[index]);
+  break;
+  case 'enddate':
+  employee.endDate = parseExcelDate(row[index]);
+  break;
+    case 'basicsalary':
+      employee.basicSalary = row[index] || '';
+      break;
+    case 'graderank':
+    case 'grade':
+      employee.grade = row[index] || '';
+      break;
+    case 'rentallowance':
+      employee.rentAllowance = row[index] || '';
+      break;
+    case 'transportallowance':
+      employee.transportAllowance = row[index] || '';
+      break;
+    case 'clothingallowance':
+      employee.clothingAllowance = row[index] || '';
+      break;
+    case 'otherallowance':
+      employee.otherAllowance = row[index] || '';
+      break;
           // Ignore other columns like Basic Salary, Account Number, etc.
           default:
             // Skip unmapped columns
@@ -213,6 +271,7 @@ const handleDisplayFile = () => {
     !newEmployee.tinNumber ||
     !newEmployee.startDate ||
     !newEmployee.endDate ||
+    !newEmployee.allowances ||
     !newEmployee.accountNumber 
   ) {
     setError("Please fill out all fields.");
@@ -1031,6 +1090,17 @@ const handleDisplayFile = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
             <input
               type="number"
+              value={editingEmployee.accountNumber}
+              onChange={(e) => setEditingEmployee({ ...editingEmployee, accountNumber: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          
+         <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
+            <input
+              type="number"
               value={editingEmployee.allowances}
               onChange={(e) => setEditingEmployee({ ...editingEmployee, allowances: e.target.value })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1069,40 +1139,65 @@ const handleDisplayFile = () => {
       <h2 className="text-xl font-semibold mb-4">Excel File Contents</h2>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">First Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Position</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Type</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Basic Salary</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Number</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {uploadedData.map((employee, index) => (
-              <tr key={index} className="hover:bg-gray-50">
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.firstName}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.lastName}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.email}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.phone}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.jobPosition}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.category}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.workType}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.minimumRate}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.basicSalary}</td>
-                     <td className="px-6 py-4 text-sm text-gray-700">{employee.accountNumber}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.ssnitNumber}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{employee.tinNumber}</td>
-              </tr>
-            ))}
-          </tbody>
+         <thead className="bg-gray-50">
+  <tr>
+    <th>First Name</th>
+    <th>Last Name</th>
+    <th>Email</th>
+    <th>Phone</th>
+    <th>SSNIT Number</th>
+    <th>TIN Number</th>
+    <th>Tag Number</th>
+    <th>Date of Birth</th>
+    <th>Emergency Contact</th>
+    <th>Account Number</th>
+    <th>Employee ID</th>
+    <th>Category</th>
+    <th>Job Position</th>
+    <th>Work Type</th>
+    <th>Department</th>
+    <th>Start Date</th>
+    <th>End Date</th>
+    <th>Basic Salary</th>
+    <th>Minimum Rate</th>
+    <th>Grade</th>
+    <th>Rent Allowance</th>
+    <th>Transport Allowance</th>
+    <th>Clothing Allowance</th>
+    <th>Other Allowance</th>
+  </tr>
+</thead>
+<tbody>
+  {uploadedData.map((employee, index) => (
+    <tr key={index}>
+      <td>{employee.firstName}</td>
+      <td>{employee.lastName}</td>
+      <td>{employee.email}</td>
+      <td>{employee.phone}</td>
+      <td>{employee.ssnitNumber}</td>
+      <td>{employee.tinNumber}</td>
+      <td>{employee.tagNumber}</td>
+      <td>{employee.dateOfBirth}</td>
+      <td>{employee.emergencyContact}</td>
+      <td>{employee.accountNumber}</td>
+      <td>{employee.employeeId}</td>
+      <td>{employee.category}</td>
+      <td>{employee.jobPosition}</td>
+      <td>{employee.workType}</td>
+      <td>{employee.department}</td>
+      <td>{employee.startDate}</td>
+      <td>{employee.endDate}</td>
+      <td>{employee.basicSalary}</td>
+      <td>{employee.minimumRate}</td>
+      <td>{employee.grade}</td>
+      <td>{employee.rentAllowance}</td>
+      <td>{employee.transportAllowance}</td>
+      <td>{employee.clothingAllowance}</td>
+      <td>{employee.otherAllowance}</td>
+    </tr>
+  ))}
+</tbody>
+
         </table>
       </div>
       <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-200">

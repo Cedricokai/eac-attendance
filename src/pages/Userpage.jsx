@@ -9,7 +9,9 @@ import {
   ShieldCheckIcon,
   PencilIcon,
   CheckIcon,
-  XMarkIcon
+  XMarkIcon,
+  PlusIcon,
+  UserPlusIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -22,56 +24,107 @@ const Userpage = () => {
     const [editingUserId, setEditingUserId] = useState(null);
     const [tempRole, setTempRole] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [createUserData, setCreateUserData] = useState({
+        name: '',
+        userName: '',
+        email: '',
+        password: '',
+        mobile: '',
+        role: 'CUSTOMER'
+    });
 
-    // Update your role mapping
-const roleMapping = {
-    'Admin': 'ROLE_ADMIN',
-    'HR': 'ROLE_HR',
-    'Customer': 'ROLE_CUSTOMER',
-    'Inventory': 'ROLE_INVENTORY',
-     'Supervisor': 'ROLE_SUPERVISOR',
-     'Planner': 'ROLE_PLANNER',
-    'None': null
-};
+    const roleMapping = {
+        'Admin': 'ROLE_ADMIN',
+        'HR': 'ROLE_HR',
+        'Customer': 'ROLE_CUSTOMER',
+        'Inventory': 'ROLE_INVENTORY',
+        'Supervisor': 'ROLE_SUPERVISOR',
+        'Planner': 'ROLE_PLANNER',
+        'None': null
+    };
 
-    // Available roles in the system
-    const availableRoles = ['Admin', 'HR', 'Customer','Inventory','Planner', 'Supervisor' ,'None'];
+    const availableRoles = ['Admin', 'HR', 'Customer', 'Inventory', 'Planner', 'Supervisor', 'None'];
 
     useEffect(() => {
-        const fetchUsers = async () => {
-            const token = localStorage.getItem('jwtToken');
-
-            if (!token) {
-                setError('No token found - Please login again');
-                setLoading(false);
-                return;
-            }
-    
-            try {
-                const response = await fetch('http://localhost:8080/auth', {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    },
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch: ${response.status}`);
-                }
-    
-                const data = await response.json();
-                setUsers(data);
-            } catch (err) {
-                console.error('Fetch error:', err.message);
-                setError(err.message);
-            } finally {
-                setLoading(false);
-            }
-        };
-    
         fetchUsers();
     }, []);
+
+    const fetchUsers = async () => {
+        const token = localStorage.getItem('jwtToken');
+
+        if (!token) {
+            setError('No token found - Please login again');
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const response = await fetch('http://localhost:8080/auth', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to fetch: ${response.status}`);
+            }
+
+            const data = await response.json();
+            setUsers(data);
+        } catch (err) {
+            console.error('Fetch error:', err.message);
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        const token = localStorage.getItem('jwtToken');
+
+        try {
+            const response = await fetch('http://localhost:8080/auth/admin/create-user', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(createUserData),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to create user');
+            }
+
+            const result = await response.json();
+            toast.success('User created successfully!');
+            setShowCreateModal(false);
+            setCreateUserData({
+                name: '',
+                userName: '',
+                email: '',
+                password: '',
+                mobile: '',
+                role: 'CUSTOMER'
+            });
+            fetchUsers(); // Refresh the list
+        } catch (err) {
+            toast.error(err.message);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setCreateUserData(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
 
     const handleEditClick = (user) => {
         setEditingUserId(user.id);
@@ -87,51 +140,44 @@ const roleMapping = {
         setTempRole('');
     };
 
- const handleSave = async (userId) => {
-  setIsUpdating(true);
-  try {
-    const token = localStorage.getItem('jwtToken');
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
+    const handleSave = async (userId) => {
+        setIsUpdating(true);
+        try {
+            const token = localStorage.getItem('jwtToken');
+            if (!token) {
+                throw new Error('No authentication token found');
+            }
 
-    // Send only raw role (e.g., "Supervisor"), not ROLE_SUPERVISOR
-    const roleValue = tempRole === 'None' ? null : tempRole;
+            const roleValue = tempRole === 'None' ? null : tempRole;
 
-    console.log('Updating role:', { userId, role: roleValue });
+            const response = await fetch(`http://localhost:8080/auth/users/${userId}/role`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ role: roleValue }),
+            });
 
-    const response = await fetch(`http://localhost:8080/auth/users/${userId}/role`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ role: roleValue }),
-    });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            }
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-    }
+            const updatedUser = await response.json();
+            setUsers(users.map(user => 
+                user.id === userId ? { ...user, role: updatedUser.role || null } : user
+            ));
 
-    const updatedUser = await response.json();
-    console.log('Update successful:', updatedUser);
-
-    setUsers(users.map(user => 
-      user.id === userId ? { ...user, role: updatedUser.role || null } : user
-    ));
-
-    toast.success('Role updated successfully!');
-    setEditingUserId(null);
-  } catch (err) {
-    console.error('Update failed:', err);
-    toast.error(err.message || 'Failed to update role');
-  } finally {
-    setIsUpdating(false);
-  }
-};
-
-
+            toast.success('Role updated successfully!');
+            setEditingUserId(null);
+        } catch (err) {
+            console.error('Update failed:', err);
+            toast.error(err.message || 'Failed to update role');
+        } finally {
+            setIsUpdating(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -201,8 +247,17 @@ const roleMapping = {
                     <div className="p-6 border-b border-gray-100">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-semibold text-gray-800">User Management</h2>
-                            <div className="text-sm text-gray-500">
-                                {users.length} {users.length === 1 ? 'user' : 'users'} found
+                            <div className="flex items-center space-x-4">
+                                <div className="text-sm text-gray-500">
+                                    {users.length} {users.length === 1 ? 'user' : 'users'} found
+                                </div>
+                                <button
+                                    onClick={() => setShowCreateModal(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    <UserPlusIcon className="h-5 w-5" />
+                                    Create User
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -299,6 +354,116 @@ const roleMapping = {
                         </table>
                     </div>
                 </div>
+
+                {/* Create User Modal */}
+                {showCreateModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white rounded-lg max-w-md w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold">Create New User</h3>
+                                <button
+                                    onClick={() => setShowCreateModal(false)}
+                                    className="text-gray-500 hover:text-gray-700"
+                                >
+                                    <XMarkIcon className="h-5 w-5" />
+                                </button>
+                            </div>
+                            
+                            <form onSubmit={handleCreateUser} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Full Name</label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        value={createUserData.name}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                        required
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Username</label>
+                                    <input
+                                        type="text"
+                                        name="userName"
+                                        value={createUserData.userName}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                        required
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Email</label>
+                                    <input
+                                        type="email"
+                                        name="email"
+                                        value={createUserData.email}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                        required
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Password</label>
+                                    <input
+                                        type="password"
+                                        name="password"
+                                        value={createUserData.password}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                        required
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Mobile</label>
+                                    <input
+                                        type="tel"
+                                        name="mobile"
+                                        value={createUserData.mobile}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Role</label>
+                                    <select
+                                        name="role"
+                                        value={createUserData.role}
+                                        onChange={handleInputChange}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                        <option value="CUSTOMER">Customer</option>
+                                        <option value="HR">HR</option>
+                                        <option value="INVENTORY">Inventory</option>
+                                        <option value="SUPERVISOR">Supervisor</option>
+                                        <option value="PLANNER">Planner</option>
+                                    </select>
+                                </div>
+                                
+                                <div className="flex justify-end space-x-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCreateModal(false)}
+                                        className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                                    >
+                                        Create User
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     );

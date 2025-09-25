@@ -15,6 +15,9 @@ function Leave() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchResults, setSearchResults] = useState([]);
+  const [isReasonModalOpen, setIsReasonModalOpen] = useState(false);
+const [selectedReason, setSelectedReason] = useState('');
+
 
   // New leave form state
   const [newLeave, setNewLeave] = useState({
@@ -267,7 +270,7 @@ function Leave() {
           </header>
 
           {/* Page Header */}
-          <div className="p-6">
+          <div className="p-0">
             {/* Header */}
             <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white rounded-xl shadow-sm p-6">
               <div>
@@ -337,83 +340,32 @@ function Leave() {
                 <span className="font-medium">Leave</span>
               </div>
             </Link>
-
-             <Link to="/leaveRequestForm" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/leaveRequestForm" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">Leave Request Form</span>
-              </div>
-            </Link>
-
-             <Link to="/supervisorDashboard" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/supervisorDashboard" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">Supervisor</span>
-              </div>
-            </Link>
-
-               <Link to="/plannerDashboard" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/plannerDashboard" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">Planner</span>
-              </div>
-            </Link>
-
-              <Link to="/HRDashboard" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/HRDashboard" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">HR Dashboard</span>
-              </div>
-            </Link>
-
-          
-// In your navigation component
-<Link to="/leave-status" className="w-[180px]">
-  <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-    location.pathname === "/leave-status" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-  }`}>
-    <span className="font-medium">My Leave Status</span>
-  </div>
-</Link>
           </div>
 
           {/* Leave Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Employee
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Leave Type
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Start Date
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      End Date
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Duration
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Reason
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+              <table className=" ">
+               <thead className="bg-gray-50">
+  <tr>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Leave Type</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+    
+    {/* New role-specific statuses */}
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supervisor</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planner</th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">HR</th>
+
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overall Status</th>
+    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+  </tr>
+</thead>
+
+                <tbody className="bg-white divide-gray-200">
                   {leaves.map((leave) => (
                     <tr key={leave.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -456,22 +408,62 @@ function Leave() {
                       <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
                         {leave.reason}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
-                          {leave.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {leave.status === 'Pending' && (
-                          <button
-                            onClick={() => validateLeave(leave.id)}
-                            className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm"
-                          >
-                            Approve
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                     <td className="px-6 py-4 whitespace-nowrap">
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
+          {leave.supervisorStatus || "Pending"}
+        </span>
+      </td>
+
+      {/* Planner Status */}
+      <td className="px-6 py-4 whitespace-nowrap">
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
+          {leave.plannerStatus || "Pending"}
+        </span>
+      </td>
+
+      {/* HR Status */}
+      <td className="px-6 py-4 whitespace-nowrap">
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
+          {leave.hrStatus || "Pending"}
+        </span>
+      </td>
+
+      {/* Overall status */}
+      <td className="px-6 py-4 whitespace-nowrap">
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
+          {leave.status}
+        </span>
+      </td>
+
+      {/* Actions (Approve etc.) */}
+     {/* Actions (Approve etc.) */}
+{/* Actions (Approve etc.) */}
+<td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex gap-2 justify-end">
+  {leave.status === "Pending" && (
+    <button
+      onClick={() => validateLeave(leave.id)}
+      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm"
+    >
+      Approve
+    </button>
+  )}
+
+  {leave.status === "Rejected" && (
+    <button
+      onClick={() => {
+        const feedback =
+          leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
+        setSelectedReason(feedback || "No feedback provided.");
+        setIsReasonModalOpen(true);
+      }}
+      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm"
+    >
+      View Reason
+    </button>
+  )}
+</td>
+
+    </tr>
                   ))}
                 </tbody>
               </table>
@@ -639,7 +631,44 @@ function Leave() {
               </div>
             </div>
           )}
+          {/* Rejection Reason Modal */}
+{isReasonModalOpen && (
+  <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
+    <div className="bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold text-gray-800">Rejection Reason</h2>
+        <button
+          onClick={() => setIsReasonModalOpen(false)}
+          className="text-gray-500 hover:text-gray-700"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <p className="text-gray-700 whitespace-pre-line">{selectedReason}</p>
+
+      <div className="mt-6 flex justify-end">
+        <button
+          onClick={() => setIsReasonModalOpen(false)}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
         </main>
+
       </div>
     </div>
   );

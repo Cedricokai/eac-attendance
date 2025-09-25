@@ -87,39 +87,47 @@ function DailyAttendanceReport() {
   };
 
   // Apply filters to data
-  const applyFilters = (data) => {
-    let filtered = [...data];
-    
-    // Filter by department
-    if (filters.department) {
-      filtered = filtered.filter(item => 
-        item.employee?.department === filters.department
-      );
-    }
-    
-    // Filter by lateness
-    if (filters.showLatenessOnly) {
-      filtered = filtered.filter(item => item.status === 'Late');
-    }
-    
-    // Filter by early departures
-    if (filters.showEarlyDeparturesOnly) {
-      const officialEndTime = settings.workEndTime || '17:00';
-      filtered = filtered.filter(a => {
-        if (!a.checkOut || a.status === 'Absent') return false;
-        
-        const [outHour, outMinute] = a.checkOut.split(':').map(Number);
-        const [endHour, endMinute] = officialEndTime.split(':').map(Number);
-        
-        const outTotalMinutes = outHour * 60 + outMinute;
-        const endTotalMinutes = endHour * 60 + endMinute;
-        
-        return outTotalMinutes < (endTotalMinutes - 15);
-      });
-    }
-    
-    setFilteredData(filtered);
-  };
+ const applyFilters = (data) => {
+  let filtered = [...data];
+  
+  // Filter by department
+  if (filters.department) {
+    filtered = filtered.filter(item => 
+      item.employee?.department === filters.department
+    );
+  }
+  
+  // Filter by lateness
+  if (filters.showLatenessOnly) {
+    filtered = filtered.filter(item => item.status === 'Late');
+  }
+  
+  // Filter by early departures
+  if (filters.showEarlyDeparturesOnly) {
+    const officialEndTime = settings.workEndTime || '17:00';
+    filtered = filtered.filter(a => {
+      if (!a.checkOut || a.status === 'Absent') return false;
+      
+      const [outHour, outMinute] = a.checkOut.split(':').map(Number);
+      const [endHour, endMinute] = officialEndTime.split(':').map(Number);
+      
+      const outTotalMinutes = outHour * 60 + outMinute;
+      const endTotalMinutes = endHour * 60 + endMinute;
+      
+      return outTotalMinutes < (endTotalMinutes - 15);
+    });
+  }
+
+  // ✅ NEW: Only include late arrivals OR less than 8 hours worked
+  filtered = filtered.filter(item => {
+    const late = calculateMinutesLate(item.checkIn) > 0;
+    const underHours = (item.minimumHour || 0) < 8;
+    return late || underHours;
+  });
+
+  setFilteredData(filtered);
+};
+
 
   // Handle filter changes
   const handleFilterChange = (key, value) => {
@@ -442,15 +450,18 @@ function DailyAttendanceReport() {
                               {item.status}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {isLate ? (
-                              <span className="text-amber-600 font-medium">
-                                {calculateMinutesLate(item.checkIn)} min
-                              </span>
-                            ) : (
-                              <span className="text-green-600">On time</span>
-                            )}
-                          </td>
+                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+  {item.status === "Absent" ? (
+    <span className="text-red-600 font-medium">Absent</span>
+  ) : isLate ? (
+    <span className="text-amber-600 font-medium">
+      {calculateMinutesLate(item.checkIn)} min late
+    </span>
+  ) : (
+    <span className="text-green-600">On time</span>
+  )}
+</td>
+
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {isEarlyDeparture ? (
                               <span className="text-purple-600 font-medium">

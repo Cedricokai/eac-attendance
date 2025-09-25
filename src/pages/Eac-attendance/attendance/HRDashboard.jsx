@@ -41,42 +41,56 @@ const HRDashboard = () => {
   };
 
   const handleDecision = async (decision) => {
-    if (decision === "Rejected" && !hrNotes) {
-      alert("Please provide notes when rejecting a request");
-      return;
+  if (decision === "Rejected" && !hrNotes) {
+    alert("Please provide notes when rejecting a request");
+    return;
+  }
+
+  try {
+    const token = getToken();
+    let endpoint, body;
+
+    if (decision === "Approved") {
+      endpoint = `http://localhost:8080/api/leave/hr/approve/${selectedRequest.id}`;
+      body = JSON.stringify({ feedback: hrNotes || "Approved by HR" });
+    } else {
+      endpoint = `http://localhost:8080/api/leave/reject/${selectedRequest.id}`;
+      body = JSON.stringify({ role: "hr", feedback: hrNotes });
     }
 
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: body,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP error! status: ${response.status}`);
+    }
+
+    // Try to parse JSON, but handle empty response gracefully
     try {
-      const token = getToken();
-      const endpoint = `http://localhost:8080/api/leave/hr/${decision.toLowerCase()}/${selectedRequest.id}`;
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          feedback: hrNotes,
-        }),
-      });
-
-      if (response.ok) {
-        setLeaveRequests((prev) =>
-          prev.filter((req) => req.id !== selectedRequest.id)
-        );
-        alert(`Leave request ${decision.toLowerCase()} successfully`);
-        setIsModalOpen(false);
-        setSelectedRequest(null);
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to update leave request");
-      }
-    } catch (error) {
-      console.error("Error updating leave request:", error);
-      alert(error.message || "Failed to update leave request");
+      await response.json();
+    } catch (jsonError) {
+      // It's okay if response is empty - just continue
+      console.log("Empty response, continuing...");
     }
-  };
+
+    setLeaveRequests((prev) =>
+      prev.filter((req) => req.id !== selectedRequest.id)
+    );
+    alert(`Leave request ${decision.toLowerCase()} successfully`);
+    setIsModalOpen(false);
+    setSelectedRequest(null);
+  } catch (error) {
+    console.error("Error updating leave request:", error);
+    alert(error.message || "Failed to update leave request");
+  }
+};
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">

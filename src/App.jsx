@@ -30,6 +30,7 @@ import PlannerDashboard from "./pages/Eac-attendance/attendance/plannerDashboard
 import HRDashboard from "./pages/Eac-attendance/attendance/HRDashboard";
 import LeaveStatus from "./pages/Eac-attendance/attendance/leave-status";
 import EmployeeDashboard from "./pages/Eac-attendance/attendance/employeeDashboard";
+import Payslip from "./pages/Eac-attendance/attendance/payslip";
 
 function App() {
   return (
@@ -65,6 +66,7 @@ function App() {
                    <Route path="/leave-status" element={<LeaveStatus />} />
                                      <Route path="/employeeDashboard" element={<EmployeeDashboard />} />
         <Route path="/dailyAttendanceReport" element={<DailyAttendanceReport />} /> {/* ✅ fixed */}
+        <Route path="/payslip" element={<Payslip />} />
       </Routes>
     </SettingsProvider>
   );

@@ -130,6 +130,17 @@ function Payroll() {
     } catch (err) { setError(err.message); setTimeout(() => setError(''), 5000); }
   };
 
+const getTotalAllowance = (record) => {
+  return (record.rentAllowance || 0) +
+         (record.transportAllowance || 0) +
+         (record.clothingAllowance || 0) +
+         (record.otherAllowance || 0) +
+         (record.overtimePay || 0);
+};
+
+
+
+
   const generatePayroll = async (periodId) => {
     try {
       const token = getToken();
@@ -297,6 +308,14 @@ function Payroll() {
               </svg>
               Add Allowances
             </button>
+
+              <Link to="/payslip" className="w-[180px]">
+                        <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
+                          location.pathname === "/payslip" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
+                        }`}>
+                          <span className="font-medium">Payslip Generator</span>
+                        </div>
+                      </Link>
           </section>
 
           {/* Status Messages */}
@@ -435,8 +454,10 @@ function Payroll() {
                           <th className="px-4 py-3 font-medium">TnT Allowance</th>
                           <th className="px-4 py-3 font-medium">Clothing Allowance</th>
                           <th className="px-4 py-3 font-medium">Other Allowances</th>
+                           <th className="px-4 py-3 font-medium">Total Taxable Allowance</th> {/* New column */}
                           <th className="px-4 py-3 font-medium">Gross Salary</th>
                           <th className="px-4 py-3 font-medium">SSNIT</th>
+                           <th className="px-4 py-3 font-medium">Taxable Income</th>
                           <th className="px-4 py-3 font-medium">Tax</th>
                           <th className="px-4 py-3 font-medium">Net Salary</th>
                           <th className="px-4 py-3 font-medium">Status</th>
@@ -448,12 +469,16 @@ function Payroll() {
                             <td className="px-4 py-3">{r.employee.firstName} {r.employee.lastName}</td>
                             <td className="px-4 py-3">{formatCurrency(r.basicSalary)}</td>
                             <td className="px-4 py-3">{formatCurrency(r.overtimePay)}</td>
-                            <td className="px-4 py-3">{formatCurrency(r.employee.housingAllowance || 0)}</td>
-                            <td className="px-4 py-3">{formatCurrency(r.employee.tntAllowance || 0)}</td>
-                            <td className="px-4 py-3">{formatCurrency(r.employee.clothsAllowances || 0)}</td>
-                            <td className="px-4 py-3">{formatCurrency(r.employee.otherAllowances || 0)}</td>
+                           <td>{formatCurrency(r.rentAllowance || 0)}</td>
+<td>{formatCurrency(r.transportAllowance || 0)}</td>
+<td>{formatCurrency(r.clothingAllowance || 0)}</td>
+<td>{formatCurrency(r.otherAllowance || 0)}</td>
+      <td className="px-4 py-3 font-medium text-blue-600">{formatCurrency(getTotalAllowance(r))}</td>
                             <td className="px-4 py-3">{formatCurrency(r.grossSalary)}</td>
                             <td className="px-4 py-3">{formatCurrency(r.ssnitEmployee)}</td>
+                            <td className="px-4 py-3 font-medium text-orange-300">
+  {formatCurrency((r.grossSalary || 0) - (r.ssnitEmployee || 0))}
+</td>
                             <td className="px-4 py-3">{formatCurrency(r.payeTax)}</td>
                             <td className="px-4 py-3 font-medium text-green-600">{formatCurrency(r.netSalary)}</td>
                             <td className="px-4 py-3">
