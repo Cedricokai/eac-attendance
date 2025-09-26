@@ -2,6 +2,7 @@ import { useState, useEffect, useContext, useRef } from "react";
 import { SettingsContext } from '../context/SettingsContext';
 import { Link, useLocation } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
+import companyLogo from "../../../assets/companyLogo.jpg";
 
 function Payslip() {
   const [payrollPeriods, setPayrollPeriods] = useState([]);
@@ -16,6 +17,8 @@ function Payslip() {
   const { settings } = useContext(SettingsContext);
   const location = useLocation();
   const payslipRef = useRef(null);
+
+  const companyName = "EAC ELECTRICAL SOLUTION LIMITED";
 
   const getToken = () => localStorage.getItem('jwtToken');
 
@@ -43,7 +46,6 @@ function Payslip() {
     } catch (err) { console.error(err.message); }
   };
 
-  // Get complete employee details
   const fetchEmployeeDetails = async (employeeId) => {
     try {
       const token = getToken();
@@ -51,8 +53,7 @@ function Payslip() {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error('Failed to fetch employee details');
-      const data = await res.json();
-      return data;
+      return await res.json();
     } catch (err) {
       console.error('Error fetching employee details:', err);
       return null;
@@ -65,8 +66,6 @@ function Payslip() {
     setLoading(true);
     try {
       const token = getToken();
-      
-      // Fetch payroll record
       const payrollRes = await fetch(`http://localhost:8080/api/payroll/employee-payslip?periodId=${selectedPeriod}&employeeId=${selectedEmployeeId}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
@@ -82,8 +81,6 @@ function Payslip() {
       } else {
         const payrollData = await payrollRes.json();
         setPayrollRecord(payrollData);
-        
-        // Fetch complete employee details
         const employeeData = await fetchEmployeeDetails(selectedEmployeeId);
         setEmployeeDetails(employeeData);
         setError('');
@@ -152,108 +149,317 @@ function Payslip() {
       <html>
         <head>
           <title>Payslip - ${employeeDetails.firstName} ${employeeDetails.lastName}</title>
+          <meta charset="UTF-8">
           <style>
+            /* Reset and base styles */
+            * { 
+              margin: 0; 
+              padding: 0; 
+              box-sizing: border-box;
+            }
+            
+            body { 
+              font-family: 'Segoe UI', 'Arial', sans-serif;
+              font-size: 12px;
+              line-height: 1.4;
+              color: #000;
+              background: #fff;
+              margin: 0;
+              padding: 15px;
+            }
+            
+            /* Print-specific styles */
             @media print {
-              body { margin: 0; padding: 0; }
-              .no-print { display: none !important; }
+              @page { 
+                margin: 0.5in;
+                size: A4 portrait;
+              }
+              
+              body { 
+                font-size: 11px;
+                padding: 0;
+              }
+              
+              .no-print { 
+                display: none !important; 
+              }
+              
               .payslip-container { 
                 width: 100% !important; 
                 margin: 0 !important; 
                 padding: 0 !important; 
                 box-shadow: none !important;
                 border: none !important;
+                page-break-inside: avoid;
               }
-              .bg-blue-600 { background-color: #2563eb !important; -webkit-print-color-adjust: exact; }
-              .text-white { color: white !important; -webkit-print-color-adjust: exact; }
-              .text-blue-100 { color: #dbeafe !important; -webkit-print-color-adjust: exact; }
-              .text-green-600 { color: #059669 !important; -webkit-print-color-adjust: exact; }
-              .text-red-600 { color: #dc2626 !important; -webkit-print-color-adjust: exact; }
-              .bg-green-50 { background-color: #f0fdf4 !important; -webkit-print-color-adjust: exact; }
-              .bg-blue-50 { background-color: #f0f9ff !important; -webkit-print-color-adjust: exact; }
-              .border-green-200 { border-color: #bbf7d0 !important; }
-              .bg-gray-50 { background-color: #f9fafb !important; -webkit-print-color-adjust: exact; }
-              .company-footer { 
-                background-color: #f8fafc !important; 
-                -webkit-print-color-adjust: exact; 
-                border-top: 2px solid #e2e8f0 !important;
+              
+              .print-header { 
+                border-bottom: 3px double #333 !important;
+                padding-bottom: 10px !important;
+                margin-bottom: 15px !important;
+                background: white !important;
+                color: black !important;
               }
+              
+              .company-logo { 
+                max-height: 60px !important;
+                filter: none !important;
+              }
+              
+              .salary-section { 
+                border: 1px solid #ccc !important; 
+                background: #fafafa !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              
+              .summary-section { 
+                background: #f8fafc !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              
+              .text-primary { color: #000 !important; font-weight: bold; }
+              .text-success { color: #000 !important; }
+              .text-danger { color: #000 !important; }
+              .bg-light { background-color: #f8fafc !important; }
+              
+              .break-before { page-break-before: always; }
+              .break-after { page-break-after: always; }
+              .break-inside-avoid { page-break-inside: avoid; }
+              
+              /* Ensure proper contrast for printing */
+              .bg-gradient-to-r { background: #f0f0f0 !important; }
+              .from-blue-800 { background: #e0e0e0 !important; }
+              .to-blue-900 { background: #e0e0e0 !important; }
+              .text-white { color: #000 !important; }
+              
+              /* Table-like structures */
+              .grid-2-col, .grid-cols-1, .grid-cols-2 {
+                display: table !important;
+                width: 100% !important;
+              }
+              
+              .flex { display: table-row !important; }
+              .flex > * { display: table-cell !important; padding: 2px 4px; }
             }
-            body { 
-              font-family: Arial, sans-serif; 
-              margin: 0; 
-              padding: 15px; 
-              background: white;
-              font-size: 12px;
-            }
+            
+            /* Enhanced print layout */
             .payslip-container { 
-              max-width: 900px; 
-              margin: 0 auto; 
+              max-width: 100%;
+              margin: 0 auto;
               background: white;
+              border: 1px solid #ccc;
             }
+            
             .print-header {
-              text-align: center;
-              margin-bottom: 15px;
-              padding-bottom: 15px;
-              border-bottom: 2px solid #e5e7eb;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              padding: 15px;
+              background: #f0f0f0;
+              border-bottom: 2px solid #ccc;
             }
-            .print-header h1 {
-              color: #2563eb;
+            
+            .company-info {
+              text-align: right;
+              font-size: 10px;
+            }
+            
+            .company-info h1 {
               margin: 0;
-              font-size: 24px;
+              font-size: 16px;
+              font-weight: bold;
+              text-transform: uppercase;
             }
-            .print-watermark {
-              position: absolute;
-              opacity: 0.05;
-              font-size: 100px;
-              transform: rotate(-45deg);
-              pointer-events: none;
-              z-index: -1;
-              top: 30%;
-              left: 10%;
+            
+            .company-info .subtitle {
+              font-size: 9px;
+              opacity: 0.8;
             }
-            .salary-structure-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 10px;
-              margin: 10px 0;
-            }
-            .rates-section, .deductions-section {
-              border: 1px solid #d1d5db;
+            
+            .employee-info {
+              background: #f8f8f8;
               padding: 10px;
-              border-radius: 4px;
+              border-left: 3px solid #333;
+              margin: 10px 0;
+              font-size: 10px;
             }
+            
             .section-title {
               font-weight: bold;
+              color: #000;
+              border-bottom: 1px solid #ccc;
+              padding-bottom: 3px;
               margin-bottom: 8px;
-              border-bottom: 1px solid #e5e7eb;
-              padding-bottom: 4px;
+              font-size: 11px;
+              text-transform: uppercase;
             }
+            
             .detail-row {
               display: flex;
               justify-content: space-between;
-              margin-bottom: 4px;
-            }
-            .company-info {
+              padding: 2px 0;
               font-size: 10px;
+            }
+            
+            .amount {
+              font-weight: bold;
+            }
+            
+            .total-row {
+              border-top: 2px solid #000;
+              font-weight: bold;
+              font-size: 11px;
+              padding-top: 3px;
+              margin-top: 3px;
+            }
+            
+            .net-salary {
+              background: #e8f5e8;
+              border: 2px solid #000;
+              padding: 10px;
+              margin: 10px 0;
               text-align: center;
+              font-weight: bold;
+            }
+            
+            .footer {
+              text-align: center;
+              padding: 8px;
+              background: #f0f0f0;
+              border-top: 1px solid #ccc;
+              font-size: 9px;
+              color: #666;
               margin-top: 15px;
-              line-height: 1.3;
+            }
+            
+            .watermark {
+              position: fixed;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%) rotate(-45deg);
+              font-size: 60px;
+              color: rgba(0,0,0,0.05);
+              pointer-events: none;
+              z-index: -1;
+              font-weight: bold;
+              opacity: 0.3;
+            }
+            
+            /* Table styles for better print layout */
+            .print-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 8px 0;
+              font-size: 10px;
+            }
+            
+            .print-table th,
+            .print-table td {
+              border: 1px solid #ccc;
+              padding: 4px 6px;
+              text-align: left;
+            }
+            
+            .print-table th {
+              background: #f0f0f0;
+              font-weight: bold;
+            }
+            
+            .print-table .total-row {
+              background: #e0e0e0;
+              font-weight: bold;
+            }
+            
+            /* Compact layout for print */
+            .compact-section {
+              margin: 5px 0;
+              padding: 5px;
+            }
+            
+            .compact-row {
+              display: flex;
+              justify-content: space-between;
+              margin: 1px 0;
+            }
+            
+            /* Signature lines */
+            .signature-area {
+              margin-top: 20px;
+              padding-top: 10px;
+              border-top: 1px dashed #ccc;
+            }
+            
+            .signature-line {
+              width: 200px;
+              border-bottom: 1px solid #000;
+              margin: 15px 0 5px 0;
             }
           </style>
         </head>
         <body>
-          <div class="print-watermark">EAC ELECTRICAL</div>
-          <div class="print-header">
-            <h1>EAC ELECTRICAL SOLUTION LIMITED - PAYSLIP</h1>
-            <p>Generated on: ${new Date().toLocaleDateString()}</p>
-          </div>
+          <div class="watermark">${companyName}</div>
           <div class="payslip-container">
             ${payslipContent}
+            
+            <!-- Additional print-only content -->
+            <div class="signature-area">
+              <table width="100%" style="font-size: 9px; margin-top: 20px;">
+                <tr>
+                  <td width="33%" align="center">
+                    <div class="signature-line"></div>
+                    <div>Employee's Signature</div>
+                    <div style="font-size: 8px;">Date: ________________</div>
+                  </td>
+                  <td width="34%" align="center">
+                    <div class="signature-line"></div>
+                    <div>Manager's Signature</div>
+                    <div style="font-size: 8px;">Date: ________________</div>
+                  </td>
+                  <td width="33%" align="center">
+                    <div class="signature-line"></div>
+                    <div>HR Department</div>
+                    <div style="font-size: 8px;">Date: ________________</div>
+                  </td>
+                </tr>
+              </table>
+            </div>
+            
+            <div class="footer">
+              <div><strong>${companyName}</strong></div>
+              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div style="margin-top: 3px; font-size: 8px;">
+                This is a computer-generated payslip. No signature is required for digital copies.
+              </div>
+              <div style="font-size: 8px; margin-top: 2px;">
+                Generated on ${new Date().toLocaleDateString('en-GH', { 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </div>
+            </div>
           </div>
           <script>
             window.onload = function() {
-              window.print();
-              setTimeout(() => window.close(), 500);
+              // Add slight delay to ensure all content is rendered
+              setTimeout(function() {
+                window.print();
+                // Close window after printing
+                setTimeout(function() {
+                  window.close();
+                }, 500);
+              }, 100);
+            };
+            
+            // Fallback in case print dialog is cancelled
+            window.onafterprint = function() {
+              setTimeout(function() {
+                window.close();
+              }, 1000);
             };
           </script>
         </body>
@@ -263,7 +469,11 @@ function Payslip() {
     printWindow.document.close();
   };
 
-  const formatCurrency = (amount) => new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(amount || 0);
+  const formatCurrency = (amount) => new Intl.NumberFormat('en-GH', { 
+    style: 'currency', 
+    currency: 'GHS',
+    minimumFractionDigits: 2
+  }).format(amount || 0);
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -275,28 +485,27 @@ function Payslip() {
     });
   };
 
-  // Calculate additional fields using actual employee data
   const calculateAdditionalFields = (record, employee) => {
     if (!record || !employee) return null;
-    
+
     const hourlyRate = employee.minimumRate || 0;
-    const normalShiftHours = record.workingDays * 8; // Assuming 8 hours per day
+    const normalShiftHours = (record.workingDays || 0) * 8;
     const overtimeHours = record.overtimeHours || 0;
     const totalHours = normalShiftHours + overtimeHours;
-    
+
     const weekDayAmount = normalShiftHours * hourlyRate;
-    const weekendOvertime = overtimeHours * hourlyRate * 1.5; // Overtime rate 1.5x
+    const overtimePay = record.overtimePay || 0;
     const basicSalary = record.basicSalary || weekDayAmount;
-    
-    // Get actual allowances from employee record
-    const rentAllowance = employee.housingAllowance || 0;
-    const specialAllowance = 500; // Fixed amount
-    const otherAllowances = employee.otherAllowances || 0;
-    const tntAllowance = employee.tntAllowance || 0;
-    const clothingAllowance = employee.clothingAllowance || 0;
-    
-    const totalAllowances = rentAllowance + specialAllowance + otherAllowances + tntAllowance + clothingAllowance;
-    const grossIncome = basicSalary + weekendOvertime + totalAllowances;
+
+    // Use the same allowance fields as payroll.jsx
+    const rentAllowance = record.rentAllowance || 0;
+    const transportAllowance = record.transportAllowance || 0;
+    const clothingAllowance = record.clothingAllowance || 0;
+    const otherAllowance = record.otherAllowance || 0;
+
+    const totalAllowances = rentAllowance + transportAllowance + clothingAllowance + otherAllowance + overtimePay;
+    const grossIncome = basicSalary + totalAllowances;
+
     const tier2Deduction = record.ssnitEmployee || 0;
     const taxableIncome = grossIncome - tier2Deduction;
     const totalDeductions = tier2Deduction + (record.payeTax || 0);
@@ -308,13 +517,12 @@ function Payslip() {
       overtimeHours,
       totalHours,
       weekDayAmount,
-      weekendOvertime,
+      overtimePay,
       basicSalary,
       rentAllowance,
-      specialAllowance,
-      otherAllowances,
-      tntAllowance,
+      transportAllowance,
       clothingAllowance,
+      otherAllowance,
       totalAllowances,
       grossIncome,
       tier2Deduction,
@@ -322,6 +530,40 @@ function Payslip() {
       totalDeductions,
       netSalary
     };
+  };
+
+  // Function to check if an allowance has a non-zero value
+  const hasNonZeroAllowance = (allowanceValue) => {
+    return allowanceValue && allowanceValue > 0;
+  };
+
+  // Function to get non-zero allowances for display
+  const getNonZeroAllowances = (additionalFields) => {
+    if (!additionalFields) return [];
+    
+    const allowances = [];
+    
+    if (hasNonZeroAllowance(additionalFields.rentAllowance)) {
+      allowances.push({ name: 'Rent Allowance', value: additionalFields.rentAllowance });
+    }
+    
+    if (hasNonZeroAllowance(additionalFields.transportAllowance)) {
+      allowances.push({ name: 'Transport Allowance', value: additionalFields.transportAllowance });
+    }
+    
+    if (hasNonZeroAllowance(additionalFields.clothingAllowance)) {
+      allowances.push({ name: 'Clothing Allowance', value: additionalFields.clothingAllowance });
+    }
+    
+    if (hasNonZeroAllowance(additionalFields.otherAllowance)) {
+      allowances.push({ name: 'Other Allowance', value: additionalFields.otherAllowance });
+    }
+    
+    if (hasNonZeroAllowance(additionalFields.overtimePay)) {
+      allowances.push({ name: 'Overtime', value: additionalFields.overtimePay });
+    }
+    
+    return allowances;
   };
 
   useEffect(() => {
@@ -337,35 +579,44 @@ function Payslip() {
 
   const additionalFields = calculateAdditionalFields(payrollRecord, employeeDetails);
   const selectedEmployee = employees.find(emp => emp.id == selectedEmployeeId);
+  const nonZeroAllowances = getNonZeroAllowances(additionalFields);
 
   return (
-    <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      <div className="fixed inset-y-0 left-0 w-64 bg-white z-30"><MainSidebar /></div>
-      <div className="flex-1 ml-64">
-        <main className="flex-1 max-w-full px-2 md:px-4 py-6">
-
-          {/* Page Header */}
-          <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6 no-print">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">Employee Payslip Generator</h1>
-              <p className="text-gray-600">Generate individual payslips for employees</p>
-            </div>
-          </section>
+    <div className="min-h-screen bg-gray-50">
+      <div className="flex">
+        <div className="w-64 bg-white shadow-lg">
+          <MainSidebar />
+        </div>
+        
+        <div className="flex-1 ml-64 p-6">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-800">Employee Payslip</h1>
+            <p className="text-gray-600">Generate and manage employee payslips</p>
+          </div>
 
           {/* Status Messages */}
-          {error && <div className="bg-red-100 text-red-700 px-4 py-3 mt-4 rounded-lg no-print">{error}</div>}
-          {success && <div className="bg-green-100 text-green-700 px-4 py-3 mt-4 rounded-lg no-print">{success}</div>}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">
+              {success}
+            </div>
+          )}
 
           {/* Selection Section */}
-          <div className="mt-6 mb-6 mx-2 md:mx-4 bg-white p-6 rounded-lg shadow-sm border border-gray-200 no-print">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Select Employee and Period</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-xl shadow-sm p-6 mb-6 border border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">Select Employee & Period</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Payroll Period</label>
                 <select 
                   value={selectedPeriod || ''}
                   onChange={e => setSelectedPeriod(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">Select a period</option>
                   {payrollPeriods.map(period => (
@@ -381,12 +632,12 @@ function Payslip() {
                 <select 
                   value={selectedEmployeeId || ''}
                   onChange={e => setSelectedEmployeeId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">Select an employee</option>
                   {employees.map(employee => (
                     <option key={employee.id} value={employee.id}>
-                      {employee.firstName} {employee.lastName} - {employee.jobPosition || 'No Position'}
+                      {employee.firstName} {employee.lastName} ({employee.jobPosition || 'No Position'})
                     </option>
                   ))}
                 </select>
@@ -396,12 +647,12 @@ function Payslip() {
             <button 
               onClick={fetchEmployeePayslip}
               disabled={!selectedPeriod || !selectedEmployeeId || loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white py-2 px-4 mt-4 rounded-md flex items-center"
+              className="mt-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white py-3 px-6 rounded-lg font-medium transition duration-200 flex items-center"
             >
               {loading ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Loading...
+                  Generating Payslip...
                 </>
               ) : (
                 'Generate Payslip'
@@ -411,24 +662,24 @@ function Payslip() {
 
           {/* Payslip Display */}
           {payrollRecord && employeeDetails && additionalFields && (
-            <div className="mx-2 md:mx-4">
+            <div>
               {/* Action Buttons */}
-              <div className="flex justify-end space-x-3 mb-4 no-print">
+              <div className="flex justify-end gap-4 mb-6 no-print">
                 <button 
                   onClick={generatePayslipPDF}
-                  className="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md flex items-center"
+                  className="bg-red-600 hover:bg-red-700 text-white py-2 px-6 rounded-lg font-medium flex items-center transition duration-200"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   Download PDF
                 </button>
                 <button 
                   onClick={printPayslip}
-                  className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-md flex items-center"
+                  className="bg-green-600 hover:bg-green-700 text-white py-2 px-6 rounded-lg font-medium flex items-center transition duration-200"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                   </svg>
                   Print Payslip
                 </button>
@@ -437,209 +688,186 @@ function Payslip() {
               {/* Payslip Content */}
               <div 
                 ref={payslipRef}
-                className="bg-white rounded-lg shadow-lg border border-gray-200 print:shadow-none print:border-0 print:bg-white"
+                className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
               >
-                {/* Header */}
-                <div className="bg-blue-600 text-white p-4 rounded-t-lg print:bg-blue-600">
-                  <div className="flex justify-between items-start">
+                {/* Header with Logo */}
+                <div className="bg-gradient-to-r from-blue-800 to-blue-900 text-white p-6 print-header">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center space-x-4">
+                      {/* Company Logo */}
+                      <div className="bg-white p-2 rounded-lg">
+                        <img 
+                          src={companyLogo} 
+                          alt="Company Logo" 
+                          className="h-12 w-auto company-logo"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'block';
+                          }}
+                        />
+                        <div className="hidden bg-blue-100 text-blue-800 font-bold text-lg px-3 py-2 rounded">
+                          EAC
+                        </div>
+                      </div>
+                      <div>
+                        <h1 className="text-2xl font-bold">{companyName}</h1>
+                        <p className="text-blue-200">Payroll Management System</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-semibold">PAYSLIP</div>
+                      <div className="text-blue-200 text-sm">
+                        Period: {payrollRecord.period?.name || 'N/A'}
+                      </div>
+                      <div className="text-blue-200 text-sm">
+                        Date: {new Date().toLocaleDateString('en-GH')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Employee Information */}
+                <div className="p-6 border-b border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <h1 className="text-xl font-bold">EMPLOYEE PAY SLIP</h1>
-                      <div className="text-blue-100 text-sm mt-2">
-                        <div>PERIOD: {payrollRecord.period?.name || 'N/A'}</div>
-                        <div>DATE: {new Date().toLocaleDateString()}</div>
+                      <h3 className="font-semibold text-gray-700 mb-3 section-title">Employee Details</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Staff No:</span>
+                          <span className="font-medium">{employeeDetails.employeeId || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">SSNIT No:</span>
+                          <span className="font-medium">{employeeDetails.ssnitNumber || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Name:</span>
+                          <span className="font-semibold text-lg">{employeeDetails.firstName} {employeeDetails.lastName}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Position:</span>
+                          <span className="font-medium">{employeeDetails.jobPosition || 'N/A'}</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right text-sm">
-                      <div>EAC ELECTRICAL SOLUTION LIMITED</div>
-                      <div className="text-blue-100">Payroll Management System</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Employee Basic Information */}
-                <div className="p-4 border-b border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div className="space-y-2">
-                      <div className="flex">
-                        <span className="font-medium w-32">STAFF NO:</span>
-                        <span>{employeeDetails.employeeId || 'N/A'}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-32">SSNIT NO:</span>
-                        <span>{employeeDetails.ssnitNumber || 'N/A'}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-32">EMPLOYEE NAME:</span>
-                        <span className="font-semibold">{employeeDetails.firstName} {employeeDetails.lastName}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-32">POSITION:</span>
-                        <span>{employeeDetails.jobPosition || 'N/A'}</span>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex">
-                        <span className="font-medium w-40">BANK:</span>
-                        <span>{employeeDetails.bankName || 'N/A'}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-40">ACCOUNT NO:</span>
-                        <span>{employeeDetails.accountNumber || 'N/A'}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-40">NORMAL SHIFT HOUR:</span>
-                        <span>{additionalFields.normalShiftHours.toFixed(1)}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-40">OVERTIME HOURS:</span>
-                        <span>{additionalFields.overtimeHours.toFixed(1)}</span>
-                      </div>
-                      <div className="flex">
-                        <span className="font-medium w-40">TOTAL HOURS:</span>
-                        <span className="font-semibold">{additionalFields.totalHours.toFixed(1)}</span>
+                    <div>
+                      <h3 className="font-semibold text-gray-700 mb-3 section-title">Bank & Hours</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Bank:</span>
+                          <span className="font-medium">{employeeDetails.bankName || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Account No:</span>
+                          <span className="font-medium">{employeeDetails.accountNumber || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Normal Hours:</span>
+                          <span>{additionalFields.normalShiftHours.toFixed(1)}</span>
+                        </div>
+                        <div className="flex justify-between detail-row">
+                          <span className="text-gray-600">Overtime Hours:</span>
+                          <span>{additionalFields.overtimeHours.toFixed(1)}</span>
+                        </div>
+                        <div className="flex justify-between detail-row total-row">
+                          <span>Total Hours:</span>
+                          <span className="text-blue-600">{additionalFields.totalHours.toFixed(1)}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Salary Structure - Matching Excel Layout */}
-                <div className="p-4 border-b border-gray-200">
-                  <h3 className="font-semibold text-gray-700 mb-3">SALARY STRUCTURE</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                    {/* Rates Section */}
-                    <div className="border border-gray-300 rounded p-3">
-                      <div className="font-semibold mb-2 border-b pb-1">RATES</div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span>HOURLY RATE:</span>
-                          <span className="font-medium">{formatCurrency(additionalFields.hourlyRate)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>WEEK DAY AMOUNT:</span>
-                          <span className="font-medium">{formatCurrency(additionalFields.weekDayAmount)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>WEEKEND/HOLIDAYS OVERTIME:</span>
-                          <span className="font-medium">{formatCurrency(additionalFields.weekendOvertime)}</span>
-                        </div>
-                        <div className="flex justify-between border-t pt-1 mt-1">
-                          <span className="font-semibold">BASIC SALARY:</span>
+                {/* Salary Structure */}
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-700 mb-4 text-lg section-title">Salary Breakdown</h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Earnings */}
+                    <div className="bg-green-50 rounded-lg p-4 border border-green-200 salary-section">
+                      <h4 className="font-semibold text-green-800 mb-3 section-title">EARNINGS</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between detail-row">
+                          <span>Basic Salary:</span>
                           <span className="font-semibold">{formatCurrency(additionalFields.basicSalary)}</span>
                         </div>
+                        
+                        {/* Only show overtime if it has value */}
+                        {hasNonZeroAllowance(additionalFields.overtimePay) && (
+                          <div className="flex justify-between detail-row">
+                            <span>Overtime:</span>
+                            <span className="font-semibold">{formatCurrency(additionalFields.overtimePay)}</span>
+                          </div>
+                        )}
+                        
+                        {/* Only show allowances that have non-zero values */}
+                        {nonZeroAllowances.map((allowance, index) => (
+                          <div key={index} className="flex justify-between detail-row">
+                            <span>{allowance.name}:</span>
+                            <span>{formatCurrency(allowance.value)}</span>
+                          </div>
+                        ))}
+                        
+                        <div className="flex justify-between detail-row total-row">
+                          <span>Total Earnings:</span>
+                          <span className="font-semibold text-green-800">{formatCurrency(additionalFields.grossIncome)}</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Deductions Section */}
-                    <div className="border border-gray-300 rounded p-3">
-                      <div className="font-semibold mb-2 border-b pb-1">DEDUCTIONS</div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span>AMOUNT OWED COMPANY:</span>
-                          <span className="font-medium">{formatCurrency(0)}</span>
+                    {/* Deductions */}
+                    <div className="bg-red-50 rounded-lg p-4 border border-red-200 salary-section">
+                      <h4 className="font-semibold text-red-800 mb-3 section-title">DEDUCTIONS</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between detail-row">
+                          <span>SSNIT Tier 2 (5.5%):</span>
+                          <span>{formatCurrency(additionalFields.tier2Deduction)}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>WELFARE DUES:</span>
-                          <span className="font-medium">{formatCurrency(0)}</span>
+                        <div className="flex justify-between detail-row">
+                          <span>Income Tax (PAYE):</span>
+                          <span>{formatCurrency(payrollRecord.payeTax)}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>INCOME TAX (PAYE):</span>
-                          <span className="font-medium text-red-600">{formatCurrency(payrollRecord.payeTax)}</span>
-                        </div>
-                        <div className="flex justify-between border-t pt-1 mt-1">
-                          <span className="font-semibold">TOTAL DEDUCTIONS:</span>
-                          <span className="font-semibold text-red-600">{formatCurrency(additionalFields.totalDeductions)}</span>
+                        <div className="flex justify-between detail-row total-row">
+                          <span>Total Deductions:</span>
+                          <span className="font-semibold text-red-800">{formatCurrency(additionalFields.totalDeductions)}</span>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Allowances Section */}
-                <div className="p-4 border-b border-gray-200">
-                  <h3 className="font-semibold text-gray-700 mb-3">ALLOWANCES</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div>
-                      <div className="font-medium">OVERTIME</div>
-                      <div className="font-semibold">{formatCurrency(additionalFields.weekendOvertime)}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium">RENT</div>
-                      <div className="font-semibold">{formatCurrency(additionalFields.rentAllowance)}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium">SPECIAL ALLOWANCE</div>
-                      <div className="font-semibold">{formatCurrency(additionalFields.specialAllowance)}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium">TNT</div>
-                      <div className="font-semibold">{formatCurrency(additionalFields.tntAllowance)}</div>
-                    </div>
+                {/* Net Salary */}
+                <div className="p-6 bg-gradient-to-r from-green-500 to-green-600 net-salary">
+                  <div className="text-center text-white">
+                    <div className="text-sm opacity-90">NET SALARY</div>
+                    <div className="text-3xl font-bold">{formatCurrency(additionalFields.netSalary)}</div>
+                    <div className="text-sm opacity-90 mt-2">Paid to {employeeDetails.bankName} • Account: {employeeDetails.accountNumber}</div>
                   </div>
                 </div>
 
-                {/* Summary Section */}
-                <div className="p-4 border-b border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                    <div>
-                      <div className="flex justify-between font-semibold mb-2">
-                        <span>GROSS INCOME:</span>
-                        <span className="text-green-600">{formatCurrency(additionalFields.grossIncome)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-600 mb-1">
-                        <span>TIER 2 (5.5% OF BASIC SALARY):</span>
-                        <span>{formatCurrency(additionalFields.tier2Deduction)}</span>
-                      </div>
-                      <div className="flex justify-between font-semibold border-t pt-2 mt-2">
-                        <span>TAXABLE INCOME (A):</span>
-                        <span>{formatCurrency(additionalFields.taxableIncome)}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-end">
-                      <div className="w-full">
-                        <div className="flex justify-between font-semibold border-t pt-2">
-                          <span>TOTAL DEDUCTIONS (B):</span>
-                          <span className="text-red-600">{formatCurrency(additionalFields.totalDeductions)}</span>
-                        </div>
-                        <div className="flex justify-between font-bold text-lg mt-3 p-3 bg-gradient-to-r from-green-50 to-blue-50 rounded">
-                          <span>NET SALARY (A-B):</span>
-                          <span className="text-green-600">{formatCurrency(additionalFields.netSalary)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Company Footer */}
-                <div className="bg-gray-50 p-3 rounded-b-lg border-t border-gray-200 print:bg-gray-50 company-footer">
-                  <div className="text-center text-gray-600 text-xs">
-                    <div className="font-semibold">EAC ELECTRICAL SOLUTION LIMITED</div>
-                    <div>P. O. Box AB 253 Abeka-Accra Ghana</div>
-                    <div>Email: eac.electricalsolution.ltd@yahoo.com | eac.electricalsolution.ltd@gmail.com</div>
-                    <div>Contact No.: +233 243 922 105 or +233 208 615 156</div>
-                    <div className="mt-1 text-gray-500">This is a computer-generated payslip. No signature is required.</div>
+                {/* Footer */}
+                <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm footer">
+                  <div className="font-semibold">{companyName}</div>
+                  <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+                  <div className="text-xs mt-1 text-gray-500">
+                    This is a computer-generated payslip. No signature is required.
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* No Record Message */}
+          {/* Empty State */}
           {!payrollRecord && selectedPeriod && selectedEmployee && !loading && (
-            <div className="mx-2 md:mx-4 p-8 text-center bg-yellow-50 rounded-lg border border-yellow-200 no-print">
-              <div className="text-yellow-600 mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-medium text-gray-800 mb-2">No Payslip Available</h3>
-              <p className="text-gray-600">
+            <div className="text-center py-12 bg-yellow-50 rounded-xl border border-yellow-200">
+              <div className="text-yellow-500 text-6xl mb-4">📄</div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">No Payslip Available</h3>
+              <p className="text-gray-600 max-w-md mx-auto">
                 No payroll record found for the selected employee and period. 
-                Please ensure payroll has been generated for this period.
+                Please ensure payroll has been processed for this period.
               </p>
             </div>
           )}
-
-        </main>
+        </div>
       </div>
     </div>
   );

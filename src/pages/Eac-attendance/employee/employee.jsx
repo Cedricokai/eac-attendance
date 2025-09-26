@@ -1,11 +1,17 @@
-import { useState, useEffect, useRef, useContext  } from "react";
+import { useState, useEffect, useRef, useContext } from "react";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { SettingsContext } from '../context/SettingsContext'; // Import the context
+import { SettingsContext } from '../context/SettingsContext';
 import MainSidebar from "../mainSidebar";
 
+// Safe value handler utility
+const getSafeValue = (value) => {
+  if (value === null || value === undefined) return "";
+  return value;
+};
+
 function Employee() {
-  const { settings } = useContext(SettingsContext); // Access settings
+  const { settings, getPositionRate } = useContext(SettingsContext);
   const [employees, setEmployees] = useState([]);
   const [query, setQuery] = useState("");
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
@@ -22,38 +28,38 @@ function Employee() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isBasicSalaryEditable, setIsBasicSalaryEditable] = useState(false);
 
-    const categories = settings?.employeeCategories || [
+  const categories = settings?.employeeCategories || [
     "Projects", 
     "Site Services", 
     "Ahafo North",
     "NSS"
   ];
 
- const [newEmployee, setNewEmployee] = useState({
-  firstName: "",
-  lastName: "",
-  email: "",
-  phone: "",
-  jobPosition: "",
-  workType: "",
-  minimumRate: "",
-  category: "",
-  basicSalary: "",
-  ssnitNumber: "",
-  tinNumber: "",
-  startDate: "",
-  endDate: "",
-  accountNumber: "",
-  allowances: "",
-  employeeId: ""
-});
+  const [newEmployee, setNewEmployee] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    jobPosition: "",
+    jobGrade: "I",
+    workType: "",
+    minimumRate: "",
+    category: "",
+    basicSalary: "",
+    ssnitNumber: "",
+    tinNumber: "",
+    startDate: "",
+    accountNumber: "",
+    allowances: "",
+    employeeId: "",
+    usePositionRate: true
+  });
 
   const filteredEmployees = selectedCategory 
     ? employees.filter(emp => emp.category === selectedCategory)
     : employees;
 
   const createMenuRef = useRef(null);
-
 
   // Fetch employees from the API with token
   const fetchEmployees = async () => {
@@ -82,6 +88,23 @@ function Employee() {
     }
   };
 
+  const getPositionGrades = (positionName) => {
+    const position = settings.jobPositions?.find(p => p.name === positionName);
+    return position?.grades || [];
+  };
+
+  useEffect(() => {
+    if (newEmployee.usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
+      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
+      if (positionRate) {
+        setNewEmployee(prev => ({
+          ...prev,
+          minimumRate: positionRate.toString()
+        }));
+      }
+    }
+  }, [newEmployee.jobPosition, newEmployee.jobGrade, newEmployee.usePositionRate, getPositionRate]);
+
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
   const settingsMenuRef = useRef(null); 
 
@@ -101,134 +124,131 @@ function Employee() {
       if (openMenuId && menuRefs.current[openMenuId] && !menuRefs.current[openMenuId].contains(event.target)) {
         setOpenMenuId(null);
       }
+      if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
+        setIsCreateMenuOpen(false);
+      }
     };
     
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [openMenuId]);
 
-
   const parseExcelDate = (value) => {
-  if (!value || value === '-' || value === 'null') return null;
-
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
-};
-
-
-  // Handle displaying the selected file's contents in a popup
-  // Handle displaying the selected file's contents in a popup
-const handleDisplayFile = () => {
-  if (!selectedFile) return;
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    const data = new Uint8Array(event.target.result);
-    const workbook = XLSX.read(data, { type: "array" });
-
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    
-    // Extract headers from first row
-    const headers = jsonData[0].map(header => header.toLowerCase().replace(/\s+/g, ''));
-    
-    // Map Excel columns to expected fields
-    const employeesData = jsonData.slice(1).map((row) => {
-      const employee = {};
-      
-      headers.forEach((header, index) => {
-        switch(header) {
-          case 'firstname':
-            employee.firstName = row[index] || '';
-            break;
-          case 'lastname':
-            employee.lastName = row[index] || '';
-            break;
-          case 'email':
-            employee.email = row[index] || '';
-            break;
-          case 'phone':
-            employee.phone = row[index] || '';
-            break;
-          case 'jobposition':
-            employee.jobPosition = row[index] || '';
-            break;
-          case 'category':
-            employee.category = row[index] || '';
-            break;
-          case 'worktype':
-            employee.workType = row[index] || '';
-            break;
-          case 'rate':
-            employee.minimumRate = row[index] || '';
-            break;
-                case 'ssnitnumber':
-      employee.ssnitNumber = row[index] || '';
-      break;
-    case 'tinnumber':
-      employee.tinNumber = row[index] || '';
-      break;
-    case 'tagnumber':
-      employee.tagNumber = row[index] || '';
-      break;
- case 'dateofbirth':
-  employee.dateOfBirth = parseExcelDate(row[index]);
-  break;
-    case 'emergencycontact':
-      employee.emergencyContact = row[index] || '';
-      break;
-    case 'accountnumber':
-      employee.accountNumber = row[index] || '';
-      break;
-    case 'employeeid':
-      employee.employeeId = row[index] || '';
-      break;
-    case 'department':
-      employee.department = row[index] || '';
-      break;
-    case 'startdate':
-  employee.startDate = parseExcelDate(row[index]);
-  break;
-  case 'enddate':
-  employee.endDate = parseExcelDate(row[index]);
-  break;
-    case 'basicsalary':
-      employee.basicSalary = row[index] || '';
-      break;
-    case 'graderank':
-    case 'grade':
-      employee.grade = row[index] || '';
-      break;
-    case 'rentallowance':
-      employee.rentAllowance = row[index] || '';
-      break;
-    case 'transportallowance':
-      employee.transportAllowance = row[index] || '';
-      break;
-    case 'clothingallowance':
-      employee.clothingAllowance = row[index] || '';
-      break;
-    case 'otherallowance':
-      employee.otherAllowance = row[index] || '';
-      break;
-          // Ignore other columns like Basic Salary, Account Number, etc.
-          default:
-            // Skip unmapped columns
-            break;
-        }
-      });
-      
-      return employee;
-    });
-
-    setUploadedData(employeesData);
-    setIsPopupOpen(true);
+    if (!value || value === '-' || value === 'null') return null;
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
   };
 
-  reader.readAsArrayBuffer(selectedFile);
-};
+  // Handle displaying the selected file's contents in a popup
+  const handleDisplayFile = () => {
+    if (!selectedFile) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const data = new Uint8Array(event.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      // Extract headers from first row
+      const headers = jsonData[0].map(header => header.toLowerCase().replace(/\s+/g, ''));
+      
+      // Map Excel columns to expected fields
+      const employeesData = jsonData.slice(1).map((row) => {
+        const employee = {};
+        
+        headers.forEach((header, index) => {
+          switch(header) {
+            case 'firstname':
+              employee.firstName = getSafeValue(row[index]);
+              break;
+            case 'lastname':
+              employee.lastName = getSafeValue(row[index]);
+              break;
+            case 'email':
+              employee.email = getSafeValue(row[index]);
+              break;
+            case 'phone':
+              employee.phone = getSafeValue(row[index]);
+              break;
+            case 'jobposition':
+              employee.jobPosition = getSafeValue(row[index]);
+              break;
+            case 'category':
+              employee.category = getSafeValue(row[index]);
+              break;
+            case 'worktype':
+              employee.workType = getSafeValue(row[index]);
+              break;
+            case 'rate':
+              employee.minimumRate = getSafeValue(row[index]);
+              break;
+            case 'ssnitnumber':
+              employee.ssnitNumber = getSafeValue(row[index]);
+              break;
+            case 'tinnumber':
+              employee.tinNumber = getSafeValue(row[index]);
+              break;
+            case 'tagnumber':
+              employee.tagNumber = getSafeValue(row[index]);
+              break;
+            case 'dateofbirth':
+              employee.dateOfBirth = parseExcelDate(row[index]);
+              break;
+            case 'emergencycontact':
+              employee.emergencyContact = getSafeValue(row[index]);
+              break;
+            case 'accountnumber':
+              employee.accountNumber = getSafeValue(row[index]);
+              break;
+            case 'employeeid':
+              employee.employeeId = getSafeValue(row[index]);
+              break;
+            case 'department':
+              employee.department = getSafeValue(row[index]);
+              break;
+            case 'startdate':
+              employee.startDate = parseExcelDate(row[index]);
+              break;
+            case 'enddate':
+              employee.endDate = parseExcelDate(row[index]);
+              break;
+            case 'basicsalary':
+              employee.basicSalary = getSafeValue(row[index]);
+              break;
+            case 'graderank':
+            case 'grade':
+              employee.grade = getSafeValue(row[index]);
+              break;
+            case 'rentallowance':
+              employee.rentAllowance = getSafeValue(row[index]);
+              break;
+            case 'transportallowance':
+              employee.transportAllowance = getSafeValue(row[index]);
+              break;
+            case 'clothingallowance':
+              employee.clothingAllowance = getSafeValue(row[index]);
+              break;
+            case 'otherallowance':
+              employee.otherAllowance = getSafeValue(row[index]);
+              break;
+            default:
+              break;
+          }
+        });
+        
+        return employee;
+      });
+
+      setUploadedData(employeesData);
+      setIsPopupOpen(true);
+    };
+
+    reader.readAsArrayBuffer(selectedFile);
+  };
 
   // Save uploaded data to the database with token
   const saveUploadedData = async () => {
@@ -259,24 +279,35 @@ const handleDisplayFile = () => {
 
   // Create a new employee with token
   const createEmployee = async () => {
-  if (
-    !newEmployee.firstName ||
-    !newEmployee.lastName ||
-    !newEmployee.email ||
-    !newEmployee.phone ||
-    !newEmployee.jobPosition ||
-    !newEmployee.minimumRate ||
-    !newEmployee.category ||
-    !newEmployee.ssnitNumber ||
-    !newEmployee.tinNumber ||
-    !newEmployee.startDate ||
-    !newEmployee.endDate ||
-    !newEmployee.allowances ||
-    !newEmployee.accountNumber 
-  ) {
-    setError("Please fill out all fields.");
-    return;
-  }
+    let finalRate = newEmployee.minimumRate;
+
+    if (newEmployee.usePositionRate) {
+      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
+      finalRate = positionRate || newEmployee.minimumRate;
+    }
+
+    const employeeData = {
+      ...newEmployee,
+      minimumRate: finalRate,
+      jobGrade: newEmployee.jobGrade || "I"
+    };
+
+    if (
+      !newEmployee.firstName ||
+      !newEmployee.lastName ||
+      !newEmployee.email ||
+      !newEmployee.phone ||
+      !newEmployee.jobPosition ||
+      !newEmployee.category ||
+      !newEmployee.ssnitNumber ||
+      !newEmployee.tinNumber ||
+      !newEmployee.startDate ||
+      !newEmployee.allowances ||
+      !newEmployee.accountNumber 
+    ) {
+      setError("Please fill out all fields.");
+      return;
+    }
 
     try {
       const token = localStorage.getItem('jwtToken');
@@ -286,29 +317,33 @@ const handleDisplayFile = () => {
           "Content-Type": "application/json",
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(newEmployee),
+        body: JSON.stringify(employeeData),
       });
 
       if (!response.ok) throw new Error("Failed to create employee");
 
       const data = await response.json();
       setEmployees((prevEmployees) => [...prevEmployees, data]);
-   setNewEmployee({
-  firstName: "",
-  lastName: "",
-  email: "",
-  phone: "",
-  jobPosition: "",
-  workType: "",
-  minimumRate: "",
-  category: "",
-  ssnitNumber: "",
-  tinNumber: "",
-  startDate: "",
-  endDate: "",
-  accountNumber : "",
-  allowances : ""
-});
+   
+      // Reset form
+      setNewEmployee({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        jobPosition: "",
+        jobGrade: "I",
+        workType: "",
+        minimumRate: "",
+        category: "",
+        ssnitNumber: "",
+        tinNumber: "",
+        startDate: "",
+        accountNumber: "",
+        allowances: "",
+        employeeId: "",
+        usePositionRate: true
+      });
 
       setIsCreateMenuOpen(false);
       setSuccessMessage("Employee created successfully!");
@@ -449,7 +484,7 @@ const handleDisplayFile = () => {
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.350.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004-.827c.424.350.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
                     />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
@@ -521,24 +556,24 @@ const handleDisplayFile = () => {
                   <input
                     type="text"
                     placeholder="Search employees..."
-                    value={query}
+                    value={getSafeValue(query)}
                     onChange={(e) => setQuery(e.target.value)}
                     className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
                 <select
-    value={selectedCategory}
-    onChange={(e) => setSelectedCategory(e.target.value)}
-    className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  >
-    <option value="">All Categories</option>
-    {categories.map((category) => (
-      <option key={category} value={category}>
-        {category}
-      </option>
-    ))}
-  </select>
+                  value={getSafeValue(selectedCategory)}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Categories</option>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
 
                 <div className="flex gap-2">
                   <label className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition duration-200">
@@ -603,7 +638,6 @@ const handleDisplayFile = () => {
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Rate
                       </th>
-                     
                       <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
@@ -639,7 +673,19 @@ const handleDisplayFile = () => {
                           {employee.workType}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          GHS{employee.minimumRate}/hr
+                          <div>
+                            <span>GHS{employee.minimumRate}/hr</span>
+                            <span className={`ml-2 text-xs px-1 rounded ${
+                              employee.usePositionRate !== false ? 
+                                'bg-green-100 text-green-800' : 
+                                'bg-blue-100 text-blue-800'
+                            }`}>
+                              {employee.usePositionRate !== false ? 'Position' : 'Custom'}
+                            </span>
+                            {employee.usePositionRate !== false && employee.jobGrade && (
+                              <span className="ml-1 text-xs text-gray-500">(Grade {employee.jobGrade})</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="relative">
@@ -693,532 +739,688 @@ const handleDisplayFile = () => {
           </section>
         </main>
 
-        
-{/* Create Employee Modal */}
-{isCreateMenuOpen && (
-  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-      {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-800">Add New Employee</h2>
-        <button
-          onClick={() => setIsCreateMenuOpen(false)}
-          className="text-gray-400 hover:text-gray-500"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-      
-      {/* Scrollable Form Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-        {/* Category */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-          <select
-            value={newEmployee.category}
-            onChange={(e) => setNewEmployee({...newEmployee, category: e.target.value})}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">Select Category</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Create Employee Modal */}
+        {isCreateMenuOpen && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+            <div ref={createMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-800">Add New Employee</h2>
+                <button
+                  onClick={() => setIsCreateMenuOpen(false)}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Scrollable Form Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+                {/* Category */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    value={getSafeValue(newEmployee.category)}
+                    onChange={(e) => setNewEmployee({...newEmployee, category: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-        {/* Names */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-            <input
-              type="text"
-              placeholder="First name"
-              value={newEmployee.firstName}
-              onChange={(e) => setNewEmployee({ ...newEmployee, firstName: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
+                {/* Names */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                    <input
+                      type="text"
+                      placeholder="First name"
+                      value={getSafeValue(newEmployee.firstName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, firstName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-            <input
-              type="text"
-              placeholder="Last name"
-              value={newEmployee.lastName}
-              onChange={(e) => setNewEmployee({ ...newEmployee, lastName: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                    <input
+                      type="text"
+                      placeholder="Last name"
+                      value={getSafeValue(newEmployee.lastName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, lastName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
 
-        {/* Email */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-          <input
-            type="text"
-            placeholder="Employee email"
-            value={newEmployee.email}
-            onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Job Position */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
-          <input
-            type="text"
-            placeholder="E.g. Quantity Surveyor"
-            value={newEmployee.jobPosition}
-            onChange={(e) => setNewEmployee({ ...newEmployee, jobPosition: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Work Type + Hourly Rate */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
-            <input
-              type="text"
-              placeholder="E.g. Regular, Contractor"
-              value={newEmployee.workType}
-              onChange={(e) => setNewEmployee({ ...newEmployee, workType: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Hourly Rate (GHS)</label>
-            <input
-              type="text"
-              placeholder="E.g. 25.00"
-              value={newEmployee.minimumRate}
-              onChange={(e) => setNewEmployee({ ...newEmployee, minimumRate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Phone */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-          <input
-            type="number"
-            placeholder="E.g. 123456789"
-            value={newEmployee.phone}
-            onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* SSNIT + TIN */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
-            <input
-              type="text"
-              placeholder="Enter SSNIT Number"
-              value={newEmployee.ssnitNumber}
-              onChange={(e) => setNewEmployee({ ...newEmployee, ssnitNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
-            <input
-              type="text"
-              placeholder="Enter TIN Number"
-              value={newEmployee.tinNumber}
-              onChange={(e) => setNewEmployee({ ...newEmployee, tinNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Start + End Date */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-            <input
-              type="date"
-              value={newEmployee.startDate}
-              onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <input
-              type="date"
-              value={newEmployee.endDate}
-              onChange={(e) => setNewEmployee({ ...newEmployee, endDate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Allowances */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
-          <input
-            type="number"
-            value={newEmployee.allowances}
-            onChange={(e) => setNewEmployee({ ...newEmployee, allowances: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Basic Salary + Account Number */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">Basic Salary</label>
-              <div className="flex items-center">
-                <span className="text-xs text-gray-500 mr-2">Include</span>
-                <label className="relative inline-flex items-center cursor-pointer">
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
-                    type="checkbox"
-                    checked={isBasicSalaryEditable}
-                    onChange={(e) => setIsBasicSalaryEditable(e.target.checked)}
-                    className="sr-only peer"
+                    type="text"
+                    placeholder="Employee email"
+                    value={getSafeValue(newEmployee.email)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+                </div>
+
+                {/* Job Position and Grade */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
+                    <select
+                      value={getSafeValue(newEmployee.jobPosition)}
+                      onChange={(e) => {
+                        const selectedPosition = e.target.value;
+                        const position = settings.jobPositions?.find(p => p.name === selectedPosition);
+                        const defaultGrade = position?.grades?.[0]?.level || "I";
+                        const defaultRate = position?.grades?.find(g => g.level === defaultGrade)?.rate || "";
+                        
+                        setNewEmployee({ 
+                          ...newEmployee, 
+                          jobPosition: selectedPosition,
+                          jobGrade: defaultGrade,
+                          minimumRate: defaultRate.toString()
+                        });
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select Job Position</option>
+                      {settings.jobPositions?.map((position) => (
+                        <option key={position.name} value={position.name}>
+                          {position.name} ({position.category})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {newEmployee.jobPosition && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Job Grade</label>
+                      <select
+                        value={getSafeValue(newEmployee.jobGrade)}
+                        onChange={(e) => {
+                          const selectedGrade = e.target.value;
+                          const position = settings.jobPositions?.find(p => p.name === newEmployee.jobPosition);
+                          const gradeRate = position?.grades?.find(g => g.level === selectedGrade)?.rate || "";
+                          
+                          setNewEmployee({ 
+                            ...newEmployee, 
+                            jobGrade: selectedGrade,
+                            minimumRate: gradeRate.toString()
+                          });
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        {getPositionGrades(newEmployee.jobPosition).map((grade) => (
+                          <option key={grade.level} value={grade.level}>
+                            Grade {grade.level} (GHS{grade.rate}/hr)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Work Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                  <input
+                    type="text"
+                    placeholder="E.g. Regular, Contractor"
+                    value={getSafeValue(newEmployee.workType)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, workType: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Rate Configuration */}
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
+                    <p className="text-xs text-gray-500">
+                      {newEmployee.usePositionRate ? 
+                        `Using position rate: GHS${getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || 'N/A'}/hr` : 
+                        'Using custom rate'}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmployee.usePositionRate}
+                      onChange={(e) => {
+                        const usePositionRate = e.target.checked;
+                        let rate = newEmployee.minimumRate;
+                        
+                        if (usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
+                          rate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || newEmployee.minimumRate;
+                        }
+                        
+                        setNewEmployee({ 
+                          ...newEmployee, 
+                          usePositionRate: usePositionRate,
+                          minimumRate: rate.toString()
+                        });
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Custom Rate Input (only show when not using position rate) */}
+                {!newEmployee.usePositionRate && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Custom Hourly Rate (GHS)</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(newEmployee.minimumRate)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, minimumRate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* Current Rate Display */}
+                {newEmployee.jobPosition && newEmployee.jobGrade && (
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-blue-700">
+                      <strong>Current Rate:</strong> {newEmployee.usePositionRate ? 
+                        `GHS${getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || newEmployee.minimumRate}/hr (Position-based)` : 
+                        `GHS${newEmployee.minimumRate}/hr (Custom)`}
+                    </p>
+                  </div>
+                )}
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="number"
+                    placeholder="E.g. 123456789"
+                    value={getSafeValue(newEmployee.phone)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* SSNIT + TIN */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter SSNIT Number"
+                      value={getSafeValue(newEmployee.ssnitNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, ssnitNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter TIN Number"
+                      value={getSafeValue(newEmployee.tinNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tinNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Start Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={getSafeValue(newEmployee.startDate)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Allowances */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
+                  <input
+                    type="number"
+                    value={getSafeValue(newEmployee.allowances)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, allowances: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Basic Salary + Account Number */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700">Basic Salary</label>
+                      <div className="flex items-center">
+                        <span className="text-xs text-gray-500 mr-2">Include</span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isBasicSalaryEditable}
+                            onChange={(e) => setIsBasicSalaryEditable(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.basicSalary)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, basicSalary: e.target.value })}
+                      disabled={!isBasicSalaryEditable}
+                      className={`w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                        !isBasicSalaryEditable ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''
+                      }`}
+                    />
+                  </div>
+                
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.accountNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
+                <button
+                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                  onClick={() => setIsCreateMenuOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  onClick={createEmployee}
+                >
+                  Create Employee
+                </button>
               </div>
             </div>
-            <input
-              type="text"
-              value={newEmployee.basicSalary}
-              onChange={(e) => setNewEmployee({ ...newEmployee, basicSalary: e.target.value })}
-              disabled={!isBasicSalaryEditable}
-              className={`w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-                !isBasicSalaryEditable ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''
-              }`}
-            />
           </div>
-        
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-            <input
-              type="text"
-              value={newEmployee.accountNumber}
-              onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+        )} 
+
+        {/* Edit Employee Modal */}
+        {isEditMenuOpen && editingEmployee && (
+          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl w-full max-w-2xl z-50">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-gray-800">Edit Employee</h2>
+                <button
+                  onClick={() => {
+                    setIsEditMenuOpen(false);
+                    setEditingEmployee(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Category */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    value={getSafeValue(editingEmployee.category)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, category: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Names */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(editingEmployee.firstName)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, firstName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(editingEmployee.lastName)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, lastName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.email)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, email: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Job Position and Grade */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
+                    <select
+                      value={getSafeValue(editingEmployee.jobPosition)}
+                      onChange={(e) => {
+                        const selectedPosition = e.target.value;
+                        const position = settings.jobPositions?.find(p => p.name === selectedPosition);
+                        const defaultGrade = position?.grades?.[0]?.level || "I";
+                        const defaultRate = position?.grades?.find(g => g.level === defaultGrade)?.rate || editingEmployee.minimumRate;
+                        
+                        setEditingEmployee({ 
+                          ...editingEmployee, 
+                          jobPosition: selectedPosition,
+                          jobGrade: defaultGrade,
+                          minimumRate: editingEmployee.usePositionRate !== false ? defaultRate.toString() : editingEmployee.minimumRate
+                        });
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select Job Position</option>
+                      {settings.jobPositions?.map((position) => (
+                        <option key={position.name} value={position.name}>
+                          {position.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Job Grade</label>
+                    <select
+                      value={getSafeValue(editingEmployee.jobGrade) || "I"}
+                      onChange={(e) => {
+                        const selectedGrade = e.target.value;
+                        const position = settings.jobPositions?.find(p => p.name === editingEmployee.jobPosition);
+                        const gradeRate = position?.grades?.find(g => g.level === selectedGrade)?.rate || editingEmployee.minimumRate;
+                        
+                        setEditingEmployee({ 
+                          ...editingEmployee, 
+                          jobGrade: selectedGrade,
+                          minimumRate: editingEmployee.usePositionRate !== false ? gradeRate.toString() : editingEmployee.minimumRate
+                        });
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      {editingEmployee.jobPosition ? (
+                        getPositionGrades(editingEmployee.jobPosition).map((grade) => (
+                          <option key={grade.level} value={grade.level}>
+                            Grade {grade.level} (GHS{grade.rate}/hr)
+                          </option>
+                        ))
+                      ) : (
+                        <option value="I">Grade I</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Work Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.workType)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, workType: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Rate Configuration */}
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
+                    <p className="text-xs text-gray-500">
+                      {editingEmployee.usePositionRate !== false ? 
+                        `Position rate: GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr` : 
+                        `Custom rate: GHS${editingEmployee.minimumRate}/hr`}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingEmployee.usePositionRate !== false}
+                      onChange={(e) => {
+                        const usePositionRate = e.target.checked;
+                        let rate = editingEmployee.minimumRate;
+                        
+                        if (usePositionRate && editingEmployee.jobPosition && editingEmployee.jobGrade) {
+                          rate = getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate;
+                        }
+                        
+                        setEditingEmployee({ 
+                          ...editingEmployee, 
+                          usePositionRate: usePositionRate,
+                          minimumRate: rate.toString()
+                        });
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Custom Rate Input */}
+                {editingEmployee.usePositionRate === false && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Custom Hourly Rate (GHS)</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(editingEmployee.minimumRate)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, minimumRate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* Current Rate Display */}
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-700">
+                    <strong>Current Rate:</strong> {editingEmployee.usePositionRate !== false ? 
+                      `GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr (Position-based)` : 
+                      `GHS${editingEmployee.minimumRate}/hr (Custom)`}
+                  </p>
+                </div>
+
+                {/* SSNIT + TIN */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(editingEmployee.ssnitNumber)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, ssnitNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(editingEmployee.tinNumber)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, tinNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Start Date + Account Number */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(editingEmployee.startDate)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, startDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(editingEmployee.accountNumber)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, accountNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Allowances */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
+                  <input
+                    type="number"
+                    value={getSafeValue(editingEmployee.allowances)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, allowances: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
+                  <button
+                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    onClick={() => {
+                      setIsEditMenuOpen(false);
+                      setEditingEmployee(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                    onClick={updateEmployee}
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
-        <button
-          className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-          onClick={() => setIsCreateMenuOpen(false)}
-        >
-          Cancel
-        </button>
-        <button
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-          onClick={createEmployee}
-        >
-          Create Employee
-        </button>
-      </div>
-    </div>
-  </div>
-)} 
-
-
-      {/* Edit Employee Modal */}
-{isEditMenuOpen && editingEmployee && (
-  <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl w-full max-w-2xl z-50">
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold text-gray-800">Edit Employee</h2>
-        <button
-          onClick={() => {
-            setIsEditMenuOpen(false);
-            setEditingEmployee(null);
-          }}
-          className="text-gray-400 hover:text-gray-500"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="space-y-6">
-        {/* Category */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-         <select
-    value={editingEmployee?.category || ""}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, category: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  >
-    <option value="">Select Category</option>
-    {categories.map((category) => (
-      <option key={category} value={category}>
-        {category}
-      </option>
-    ))}
-  </select>
-        </div>
-
-        {/* Names */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-            <input
-              type="text"
-              value={editingEmployee.firstName}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, firstName: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-            <input
-              type="text"
-              value={editingEmployee.lastName}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, lastName: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Email */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-          <input
-            type="text"
-            value={editingEmployee.email}
-            onChange={(e) => setEditingEmployee({ ...editingEmployee, email: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Job Position */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
-          <input
-            type="text"
-            value={editingEmployee.jobPosition}
-            onChange={(e) => setEditingEmployee({ ...editingEmployee, jobPosition: e.target.value })}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-        </div>
-
-        {/* Work Type + Hourly Rate */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
-            <input
-              type="text"
-              value={editingEmployee.workType}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, workType: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Hourly Rate (GHS)</label>
-            <input
-              type="text"
-              value={editingEmployee.minimumRate}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, minimumRate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* NEW FIELDS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
-            <input
-              type="text"
-              value={editingEmployee.ssnitNumber}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, ssnitNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
-            <input
-              type="text"
-              value={editingEmployee.tinNumber}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, tinNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-            <input
-              type="date"
-              value={editingEmployee.startDate}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, startDate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-            <input
-              type="date"
-              value={editingEmployee.endDate}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, endDate: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-         <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-            <input
-              type="number"
-              value={editingEmployee.accountNumber}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, accountNumber: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          
-         <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
-            <input
-              type="number"
-              value={editingEmployee.allowances}
-              onChange={(e) => setEditingEmployee({ ...editingEmployee, allowances: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        
-
-        {/* Actions */}
-        <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
-          <button
-            className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-            onClick={() => {
-              setIsEditMenuOpen(false);
-              setEditingEmployee(null);
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            onClick={updateEmployee}
-          >
-            Save Changes
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+        )}
 
         {/* Excel Import Popup Modal */}
-{/* Excel Import Popup Modal */}
-{isPopupOpen && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
-    <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
-      <h2 className="text-xl font-semibold mb-4">Excel File Contents</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-         <thead className="bg-gray-50">
-  <tr>
-    <th>First Name</th>
-    <th>Last Name</th>
-    <th>Email</th>
-    <th>Phone</th>
-    <th>SSNIT Number</th>
-    <th>TIN Number</th>
-    <th>Tag Number</th>
-    <th>Date of Birth</th>
-    <th>Emergency Contact</th>
-    <th>Account Number</th>
-    <th>Employee ID</th>
-    <th>Category</th>
-    <th>Job Position</th>
-    <th>Work Type</th>
-    <th>Department</th>
-    <th>Start Date</th>
-    <th>End Date</th>
-    <th>Basic Salary</th>
-    <th>Minimum Rate</th>
-    <th>Grade</th>
-    <th>Rent Allowance</th>
-    <th>Transport Allowance</th>
-    <th>Clothing Allowance</th>
-    <th>Other Allowance</th>
-  </tr>
-</thead>
-<tbody>
-  {uploadedData.map((employee, index) => (
-    <tr key={index}>
-      <td>{employee.firstName}</td>
-      <td>{employee.lastName}</td>
-      <td>{employee.email}</td>
-      <td>{employee.phone}</td>
-      <td>{employee.ssnitNumber}</td>
-      <td>{employee.tinNumber}</td>
-      <td>{employee.tagNumber}</td>
-      <td>{employee.dateOfBirth}</td>
-      <td>{employee.emergencyContact}</td>
-      <td>{employee.accountNumber}</td>
-      <td>{employee.employeeId}</td>
-      <td>{employee.category}</td>
-      <td>{employee.jobPosition}</td>
-      <td>{employee.workType}</td>
-      <td>{employee.department}</td>
-      <td>{employee.startDate}</td>
-      <td>{employee.endDate}</td>
-      <td>{employee.basicSalary}</td>
-      <td>{employee.minimumRate}</td>
-      <td>{employee.grade}</td>
-      <td>{employee.rentAllowance}</td>
-      <td>{employee.transportAllowance}</td>
-      <td>{employee.clothingAllowance}</td>
-      <td>{employee.otherAllowance}</td>
-    </tr>
-  ))}
-</tbody>
-
-        </table>
-      </div>
-      <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-200">
-        <button
-          className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-          onClick={() => setIsPopupOpen(false)}
-        >
-          Cancel
-        </button>
-        <button
-          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-          onClick={saveUploadedData}
-        >
-          Confirm Upload
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-
+        {isPopupOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
+              <h2 className="text-xl font-semibold mb-4">Excel File Contents</h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th>First Name</th>
+                      <th>Last Name</th>
+                      <th>Email</th>
+                      <th>Phone</th>
+                      <th>SSNIT Number</th>
+                      <th>TIN Number</th>
+                      <th>Tag Number</th>
+                      <th>Date of Birth</th>
+                      <th>Emergency Contact</th>
+                      <th>Account Number</th>
+                      <th>Employee ID</th>
+                      <th>Category</th>
+                      <th>Job Position</th>
+                      <th>Work Type</th>
+                      <th>Department</th>
+                      <th>Start Date</th>
+                      <th>End Date</th>
+                      <th>Basic Salary</th>
+                      <th>Minimum Rate</th>
+                      <th>Grade</th>
+                      <th>Rent Allowance</th>
+                      <th>Transport Allowance</th>
+                      <th>Clothing Allowance</th>
+                      <th>Other Allowance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadedData.map((employee, index) => (
+                      <tr key={index}>
+                        <td>{getSafeValue(employee.firstName)}</td>
+                        <td>{getSafeValue(employee.lastName)}</td>
+                        <td>{getSafeValue(employee.email)}</td>
+                        <td>{getSafeValue(employee.phone)}</td>
+                        <td>{getSafeValue(employee.ssnitNumber)}</td>
+                        <td>{getSafeValue(employee.tinNumber)}</td>
+                        <td>{getSafeValue(employee.tagNumber)}</td>
+                        <td>{getSafeValue(employee.dateOfBirth)}</td>
+                        <td>{getSafeValue(employee.emergencyContact)}</td>
+                        <td>{getSafeValue(employee.accountNumber)}</td>
+                        <td>{getSafeValue(employee.employeeId)}</td>
+                        <td>{getSafeValue(employee.category)}</td>
+                        <td>{getSafeValue(employee.jobPosition)}</td>
+                        <td>{getSafeValue(employee.workType)}</td>
+                        <td>{getSafeValue(employee.department)}</td>
+                        <td>{getSafeValue(employee.startDate)}</td>
+                        <td>{getSafeValue(employee.endDate)}</td>
+                        <td>{getSafeValue(employee.basicSalary)}</td>
+                        <td>{getSafeValue(employee.minimumRate)}</td>
+                        <td>{getSafeValue(employee.grade)}</td>
+                        <td>{getSafeValue(employee.rentAllowance)}</td>
+                        <td>{getSafeValue(employee.transportAllowance)}</td>
+                        <td>{getSafeValue(employee.clothingAllowance)}</td>
+                        <td>{getSafeValue(employee.otherAllowance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-200">
+                <button
+                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                  onClick={() => setIsPopupOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                  onClick={saveUploadedData}
+                >
+                  Confirm Upload
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

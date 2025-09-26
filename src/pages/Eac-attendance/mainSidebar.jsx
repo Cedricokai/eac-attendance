@@ -90,13 +90,7 @@ function MainSidebar() {
                 <User size={16} />
                 Employee List
               </Link>
-              <Link 
-                to="/employees/add"
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/employees/add") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
-              >
-                <Plus size={16} />
-                Add Employee
-              </Link>
+             
             </div>
           )}
         </div>

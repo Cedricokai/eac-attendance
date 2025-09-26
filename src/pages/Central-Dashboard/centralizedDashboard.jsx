@@ -8,9 +8,7 @@ import {
   Briefcase,
   PieChart,
   Home,
-  Bell,
   ChevronDown,
-  Menu,
   ChevronLeft,
   ChevronRight,
   Settings,
@@ -20,6 +18,7 @@ import {
 import AttendanceDashboard from '../Eac-attendance/attendanceDashboard';
 import InventoryDashboard from '../Eac-inventory/InventoryDashboard';
 import Userpage from '../Userpage';
+import companyLogo from "../../assets/companyLogo.jpg";
 
 const CentralizedDashboard = () => {
   const location = useLocation();
@@ -27,64 +26,59 @@ const CentralizedDashboard = () => {
   const [activeDashboard, setActiveDashboard] = useState('main');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   // Mock user data
   const [user, setUser] = useState(null);
 
-useEffect(() => {
-  const fetchUser = async () => {
-    try {
-     const token = localStorage.getItem("jwtToken"); // ✅ match LoginPage
- // assuming you store JWT here
-      const res = await fetch("http://localhost:8080/auth/me", {
-        headers: {
-          "Authorization": `Bearer ${token}`
-        },
-        credentials: "include"
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser({
-          name: data.username,  // comes from backend
-          role: data.role.replace("ROLE_", "").toLowerCase(), 
-          email: data.email
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const res = await fetch("http://localhost:8080/auth/me", {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          },
+          credentials: "include"
         });
+        if (res.ok) {
+          const data = await res.json();
+          setUser({
+            name: data.username,
+            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            email: data.email
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch user", err);
       }
-    } catch (err) {
-      console.error("Failed to fetch user", err);
+    };
+    fetchUser();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("jwtToken");
+
+      await fetch("http://localhost:8080/auth/logout", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+
+      // Clear local storage
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+
+      // Redirect to login
+      navigate("/");
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
   };
-  fetchUser();
-}, []);
-
-
-const handleLogout = async () => {
-  try {
-    const token = localStorage.getItem("jwtToken");
-
-    await fetch("http://localhost:8080/auth/logout", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-    });
-
-    // Clear local storage
-    localStorage.removeItem("jwtToken");
-    localStorage.removeItem("userRole");
-
-    // Redirect to login
-    navigate("/LoginPage");
-  } catch (error) {
-    console.error("Logout failed:", error);
-  }
-};
-
-
 
   const dashboards = [
     { 
@@ -127,7 +121,7 @@ const handleLogout = async () => {
       hover: 'hover:bg-cyan-50',
       roles: ['admin', 'manager']
     },
-        { 
+    { 
       id: 'UserPage', 
       name: 'UserPage', 
       icon: <PieChart size={18} />, 
@@ -144,7 +138,7 @@ const handleLogout = async () => {
       roles: ['admin']
     },
     { 
-      id: 'settings', 
+      id: 'settingspage', 
       name: 'Settings', 
       icon: <Settings size={18} />, 
       color: 'bg-gray-100 text-gray-800',
@@ -172,7 +166,7 @@ const handleLogout = async () => {
         return <AttendanceDashboard />;
       case 'InventoryDashboard':
         return <InventoryDashboard />;
-        case 'UserPage':
+      case 'UserPage':
         return <Userpage />;
       default:
         return <MainDashboard />;
@@ -289,12 +283,12 @@ const handleLogout = async () => {
                       <p className="text-xs text-indigo-200 capitalize">{user?.role || 'employee'}</p>
                     </div>
                   </div>
-                     <button
-  onClick={handleLogout}
-  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
->
-  Logout
-</button>
+                  <button
+                    onClick={handleLogout}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  >
+                    Logout
+                  </button>
                 </>
               ) : (
                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
@@ -373,25 +367,18 @@ const handleLogout = async () => {
                       <p className="text-xs text-indigo-200 capitalize">{user?.role || 'employee'}</p>
                     </div>
                   </div>
-                      <button
-  onClick={handleLogout}
-  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
->
-  Logout
-</button>
+                  <button
+                    onClick={handleLogout}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  >
+                    Logout
+                  </button>
                 </div>
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
-
-      <button
-        onClick={() => setMobileMenuOpen(true)}
-        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white shadow-md"
-      >
-        <Menu size={24} className="text-gray-700" />
-      </button>
 
       <div 
         className="flex-1 transition-all duration-300 overflow-auto"
@@ -400,40 +387,17 @@ const handleLogout = async () => {
         <header className="bg-white shadow-sm sticky top-0 z-10">
           <div className="flex items-center justify-between p-4 h-16">
             <div className="flex items-center">
-              <button 
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="mr-4 p-1 rounded-md hover:bg-gray-100 hidden md:block"
-              >
-                <Menu size={20} />
-              </button>
-            <div className="flex items-center space-x-2">
-  <img 
-    src="/assets/company-logo.png"  // put logo in /public/assets/
-    alt="Company Logo" 
-    className="h-8 w-auto"
-  />
-  <span className="text-xl font-semibold text-gray-800">
-    {dashboards.find(d => d.id === activeDashboard)?.name || 'Dashboard'}
-  </span>
-</div>
-
+              {/* Hamburger menu button removed from here */}
+              <div className="flex items-center space-x-2">
+                <img src={companyLogo} alt="Company Logo" className="h-8 w-auto" />
+                <span className="text-xl font-semibold text-gray-800">
+                  {dashboards.find(d => d.id === activeDashboard)?.name || 'Dashboard'}
+                </span>
+              </div>
             </div>
+            
             <div className="flex items-center space-x-4">
-              <div className="relative">
-                <div className="w-3 h-3 rounded-full bg-green-500 absolute -top-1 -right-1"></div>
-                <span className="text-gray-600">Online</span>
-              </div>
-              
-              <div className="relative">
-                <button 
-                  onClick={() => setNotificationOpen(!notificationOpen)}
-                  className="p-2 rounded-full hover:bg-gray-100 relative"
-                >
-                  <Bell size={20} className="text-gray-600" />
-                  <span className="absolute top-0 right-0 h-3 w-3 rounded-full bg-red-500 border-2 border-white"></span>
-                </button>
-              </div>
-
+              {/* User Dropdown Section */}
               <div className="relative">
                 <div 
                   className="flex items-center space-x-2 cursor-pointer group"
@@ -451,34 +415,43 @@ const handleLogout = async () => {
                   />
                 </div>
 
-                {/* User Dropdown */}
+                {/* User Dropdown Menu */}
                 <AnimatePresence>
                   {userDropdownOpen && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50"
+                      className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="px-4 py-2 border-b">
-                        <p className="text-sm font-medium">{user.name}</p>
-                        <p className="text-xs text-gray-500">{user.email}</p>
+                      <div className="px-4 py-2 border-b border-gray-100">
+                        <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
+                        <p className="text-xs text-gray-500 truncate">{user?.email || ''}</p>
+                        <p className="text-xs text-indigo-600 capitalize mt-1">{user?.role || 'employee'}</p>
                       </div>
+                      
                       <button
-                        onClick={() => navigate('/settings')}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center"
+                        onClick={() => {
+                          navigate('/settings');
+                          setUserDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center transition-colors"
                       >
                         <Settings size={16} className="mr-2" />
                         Settings
                       </button>
-                    <button
-  onClick={handleLogout}
-  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
->
-  Logout
-</button>
-
+                      
+                      <button
+                        onClick={() => {
+                          handleLogout();
+                          setUserDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors border-t border-gray-100"
+                      >
+                        <LogOut size={16} className="mr-2" />
+                        Logout
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>

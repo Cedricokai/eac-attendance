@@ -1,23 +1,5 @@
-import { useState, useEffect, useContext } from "react";
-import { SettingsContext } from '../context/SettingsContext';
-import { Link, useLocation } from "react-router-dom";
-import MainSidebar from "../mainSidebar";
 
-function Payroll() {
-  const [payrollPeriods, setPayrollPeriods] = useState([]);
-  const [selectedPeriod, setSelectedPeriod] = useState(null);
-  const [payrollRecords, setPayrollRecords] = useState([]);
-  const [newPeriod, setNewPeriod] = useState({ name: '', startDate: '', endDate: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [summary, setSummary] = useState(null);
-  const { settings } = useContext(SettingsContext);
-  const location = useLocation();
-  
-  // New state for allowance management
-  const [employees, setEmployees] = useState([]);
-  const [selectedEmployees, setSelectedEmployees] = useState([]);
+tate([]);
   const [allowances, setAllowances] = useState([
     { type: 'housingAllowance', amount: '', description: '', enabled: false },
     { type: 'tntAllowance', amount: '', description: '', enabled: false },
