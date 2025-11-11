@@ -15,7 +15,64 @@ const StorekeeperRequests = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [filter, setFilter] = useState('all');
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+  // Mock requests data
+  const mockRequests = [
+    {
+      id: 1,
+      productName: 'Safety Helmet',
+      productCode: 'PPE-001',
+      quantity: 10,
+      requestedBy: 'John Smith',
+      department: 'Construction',
+      location: 'Site A',
+      requestDate: '2024-01-15T10:30:00',
+      status: 'PENDING'
+    },
+    {
+      id: 2,
+      productName: 'Safety Gloves',
+      productCode: 'PPE-002',
+      quantity: 25,
+      requestedBy: 'Jane Doe',
+      department: 'Maintenance',
+      location: 'Warehouse B',
+      requestDate: '2024-01-14T14:20:00',
+      status: 'APPROVED'
+    },
+    {
+      id: 3,
+      productName: 'Safety Boots',
+      productCode: 'PPE-003',
+      quantity: 5,
+      requestedBy: 'Mike Johnson',
+      department: 'Operations',
+      location: 'Site C',
+      requestDate: '2024-01-13T09:15:00',
+      status: 'REJECTED'
+    },
+    {
+      id: 4,
+      productName: 'Safety Glasses',
+      productCode: 'PPE-004',
+      quantity: 15,
+      requestedBy: 'Sarah Wilson',
+      department: 'Quality Control',
+      location: 'Lab 2',
+      requestDate: '2024-01-12T16:45:00',
+      status: 'FULFILLED'
+    },
+    {
+      id: 5,
+      productName: 'Ear Protection',
+      productCode: 'PPE-005',
+      quantity: 30,
+      requestedBy: 'Tom Brown',
+      department: 'Manufacturing',
+      location: 'Plant 1',
+      requestDate: '2024-01-15T08:00:00',
+      status: 'PENDING'
+    }
+  ];
 
   useEffect(() => {
     fetchRequests();
@@ -24,73 +81,24 @@ const StorekeeperRequests = () => {
   const fetchRequests = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('jwtToken');
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Try endpoints in priority order - ProductController endpoints first
-      const endpoints = [
-        {
-          url: `${API_BASE_URL}/api/products/requests`,
-          pendingUrl: `${API_BASE_URL}/api/products/requests/pending`
-        },
-        {
-          url: `${API_BASE_URL}/api/requests`,
-          pendingUrl: `${API_BASE_URL}/api/requests/pending`
-        }
-      ];
-
-      let response = null;
-      let data = null;
-      let workingEndpoint = null;
-
-      // Try each endpoint until one works
-      for (const endpoint of endpoints) {
-        try {
-          const url = filter === 'pending' ? endpoint.pendingUrl : endpoint.url;
-          
-          console.log('🔍 Trying endpoint:', url);
-          
-          response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            }
-          });
-
-          console.log('📊 Response status:', response.status, response.statusText);
-
-          if (response.ok) {
-            data = await response.json();
-            workingEndpoint = url;
-            console.log('✅ Success with endpoint:', url);
-            console.log('📦 Data received:', data);
-            break; // Exit loop if successful
-          } else {
-            console.log('❌ Endpoint failed:', url, 'Status:', response.status);
-          }
-        } catch (err) {
-          console.log('🚨 Endpoint error:', err.message);
-          // Continue to next endpoint
-        }
+      let filteredRequests = [...mockRequests];
+      
+      // Apply filter
+      if (filter !== 'all') {
+        filteredRequests = mockRequests.filter(request => 
+          request.status === filter.toUpperCase()
+        );
       }
-
-      if (!response || !response.ok) {
-        let errorMsg = 'Failed to fetch requests from all endpoints. ';
-        if (response) {
-          errorMsg += `Last response: ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMsg);
-      }
-
-      setRequests(data || []);
+      
+      setRequests(filteredRequests);
       setError('');
       
-      // Show which endpoint is working
-      console.log('🎯 Using endpoint:', workingEndpoint);
-      
     } catch (err) {
-      setError(err.message);
-      console.error('💥 Error fetching requests:', err);
+      setError('Failed to load requests');
+      console.error('Error fetching requests:', err);
     } finally {
       setLoading(false);
     }
@@ -98,60 +106,48 @@ const StorekeeperRequests = () => {
 
   const processRequest = async (requestId, action) => {
     try {
-      const token = localStorage.getItem('jwtToken');
-      
-      // Try endpoints in priority order
-      const endpoints = [
-        `${API_BASE_URL}/api/products/requests/${requestId}/process?action=${action}`,
-        `${API_BASE_URL}/api/requests/${requestId}/process?action=${action}`
-      ];
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      let response = null;
-      let workingEndpoint = null;
-
-      for (const endpoint of endpoints) {
-        try {
-          console.log('🔍 Trying process endpoint:', endpoint);
-          response = await fetch(endpoint, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            }
-          });
-
-          console.log('📊 Process response status:', response.status);
-
-          if (response.ok) {
-            workingEndpoint = endpoint;
-            console.log('✅ Success with process endpoint:', endpoint);
-            break;
-          } else {
-            console.log('❌ Process endpoint failed:', endpoint, 'Status:', response.status);
+      // Update request status based on action
+      const updatedRequests = requests.map(request => {
+        if (request.id === requestId) {
+          let newStatus = request.status;
+          
+          switch (action) {
+            case 'approve':
+              newStatus = 'APPROVED';
+              break;
+            case 'reject':
+              newStatus = 'REJECTED';
+              break;
+            case 'fulfill':
+              newStatus = 'FULFILLED';
+              break;
+            default:
+              newStatus = request.status;
           }
-        } catch (err) {
-          console.log('🚨 Process endpoint error:', err.message);
+          
+          return {
+            ...request,
+            status: newStatus
+          };
         }
-      }
+        return request;
+      });
 
-      if (!response || !response.ok) {
-        let errorMsg = 'Failed to process request. ';
-        if (response?.status === 403) {
-          errorMsg = 'Access denied: You need storekeeper role to process requests';
-        } else if (response?.status === 405) {
-          errorMsg = 'Method not allowed. The server rejected the request.';
-        } else if (response) {
-          errorMsg += `Last status: ${response.status}`;
-        }
-        throw new Error(errorMsg);
-      }
-
-      setSuccessMessage(`Request ${action}ed successfully!`);
+      setRequests(updatedRequests);
+      
+      const actionText = action === 'approve' ? 'approved' : 
+                        action === 'reject' ? 'rejected' : 
+                        'fulfilled';
+      
+      setSuccessMessage(`Request ${actionText} successfully!`);
       setTimeout(() => setSuccessMessage(''), 3000);
-      fetchRequests();
+      
     } catch (err) {
-      setError(err.message);
-      console.error('💥 Error processing request:', err);
+      setError('Failed to process request');
+      console.error('Error processing request:', err);
     }
   };
 
@@ -194,7 +190,7 @@ const StorekeeperRequests = () => {
           <select 
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="border border-gray-300 rounded-lg p-2"
+            className="border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="all">All Requests</option>
             <option value="pending">Pending</option>
@@ -205,7 +201,7 @@ const StorekeeperRequests = () => {
           
           <button 
             onClick={fetchRequests}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
+            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors"
           >
             Refresh
           </button>
@@ -218,7 +214,6 @@ const StorekeeperRequests = () => {
             <XMarkIcon className="h-5 w-5" />
             <strong>Error:</strong> {error}
           </div>
-          <p className="mt-2 text-sm">Check browser console for detailed logs.</p>
         </div>
       )}
 
@@ -236,27 +231,27 @@ const StorekeeperRequests = () => {
           <div className="text-center py-8 text-gray-500">
             <ArchiveBoxIcon className="h-12 w-12 mx-auto text-gray-400 mb-2" />
             <p>No requests found</p>
-            <p className="text-sm mt-1">Try refreshing or check if any requests were created.</p>
+            <p className="text-sm mt-1">Try changing the filter or check back later.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requested By</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Requested By</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-200">
                 {requests.map((request) => (
-                  <tr key={request.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
+                  <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div>
                         <div className="font-medium text-gray-900">{request.productName}</div>
                         {request.productCode && (
@@ -264,35 +259,35 @@ const StorekeeperRequests = () => {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className="font-medium">{request.quantity}</span>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="font-medium text-gray-900">{request.quantity}</span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <UserCircleIcon className="h-5 w-5 text-gray-400" />
-                        <span>{request.requestedBy}</span>
+                        <span className="text-gray-900">{request.requestedBy}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4">{request.department || 'N/A'}</td>
-                    <td className="px-6 py-4">{request.location}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-900">{request.department || 'N/A'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-900">{request.location}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDate(request.requestDate)}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       {getStatusBadge(request.status)}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       {request.status === 'PENDING' && (
                         <div className="flex gap-2">
                           <button
                             onClick={() => processRequest(request.id, 'approve')}
-                            className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600"
+                            className="bg-green-500 text-white px-3 py-1 rounded text-sm hover:bg-green-600 transition-colors"
                           >
                             Approve
                           </button>
                           <button
                             onClick={() => processRequest(request.id, 'reject')}
-                            className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                            className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition-colors"
                           >
                             Reject
                           </button>
@@ -301,7 +296,7 @@ const StorekeeperRequests = () => {
                       {request.status === 'APPROVED' && (
                         <button
                           onClick={() => processRequest(request.id, 'fulfill')}
-                          className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600"
+                          className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition-colors"
                         >
                           Mark Fulfilled
                         </button>
@@ -321,8 +316,20 @@ const StorekeeperRequests = () => {
       {requests.length > 0 && (
         <div className="mt-4 text-sm text-gray-500">
           Showing {requests.length} request{requests.length !== 1 ? 's' : ''}
+          {filter !== 'all' && ` (filtered by ${filter})`}
         </div>
       )}
+
+      {/* Demo Information */}
+      <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <h3 className="text-lg font-semibold text-blue-800 mb-2">Demo Information</h3>
+        <p className="text-blue-700 text-sm">
+          This is a mock implementation with sample data. In a real application, this would connect to your backend API.
+        </p>
+        <div className="mt-2 text-xs text-blue-600">
+          <strong>Available actions:</strong> Approve/Reject pending requests, Mark approved requests as fulfilled
+        </div>
+      </div>
     </div>
   );
 };

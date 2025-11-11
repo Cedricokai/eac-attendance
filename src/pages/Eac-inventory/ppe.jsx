@@ -49,6 +49,82 @@ const PPES = () => {
   const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
   const safetyStandards = ['ANSI', 'OSHA', 'CE', 'ISO', 'Other'];
 
+  // Mock PPE data
+  const mockPPEItems = [
+    {
+      id: 1,
+      name: 'Safety Helmet',
+      code: 'PPE-001',
+      description: 'Hard hat for head protection',
+      brand: '3M',
+      ppeType: 'Helmet',
+      size: 'L',
+      material: 'HDPE',
+      color: 'Yellow',
+      stock: 45,
+      cost: 25.99,
+      location: 'Warehouse A',
+      safetyStandard: 'ANSI',
+      expiryDate: '2025-12-31',
+      minStockLevel: 10,
+      entryDate: '2024-01-15'
+    },
+    {
+      id: 2,
+      name: 'Safety Glasses',
+      code: 'PPE-002',
+      description: 'Anti-fog safety glasses',
+      brand: 'Honeywell',
+      ppeType: 'Safety Glasses',
+      size: 'One Size',
+      material: 'Polycarbonate',
+      color: 'Clear',
+      stock: 120,
+      cost: 8.50,
+      location: 'Warehouse B',
+      safetyStandard: 'ANSI',
+      expiryDate: null,
+      minStockLevel: 20,
+      entryDate: '2024-01-10'
+    },
+    {
+      id: 3,
+      name: 'Safety Gloves',
+      code: 'PPE-003',
+      description: 'Cut-resistant gloves',
+      brand: 'Ansell',
+      ppeType: 'Gloves',
+      size: 'M',
+      material: 'Kevlar',
+      color: 'Gray',
+      stock: 5,
+      cost: 15.75,
+      location: 'Warehouse A',
+      safetyStandard: 'CE',
+      expiryDate: '2024-06-30',
+      minStockLevel: 15,
+      entryDate: '2024-01-20'
+    },
+    {
+      id: 4,
+      name: 'Safety Boots',
+      code: 'PPE-004',
+      description: 'Steel-toe work boots',
+      brand: 'Timberland',
+      ppeType: 'Safety Boots',
+      size: '42',
+      material: 'Leather',
+      color: 'Brown',
+      stock: 25,
+      cost: 89.99,
+      location: 'Warehouse C',
+      safetyStandard: 'OSHA',
+      expiryDate: null,
+      minStockLevel: 8,
+      entryDate: '2024-01-18'
+    }
+  ];
+
   const [updatedPpe, setUpdatedPpe] = useState({
     name: '',
     description: '',
@@ -82,66 +158,12 @@ const PPES = () => {
     entryDate: new Date().toISOString().split('T')[0]
   });
 
-  // Use the same API URL logic as LoginPage
-  const getApiBaseUrl = () => {
-    const hostname = window.location.hostname;
-    if (hostname.startsWith("192.168.") || hostname === "localhost") {
-      return import.meta.env.VITE_API_BASE_URL_LOCAL || 'http://192.168.1.97:8080';
-    } else {
-      return import.meta.env.VITE_API_BASE_URL_PUBLIC || 'http://192.168.1.97:8080';
-    }
-  };
-
-  const API_BASE_URL = getApiBaseUrl();
-
-  // Get JWT token from localStorage
-  const getAuthToken = () => {
-    return localStorage.getItem("jwtToken") || localStorage.getItem("authToken");
-  };
-
-  // Enhanced fetch function with error handling
-  const apiFetch = async (url, options = {}) => {
-    const token = getAuthToken();
-    
-    const defaultOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options.headers,
-      },
-    };
-
-    const finalOptions = { ...defaultOptions, ...options };
-
-    try {
-      console.log(`Making API call to: ${url}`);
-      const response = await fetch(url, finalOptions);
-
-      if (!response.ok) {
-        // Try to get error message from response
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const errorText = await response.text();
-          if (errorText) {
-            errorMessage = errorText;
-          }
-        } catch (e) {
-          console.error('Could not parse error response:', e);
-        }
-        throw new Error(errorMessage);
-      }
-
-      // Handle empty responses
-      const contentLength = response.headers.get('content-length');
-      if (contentLength === '0' || response.status === 204) {
-        return null;
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('API call failed:', error);
-      throw error;
-    }
+  // Mock stats data
+  const mockStats = {
+    totalItems: 4,
+    totalStock: 195,
+    lowStockCount: 1,
+    totalValue: 140.23
   };
 
   useEffect(() => {
@@ -152,11 +174,12 @@ const PPES = () => {
   const fetchPPEItems = async () => {
     try {
       setLoading(true);
-      const data = await apiFetch(`${API_BASE_URL}/api/ppe`);
-      setPpeItems(data || []);
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setPpeItems(mockPPEItems);
     } catch (err) {
       console.error('Failed to fetch PPE items:', err);
-      setError(`Failed to load PPE items: ${err.message}`);
+      setError('Failed to load PPE items');
       setPpeItems([]);
     } finally {
       setLoading(false);
@@ -165,11 +188,11 @@ const PPES = () => {
 
   const fetchStats = async () => {
     try {
-      const data = await apiFetch(`${API_BASE_URL}/api/ppe/stats`);
-      setStats(data);
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setStats(mockStats);
     } catch (err) {
       console.error('Failed to fetch stats:', err);
-      // Don't set error for stats failure, just log it
     }
   };
 
@@ -180,11 +203,18 @@ const PPES = () => {
     }
 
     try {
-      const data = await apiFetch(`${API_BASE_URL}/api/ppe/search?query=${encodeURIComponent(query)}`);
-      setPpeItems(data || []);
+      // Simulate search delay
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const filteredItems = mockPPEItems.filter(item =>
+        item.name.toLowerCase().includes(query.toLowerCase()) ||
+        item.code.toLowerCase().includes(query.toLowerCase()) ||
+        item.brand.toLowerCase().includes(query.toLowerCase()) ||
+        item.ppeType.toLowerCase().includes(query.toLowerCase())
+      );
+      setPpeItems(filteredItems);
     } catch (err) {
       console.error('Search failed:', err);
-      setError('Search failed: ' + err.message);
+      setError('Search failed');
     }
   };
 
@@ -216,7 +246,7 @@ const PPES = () => {
       ppe.safetyStandard || '',
       formatDate(ppe.expiryDate) || '',
       ppe.minStockLevel || 0,
-      formatDate(ppe.entryDate || ppe.createdDate) || ''
+      formatDate(ppe.entryDate) || ''
     ]);
 
     const csvContent = [headers, ...rows]
@@ -377,37 +407,35 @@ const PPES = () => {
     }
 
     try {
-      const token = getAuthToken();
-      let successCount = 0;
-      let errorCount = 0;
+      // Simulate import delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      for (const ppe of ppeToImport) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/ppe`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify(ppe),
-          });
+      // Generate new IDs for imported items
+      const newItems = ppeToImport.map((ppe, index) => ({
+        ...ppe,
+        id: Date.now() + index,
+        code: ppe.code || `PPE-IMPORT-${Date.now() + index}`,
+        entryDate: new Date().toISOString().split('T')[0]
+      }));
 
-          if (response.ok) {
-            successCount++;
-          } else {
-            errorCount++;
-            console.error(`Failed to import PPE: ${ppe.name}`);
-          }
-        } catch (err) {
-          errorCount++;
-          console.error(`Error importing PPE: ${ppe.name}`, err);
-        }
-      }
+      // Add imported items to the current list
+      setPpeItems(prev => [...prev, ...newItems]);
+      
+      // Update stats
+      const newStats = {
+        totalItems: ppeItems.length + newItems.length,
+        totalStock: ppeItems.reduce((sum, item) => sum + item.stock, 0) + 
+                   newItems.reduce((sum, item) => sum + item.stock, 0),
+        lowStockCount: [...ppeItems, ...newItems].filter(item => 
+          item.stock <= item.minStockLevel
+        ).length,
+        totalValue: [...ppeItems, ...newItems].reduce((sum, item) => 
+          sum + (item.cost * item.stock), 0
+        )
+      };
+      setStats(newStats);
 
-      await fetchPPEItems();
-      await fetchStats();
-
-      setSuccessMessage(`Import completed: ${successCount} successful, ${errorCount} failed`);
+      setSuccessMessage(`Import completed: ${newItems.length} items imported successfully`);
       setTimeout(() => setSuccessMessage(''), 5000);
       setIsImportModalOpen(false);
       setImportData([]);
@@ -502,16 +530,6 @@ const PPES = () => {
     }
   };
 
-  const handleApply = () => {
-    if (selectedCategory === "projects") {
-      navigate('/products');
-    } else if (selectedCategory === "assets") {
-      navigate('/assets');
-    } else {
-      setError('Please select a category');
-    }
-  };
-
   const toggleModal = () => setIsModalOpen(!isModalOpen);
   const toggleUpdateModal = () => setIsUpdateModalOpen(!isUpdateModalOpen);
 
@@ -536,7 +554,11 @@ const PPES = () => {
     }
   
     try {
-      const ppeData = {
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const newPPEItem = {
+        id: Date.now(),
         name: newPpe.name,
         description: newPpe.description,
         stock: parseInt(newPpe.stock),
@@ -545,21 +567,18 @@ const PPES = () => {
         size: newPpe.size,
         material: newPpe.material,
         color: newPpe.color,
-        cost: newPpe.cost ? parseFloat(newPpe.cost) : null,
+        cost: newPpe.cost ? parseFloat(newPpe.cost) : 0,
         location: newPpe.location,
         safetyStandard: newPpe.safetyStandard,
         expiryDate: newPpe.expiryDate || null,
         minStockLevel: parseInt(newPpe.minStockLevel) || 0,
-        entryDate: newPpe.entryDate
+        entryDate: newPpe.entryDate,
+        code: `PPE-${Date.now().toString().slice(-6)}`
       };
   
-      const addedPPE = await apiFetch(`${API_BASE_URL}/api/ppe`, {
-        method: 'POST',
-        body: JSON.stringify(ppeData),
-      });
-  
-      setPpeItems(prev => [...prev, addedPPE]);
+      setPpeItems(prev => [...prev, newPPEItem]);
       
+      // Reset form
       setNewPpe({
         name: '',
         description: '',
@@ -582,9 +601,10 @@ const PPES = () => {
       setTimeout(() => setSuccessMessage(''), 3000);
       toggleModal();
       
+      // Update stats
       fetchStats();
     } catch (err) {
-      setError(err.message);
+      setError('Failed to add PPE item');
     }
   };
 
@@ -597,7 +617,11 @@ const PPES = () => {
     }
   
     try {
-      const updateData = {
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const updatedPPEItem = {
+        ...currentPpe,
         name: updatedPpe.name,
         description: updatedPpe.description,
         stock: parseInt(updatedPpe.stock),
@@ -606,32 +630,26 @@ const PPES = () => {
         size: updatedPpe.size,
         material: updatedPpe.material,
         color: updatedPpe.color,
-        cost: updatedPpe.cost ? parseFloat(updatedPpe.cost) : null,
+        cost: updatedPpe.cost ? parseFloat(updatedPpe.cost) : currentPpe.cost,
         location: updatedPpe.location,
         safetyStandard: updatedPpe.safetyStandard,
         expiryDate: updatedPpe.expiryDate || null,
         minStockLevel: parseInt(updatedPpe.minStockLevel) || 0,
         entryDate: updatedPpe.entryDate
       };
-
-      const updatedPpeData = await apiFetch(`${API_BASE_URL}/api/ppe/${currentPpe.id}`, {
-        method: 'PUT',
-        headers: {
-          'User-Email': userEmail || 'system@example.com'
-        },
-        body: JSON.stringify(updateData),
-      });
   
       setPpeItems(prev =>
-        prev.map(ppe => (ppe.id === updatedPpeData.id ? updatedPpeData : ppe))
+        prev.map(ppe => (ppe.id === currentPpe.id ? updatedPPEItem : ppe))
       );
+      
       setSuccessMessage('PPE item updated successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
       toggleUpdateModal();
       
+      // Update stats
       fetchStats();
     } catch (err) {
-      setError(err.message);
+      setError('Failed to update PPE item');
     }
   };
   
@@ -640,20 +658,17 @@ const PPES = () => {
     if (!confirmed) return;
   
     try {
-      await apiFetch(`${API_BASE_URL}/api/ppe/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'User-Email': userEmail || 'system@example.com'
-        },
-      });
-  
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       setPpeItems(prevPpeItems => prevPpeItems.filter(ppe => ppe.id !== id));
       setSuccessMessage('PPE item deleted successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
       
+      // Update stats
       fetchStats();
     } catch (err) {
-      setError(`Error deleting PPE item: ${err.message}`);
+      setError('Error deleting PPE item');
     }
   };
   
@@ -673,7 +688,7 @@ const PPES = () => {
       safetyStandard: ppe.safetyStandard || '',
       expiryDate: ppe.expiryDate ? new Date(ppe.expiryDate).toISOString().split('T')[0] : '',
       minStockLevel: ppe.minStockLevel || '0',
-      entryDate: ppe.entryDate ? new Date(ppe.entryDate).toISOString().split('T')[0] : ''
+      entryDate: ppe.entryDate ? new Date(ppe.entryDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
     });
     toggleUpdateModal();
   };
@@ -802,16 +817,6 @@ const PPES = () => {
             </div>
           </div>
         </div>
-
-        {/* Debug Info */}
-        {import.meta.env.DEV && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
-            <p><strong>Debug Info:</strong></p>
-            <p>API Base URL: {API_BASE_URL}</p>
-            <p>Token Present: {getAuthToken() ? 'Yes' : 'No'}</p>
-            <p>PPE Items Count: {ppeItems.length}</p>
-          </div>
-        )}
 
         {/* Stats Cards */}
         {stats && (
@@ -1206,18 +1211,18 @@ const PPES = () => {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                  <input 
-                    type="text"
-                    placeholder="Storage Location"
-                    name="location" 
-                    value={newPpe.location} 
-                    onChange={handleInputChange} 
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
-                  />
+                    <input 
+                      type="text"
+                      placeholder="Storage Location"
+                      name="location" 
+                      value={newPpe.location} 
+                      onChange={handleInputChange} 
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
+                    />
                 </div>
                 
                 <div className="text-sm text-gray-500">
-                  * Required fields. Code will be generated automatically by the backend.
+                  * Required fields. Code will be generated automatically.
                 </div>
               </form>
               {inputError && (
@@ -1429,18 +1434,6 @@ const PPES = () => {
                     name="location" 
                     value={updatedPpe.location} 
                     onChange={handleInputChange} 
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Your Email for Audit Trail *</label>
-                  <input
-                    type="email"
-                    placeholder="Enter your email for audit trail"
-                    value={userEmail}
-                    onChange={(e) => setUserEmail(e.target.value)}
-                    required
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
                   />
                 </div>

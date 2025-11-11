@@ -25,8 +25,6 @@ const InventoryDashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [welcomeMessage, setWelcomeMessage] = useState('Welcome');
 
-   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
-
   useEffect(() => {
     const token = localStorage.getItem('jwtToken');
     if (token) {

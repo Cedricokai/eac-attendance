@@ -50,48 +50,67 @@ const Products = () => {
     entryDate: new Date().toISOString().split('T')[0]
   });
 
-  // Get API base URL
-  const getApiBaseUrl = () => {
-    const hostname = window.location.hostname;
-    if (hostname.startsWith("192.168.") || hostname === "localhost") {
-      return import.meta.env.VITE_API_BASE_URL_LOCAL;
-    } else {
-      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  // Mock data for demonstration
+  const mockProducts = [
+    {
+      id: 1,
+      name: 'Steel Beams',
+      code: 'STL-BM-001',
+      description: 'High-grade steel construction beams',
+      userName: 'ACME Steel',
+      productType: 'Construction',
+      stock: 15,
+      entryDate: '2024-01-15T10:30:00Z',
+      createdDate: '2024-01-15T10:30:00Z'
+    },
+    {
+      id: 2,
+      name: 'Electrical Wiring',
+      code: 'ELEC-WR-002',
+      description: 'Copper electrical wiring 2.5mm',
+      userName: 'ElectroCorp',
+      productType: 'Electrical',
+      stock: 8,
+      entryDate: '2024-01-14T14:20:00Z',
+      createdDate: '2024-01-14T14:20:00Z'
+    },
+    {
+      id: 3,
+      name: 'PVC Pipes',
+      code: 'PVC-PP-003',
+      description: '3-inch PVC plumbing pipes',
+      userName: 'PipeMasters',
+      productType: 'Plumbing',
+      stock: 25,
+      entryDate: '2024-01-13T09:15:00Z',
+      createdDate: '2024-01-13T09:15:00Z'
+    },
+    {
+      id: 4,
+      name: 'Safety Helmets',
+      code: 'SFY-HL-004',
+      description: 'Industrial safety helmets',
+      userName: 'SafeWork',
+      productType: 'Safety',
+      stock: 3,
+      entryDate: '2024-01-12T16:45:00Z',
+      createdDate: '2024-01-12T16:45:00Z'
     }
-  };
+  ];
 
-  // Get auth token
-  const getAuthToken = () => {
-    return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
-  };
-
+  // Mock fetch products
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const token = getAuthToken();
-      const API_BASE_URL = getApiBaseUrl();
-
-      if (!token) {
-        setError('Authentication token not found. Please login again.');
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/products`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Failed to fetch products: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      setProducts(data);
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Use mock data
+      setProducts(mockProducts);
+      setError(null);
     } catch (err) {
-      setError(err.message);
+      setError('Failed to load products');
     } finally {
       setLoading(false);
     }
@@ -286,42 +305,20 @@ const Products = () => {
     }
 
     try {
-      const token = getAuthToken();
-      const API_BASE_URL = getApiBaseUrl();
-      
-      if (!token) {
-        throw new Error('Authentication token not found. Please login again.');
-      }
-
+      // Simulate import process
       let successCount = 0;
       let errorCount = 0;
 
-      // Import products one by one
-      for (const product of productsToImport) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/products`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify(product),
-          });
+      // Add imported products to existing products
+      const newProducts = productsToImport.map((product, index) => ({
+        ...product,
+        id: Date.now() + index, // Generate unique ID
+        code: product.code || `IMP-${Date.now() + index}`,
+        createdDate: new Date().toISOString()
+      }));
 
-          if (response.ok) {
-            successCount++;
-          } else {
-            errorCount++;
-            console.error(`Failed to import product: ${product.name}`);
-          }
-        } catch (err) {
-          errorCount++;
-          console.error(`Error importing product: ${product.name}`, err);
-        }
-      }
-
-      // Refresh products list
-      await fetchProducts();
+      setProducts(prev => [...prev, ...newProducts]);
+      successCount = newProducts.length;
 
       setSuccessMessage(`Import completed: ${successCount} successful, ${errorCount} failed`);
       setTimeout(() => setSuccessMessage(''), 5000);
@@ -446,39 +443,21 @@ const Products = () => {
     }
   
     try {
-      const token = getAuthToken();
-      const API_BASE_URL = getApiBaseUrl();
-      
-      if (!token) {
-        throw new Error('Authentication token not found. Please login again.');
-      }
-  
-      // Prepare product data matching your Product entity
-      const productData = {
+      // Create new product with mock data
+      const newProductData = {
+        id: Date.now(), // Generate unique ID
         name: newProduct.name,
         description: newProduct.description,
         stock: parseInt(newProduct.stock),
         userName: newProduct.userName,
         productType: newProduct.productType,
-        entryDate: newProduct.entryDate ? new Date(newProduct.entryDate).toISOString() : new Date().toISOString()
+        code: `PROD-${Date.now()}`,
+        entryDate: new Date().toISOString(),
+        createdDate: new Date().toISOString()
       };
-  
-      const response = await fetch(`${API_BASE_URL}/api/products`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(productData),
-      });
-  
-      if (!response.ok) {
-        const errorResponse = await response.text();
-        throw new Error(`Failed to create product: ${errorResponse}`);
-      }
-  
-      const addedProduct = await response.json();
-      setProducts(prev => [...prev, addedProduct]);
+
+      // Add to products list
+      setProducts(prev => [...prev, newProductData]);
       
       // Reset form
       setNewProduct({
@@ -508,17 +487,10 @@ const Products = () => {
       return;
     }
   
-    const token = getAuthToken();
-    const API_BASE_URL = getApiBaseUrl();
-
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
-    }
-  
     try {
-      // Prepare update data matching your Product entity
-      const updateData = {
+      // Update product in the list
+      const updatedProductData = {
+        ...currentProduct,
         name: updatedProduct.name,
         description: updatedProduct.description,
         stock: parseInt(updatedProduct.stock),
@@ -526,24 +498,10 @@ const Products = () => {
         productType: updatedProduct.productType
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/products/${currentProduct.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(updateData),
-      });
-      
-      if (!response.ok) {
-        const errorResponse = await response.text();
-        throw new Error(`Failed to update product: ${errorResponse}`);
-      }
-  
-      const updatedProductData = await response.json();
       setProducts(prev =>
-        prev.map(product => (product.id === updatedProductData.id ? updatedProductData : product))
+        prev.map(product => (product.id === currentProduct.id ? updatedProductData : product))
       );
+      
       setSuccessMessage('Product updated successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
       toggleUpdateModal();
@@ -553,31 +511,11 @@ const Products = () => {
   };
   
   const deleteProduct = async (id) => {
-    const token = getAuthToken();
-    const API_BASE_URL = getApiBaseUrl();
-    
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
-    }
-
     const confirmed = window.confirm("Are you sure you want to delete this product?");
     if (!confirmed) return;
   
     try {
-      const response = await fetch(`${API_BASE_URL}/api/products/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        const errorMessage = await response.text();
-        throw new Error(errorMessage || 'Failed to delete product');
-      }
-  
+      // Remove product from list
       setProducts(prevProducts => prevProducts.filter(product => product.id !== id));
       setSuccessMessage('Product deleted successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);

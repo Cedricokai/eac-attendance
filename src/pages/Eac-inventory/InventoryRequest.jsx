@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 const InventoryRequest = () => {
   const [products, setProducts] = useState([]);
@@ -15,6 +15,20 @@ const InventoryRequest = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Mock products data
+  const mockProducts = [
+    { id: 1, name: "Safety Gloves", code: "SG-001", stock: 150, category: "Safety" },
+    { id: 2, name: "Hard Hat", code: "HH-002", stock: 75, category: "Safety" },
+    { id: 3, name: "Steel-toe Boots", code: "STB-003", stock: 40, category: "Footwear" },
+    { id: 4, name: "Safety Glasses", code: "SGL-004", stock: 200, category: "Eye Protection" },
+    { id: 5, name: "Ear Plugs", code: "EP-005", stock: 500, category: "Hearing Protection" },
+    { id: 6, name: "Work Gloves", code: "WG-006", stock: 120, category: "Hand Protection" },
+    { id: 7, name: "High-Vis Vest", code: "HVV-007", stock: 80, category: "Visibility" },
+    { id: 8, name: "Dust Mask", code: "DM-008", stock: 300, category: "Respiratory" },
+    { id: 9, name: "First Aid Kit", code: "FAK-009", stock: 25, category: "Medical" },
+    { id: 10, name: "Tool Belt", code: "TB-010", stock: 35, category: "Tools" }
+  ];
+
   // PPE Items list
   const ppeItemsList = [
     { id: "safety-helmet", name: "Safety Helmet", category: "Head Protection" },
@@ -29,35 +43,19 @@ const InventoryRequest = () => {
     { id: "coverall", name: "Coverall", category: "Body Protection" },
     { id: "welding-helmet", name: "Welding Helmet", category: "Welding Protection" },
     { id: "chemical-gloves", name: "Chemical Resistant Gloves", category: "Chemical Protection" },
-    { id: "miners belt", name: "Underground Miners belt", category: "fall Protection"}
+    { id: "miners-belt", name: "Underground Miners Belt", category: "Fall Protection" }
   ];
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
-
+  // Mock data initialization
   useEffect(() => {
     const fetchProducts = async () => {
-      const token = localStorage.getItem('jwtToken');
       try {
-        const response = await fetch(`${API_BASE_URL}/api/products`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          }
-        });
-    
-        if (!response.ok) {
-          if (response.status === 403) {
-            throw new Error("Access denied: You don't have permission to view products");
-          }
-          throw new Error(`Network response was not ok: ${response.status}`);
-        }
-    
-        const data = await response.json();
-        setProducts(data);
-        setPpeItems(ppeItemsList); // Initialize PPE items
+        // Simulate API delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        setProducts(mockProducts);
+        setPpeItems(ppeItemsList);
       } catch (err) {
-        setError(err.message);
+        setError("Failed to load products data");
       } finally {
         setLoading(false);
       }
@@ -68,7 +66,7 @@ const InventoryRequest = () => {
 
   // Auto-fill user info on component mount
   useEffect(() => {
-    const username = localStorage.getItem("username") || "";
+    const username = "Demo User"; // Mock username
     setContactPerson(username);
   }, []);
 
@@ -90,7 +88,7 @@ const InventoryRequest = () => {
     setSelectedPpes(prev => prev.filter(id => id !== ppeId));
   };
 
-const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     // Enhanced validation
@@ -119,70 +117,33 @@ const handleSubmit = async (e) => {
         return;
     }
 
-    const token = localStorage.getItem("jwtToken");
-    const username = localStorage.getItem("username") || "Employee";
-
-    // For now, only handle inventory requests (PPE needs separate implementation)
-    if (requestType === "ppe") {
-        setMessage("❌ PPE requests are not yet implemented. Please use inventory requests for now.");
-        return;
-    }
-
-    // Create move request for inventory items
-    const moveRequest = {
-        productIds: [parseInt(selectedProduct)],
-        quantities: [parseInt(quantity)],
-        requestedBy: username,
-        location: "Main Store",
-        department: "General",
-        projectName: "General Request",
-        notes: additionalNotes || `Request for ${quantity} units`,
-        ppe: "No"
-    };
+    const username = "Demo User"; // Mock username
 
     try {
         setMessage("⏳ Submitting request...");
         
-        // Try multiple endpoints
-        const endpoints = [
-            `${API_BASE_URL}/api/products/requests`,
-            `${API_BASE_URL}/api/requests`
-        ];
-
-        let response = null;
-
-        for (const endpoint of endpoints) {
-            try {
-                console.log('Trying submit endpoint:', endpoint);
-                response = await fetch(endpoint, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify(moveRequest),
-                });
-
-                if (response.ok) {
-                    console.log('Success with submit endpoint:', endpoint);
-                    break;
-                }
-            } catch (err) {
-                console.log('Failed with submit endpoint:', err.message);
-            }
+        // Simulate API call delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Mock successful submission
+        if (requestType === "inventory") {
+          const selectedProductData = products.find(p => p.id === parseInt(selectedProduct));
+          setMessage(`✅ Inventory request submitted successfully! 
+            Product: ${selectedProductData?.name}
+            Quantity: ${quantity}
+            Requested by: ${username}
+            Urgency: ${urgency}`);
+        } else {
+          const selectedPpeNames = selectedPpes.map(ppeId => 
+            ppeItems.find(p => p.id === ppeId)?.name
+          ).join(", ");
+          setMessage(`✅ PPE request submitted successfully!
+            Items: ${selectedPpeNames}
+            Quantity: ${quantity}
+            Requested by: ${username}
+            Urgency: ${urgency}`);
         }
 
-        if (!response || !response.ok) {
-            if (response?.status === 403) {
-                setMessage("❌ Access denied: You don't have permission to create requests");
-            } else {
-                const errorText = await response?.text() || 'Unknown error';
-                setMessage(`❌ Failed to send request: ${errorText}`);
-            }
-            return;
-        }
-
-        setMessage("✅ Request sent to store successfully!");
         // Reset all form fields
         setSelectedProduct("");
         setSelectedPpes([]);
@@ -190,11 +151,12 @@ const handleSubmit = async (e) => {
         setUrgency("normal");
         setAdditionalNotes("");
         setContactPhone("");
+        
     } catch (error) {
-        console.error("Error sending inventory request:", error);
-        setMessage("❌ Error connecting to server.");
+        console.error("Error sending request:", error);
+        setMessage("❌ Error submitting request. Please try again.");
     }
-};
+  };
 
   // Reset item selection when request type changes
   useEffect(() => {
@@ -207,6 +169,7 @@ const handleSubmit = async (e) => {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <span className="ml-3 text-gray-600">Loading products...</span>
       </div>
     );
   }
@@ -216,7 +179,7 @@ const handleSubmit = async (e) => {
       <div className="flex justify-center items-center min-h-screen">
         <div className="max-w-md p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <h2 className="text-lg font-semibold">Error: {error}</h2>
-          <p className="mt-2 text-sm">Please check your permissions or contact administrator.</p>
+          <p className="mt-2 text-sm">Please check your connection or contact administrator.</p>
         </div>
       </div>
     );
@@ -477,7 +440,7 @@ const handleSubmit = async (e) => {
           </button>
 
           {message && (
-            <div className={`mt-4 p-4 rounded-lg text-center ${
+            <div className={`mt-4 p-4 rounded-lg text-center whitespace-pre-line ${
               message.includes("✅") 
                 ? "bg-green-100 text-green-700 border border-green-200" 
                 : message.includes("⏳")

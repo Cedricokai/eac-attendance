@@ -38,46 +38,72 @@ const Received = () => {
     const locations = ['AHAFO_NORTH', 'NPI', 'LAYDOWN', 'MKV', 'SUG', 'PROCESS PLANT', 'AROPLANT', 'PLANT SITE'];
     const navigate = useNavigate();
 
-    const getApiBaseUrl = () => {
-        const hostname = window.location.hostname;
-        if (hostname.startsWith("192.168.") || hostname === "localhost") {
-            return import.meta.env.VITE_API_BASE_URL_LOCAL;
-        } else {
-            return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    // Mock data for demonstration
+    const mockProducts = [
+        {
+            id: 1,
+            name: 'Steel Beams',
+            code: 'STL-BM-001',
+            description: 'High-grade steel construction beams',
+            userName: 'ACME Steel',
+            productType: 'Construction',
+            stock: 15,
+            entryDate: '2024-01-15T10:30:00Z'
+        },
+        {
+            id: 2,
+            name: 'Electrical Wiring',
+            code: 'ELEC-WR-002',
+            description: 'Copper electrical wiring 2.5mm',
+            userName: 'ElectroCorp',
+            productType: 'Electrical',
+            stock: 8,
+            entryDate: '2024-01-14T14:20:00Z'
+        },
+        {
+            id: 3,
+            name: 'PVC Pipes',
+            code: 'PVC-PP-003',
+            description: '3-inch PVC plumbing pipes',
+            userName: 'PipeMasters',
+            productType: 'Plumbing',
+            stock: 25,
+            entryDate: '2024-01-13T09:15:00Z'
+        },
+        {
+            id: 4,
+            name: 'Safety Helmets',
+            code: 'SFY-HL-004',
+            description: 'Industrial safety helmets',
+            userName: 'SafeWork',
+            productType: 'Safety',
+            stock: 3,
+            entryDate: '2024-01-12T16:45:00Z'
+        },
+        {
+            id: 5,
+            name: 'Concrete Mix',
+            code: 'CONC-MX-005',
+            description: 'Ready-mix concrete 25MPa',
+            userName: 'BuildRight',
+            productType: 'Construction',
+            stock: 50,
+            entryDate: '2024-01-11T08:00:00Z'
         }
-    };
+    ];
 
-    // Get auth token
-    const getAuthToken = () => {
-        return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
-    };
-
-    // Fetch Products
+    // Mock fetch products
     const fetchProducts = async () => {
         try {
             setLoading(true);
-            const token = getAuthToken();
-            const API_BASE_URL = getApiBaseUrl();
-
-            if (!token) {
-                setError('Authentication token not found. Please login again.');
-                return;
-            }
-
-            const productsResponse = await fetch(`${API_BASE_URL}/api/products`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!productsResponse.ok) {
-                throw new Error(`Failed to fetch products: ${productsResponse.status}`);
-            }
-
-            const productsData = await productsResponse.json();
-            setProducts(productsData);
-            setFilteredProducts(productsData);
+            
+            // Simulate API call delay
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Use mock data
+            setProducts(mockProducts);
+            setFilteredProducts(mockProducts);
+            setError(null);
 
         } catch (err) {
             console.error('Error fetching data:', err);
@@ -208,13 +234,6 @@ const Received = () => {
                 return;
             }
 
-            const token = getAuthToken();
-            if (!token) {
-                setMoveError("Authentication token not found. Please log in again.");
-                setMoveLoading(false);
-                return;
-            }
-
             // ✅ Step 1: Validate quantities
             for (let itemId of selectedItems) {
                 const product = products.find(p => p.id === itemId);
@@ -257,58 +276,9 @@ const Received = () => {
                 };
             });
 
-            console.log('Sending outgoing items:', outgoingItems);
+            console.log('Mock transfer - Outgoing items:', outgoingItems);
 
-            const API_BASE_URL = getApiBaseUrl();
-
-            // ✅ Step 3: Send outgoing records to backend
-            const outgoingResponse = await fetch(`${API_BASE_URL}/api/outgoing`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(outgoingItems),
-            });
-
-            console.log('Outgoing response status:', outgoingResponse.status);
-
-            if (!outgoingResponse.ok) {
-                const errorText = await outgoingResponse.text();
-                console.error('Outgoing server error:', errorText);
-                throw new Error(`Failed to save outgoing records: ${outgoingResponse.status}`);
-            }
-
-            // ✅ Step 4: Update each product's stock individually in backend
-            for (const itemId of selectedItems) {
-                const product = products.find(p => p.id === itemId);
-                const quantityMoved = individualQuantities[itemId] || 1;
-                const newStock = product.stock - quantityMoved;
-
-                // Update product stock via individual PUT endpoint
-                const updateResponse = await fetch(`${API_BASE_URL}/api/products/${product.id}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ...product,
-                        stock: newStock
-                    }),
-                });
-
-                if (!updateResponse.ok) {
-                    const errorText = await updateResponse.text();
-                    console.error(`Failed to update product ${product.id}:`, errorText);
-                    throw new Error(`Failed to update stock for ${product.name}`);
-                }
-            }
-
-            const result = await outgoingResponse.text();
-            console.log('Move successful:', result);
-
-            // ✅ Step 5: Update frontend state with new stock values
+            // ✅ Step 3: Update frontend state with new stock values
             const updatedProducts = products.map(product => {
                 if (selectedItems.includes(product.id)) {
                     const quantityMoved = individualQuantities[product.id] || 1;
@@ -332,17 +302,7 @@ const Received = () => {
 
         } catch (error) {
             console.error("Move to outgoing failed:", error);
-
-            let userFriendlyError = error.message;
-            if (error.message.includes('Failed to fetch')) {
-                userFriendlyError = 'Cannot connect to server. Please check if backend is running.';
-            } else if (error.message.includes('404')) {
-                userFriendlyError = 'Server endpoint not found. Please check the API URL.';
-            } else if (error.message.includes('401') || error.message.includes('403')) {
-                userFriendlyError = 'Authentication failed. Please log in again.';
-            }
-
-            setMoveError(userFriendlyError);
+            setMoveError('Transfer failed. Please try again.');
         } finally {
             setMoveLoading(false);
         }

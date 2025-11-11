@@ -24,46 +24,74 @@ const Outgoing = () => {
 
     const locations = ['AHAFO_NORTH', 'NPI', 'LAYDOWN', 'MKV', 'SUG', 'PROCESS PLANT', 'AROPLANT', 'PLANT SITE'];
 
-    const getApiBaseUrl = () => {
-        const hostname = window.location.hostname;
-        if (hostname.startsWith("192.168.") || hostname === "localhost") {
-            return import.meta.env.VITE_API_BASE_URL_LOCAL;
-        } else {
-            return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    // Mock data for demonstration
+    const mockOutgoingRecords = [
+        {
+            id: 1,
+            name: 'Steel Beams',
+            code: 'STL-BM-001',
+            description: 'High-grade steel construction beams',
+            productId: 'P1001',
+            userName: 'ACME Steel',
+            stock: 15,
+            quantityMoved: 15,
+            location: 'AHAFO_NORTH',
+            requestedBy: 'John Smith',
+            movementDate: '2024-01-15T10:30:00Z'
+        },
+        {
+            id: 2,
+            name: 'Electrical Wiring',
+            code: 'ELEC-WR-002',
+            description: 'Copper electrical wiring 2.5mm',
+            productId: 'P1002',
+            userName: 'ElectroCorp',
+            stock: 8,
+            quantityMoved: 8,
+            location: 'NPI',
+            requestedBy: 'Sarah Johnson',
+            movementDate: '2024-01-14T14:20:00Z'
+        },
+        {
+            id: 3,
+            name: 'PVC Pipes',
+            code: 'PVC-PP-003',
+            description: '3-inch PVC plumbing pipes',
+            productId: 'P1003',
+            userName: 'PipeMasters',
+            stock: 25,
+            quantityMoved: 25,
+            location: 'LAYDOWN',
+            requestedBy: 'Mike Wilson',
+            movementDate: '2024-01-13T09:15:00Z'
+        },
+        {
+            id: 4,
+            name: 'Safety Helmets',
+            code: 'SFY-HL-004',
+            description: 'Industrial safety helmets',
+            productId: 'P1004',
+            userName: 'SafeWork',
+            stock: 3,
+            quantityMoved: 3,
+            location: 'PROCESS PLANT',
+            requestedBy: 'Emma Davis',
+            movementDate: '2024-01-12T16:45:00Z'
         }
-    };
+    ];
 
-    // Get auth token
-    const getAuthToken = () => {
-        return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
-    };
-
-    // Fetch Outgoing Records
+    // Fetch Outgoing Records - Mock implementation
     const fetchOutgoingRecords = async () => {
         try {
             setLoading(true);
-            const token = getAuthToken();
-            const API_BASE_URL = getApiBaseUrl();
-
-            if (!token) {
-                setError('Authentication token not found. Please login again.');
-                return;
-            }
-
-            const response = await fetch(`${API_BASE_URL}/api/outgoing`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch outgoing records: ${response.status}`);
-            }
-
-            const data = await response.json();
-            setOutgoingRecords(data);
-            setFilteredRecords(data);
+            
+            // Simulate API call delay
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Use mock data
+            setOutgoingRecords(mockOutgoingRecords);
+            setFilteredRecords(mockOutgoingRecords);
+            setError(null);
 
         } catch (err) {
             console.error('Error fetching outgoing records:', err);
@@ -111,12 +139,6 @@ const Outgoing = () => {
         if (!dateString) return 'N/A';
         const date = new Date(dateString);
         return date.toLocaleString();
-    };
-
-    const formatDateForInput = (dateString) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toISOString().split('T')[0];
     };
 
     const getStatusColor = (quantityMoved) => {
