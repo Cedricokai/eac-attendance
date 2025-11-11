@@ -1,5 +1,19 @@
+import { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import MainSidebar from '../mainSidebar';
 
-tate([]);
+function Payroll() {
+  const location = useLocation();
+  const [payrollPeriods, setPayrollPeriods] = useState([]);
+  const [selectedPeriod, setSelectedPeriod] = useState(null);
+  const [payrollRecords, setPayrollRecords] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [newPeriod, setNewPeriod] = useState({ name: '', startDate: '', endDate: '' });
   const [allowances, setAllowances] = useState([
     { type: 'housingAllowance', amount: '', description: '', enabled: false },
     { type: 'tntAllowance', amount: '', description: '', enabled: false },
@@ -290,14 +304,13 @@ const getTotalAllowance = (record) => {
               </svg>
               Add Allowances
             </button>
-
-              <Link to="/payslip" className="w-[180px]">
-                        <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                          location.pathname === "/payslip" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-                        }`}>
-                          <span className="font-medium">Payslip Generator</span>
-                        </div>
-                      </Link>
+            <Link to="/payslip" className="w-[180px]">
+              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
+                location.pathname === "/payslip" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
+              }`}>
+                <span className="font-medium">Payslip Generator</span>
+              </div>
+            </Link>
           </section>
 
           {/* Status Messages */}
@@ -451,11 +464,11 @@ const getTotalAllowance = (record) => {
                             <td className="px-4 py-3">{r.employee.firstName} {r.employee.lastName}</td>
                             <td className="px-4 py-3">{formatCurrency(r.basicSalary)}</td>
                             <td className="px-4 py-3">{formatCurrency(r.overtimePay)}</td>
-                           <td>{formatCurrency(r.rentAllowance || 0)}</td>
-<td>{formatCurrency(r.transportAllowance || 0)}</td>
-<td>{formatCurrency(r.clothingAllowance || 0)}</td>
-<td>{formatCurrency(r.otherAllowance || 0)}</td>
-      <td className="px-4 py-3 font-medium text-blue-600">{formatCurrency(getTotalAllowance(r))}</td>
+                            <td className="px-4 py-3">{formatCurrency(r.rentAllowance || 0)}</td>
+                            <td className="px-4 py-3">{formatCurrency(r.transportAllowance || 0)}</td>
+                            <td className="px-4 py-3">{formatCurrency(r.clothingAllowance || 0)}</td>
+                            <td className="px-4 py-3">{formatCurrency(r.otherAllowance || 0)}</td>
+                            <td className="px-4 py-3 font-medium text-blue-600">{formatCurrency(getTotalAllowance(r))}</td>
                             <td className="px-4 py-3">{formatCurrency(r.grossSalary)}</td>
                             <td className="px-4 py-3">{formatCurrency(r.ssnitEmployee)}</td>
                             <td className="px-4 py-3 font-medium text-orange-300">

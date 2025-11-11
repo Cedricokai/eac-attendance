@@ -53,6 +53,7 @@ const Products = () => {
     name: '',
     description: '',
     stock: '',
+    unitCost: '',
     userName: '',
     productType: '',
   });
@@ -61,6 +62,7 @@ const Products = () => {
     name: '',
     description: '',
     stock: '',
+    unitCost: '',
     userName: '',
     productType: '',
     location: ''
@@ -128,7 +130,7 @@ const Products = () => {
   const handleAddProduct = async (e) => {
     e.preventDefault();
   
-    if (!newProduct.name || !newProduct.description || !newProduct.stock || !newProduct.userName || !newProduct.productType) {
+    if (!newProduct.name || !newProduct.description || !newProduct.stock || !newProduct.unitCost || !newProduct.userName || !newProduct.productType) {
       setInputError('Please fill out all fields.');
       return;
     }
@@ -151,7 +153,7 @@ const Products = () => {
   
       const addedProduct = await response.json();
       setProducts(prev => [...prev, addedProduct]);
-      setNewProduct({ name: '', description: '', stock: '', userName: '', productType: ''});
+      setNewProduct({ name: '', description: '', stock: '', unitCost: '', userName: '', productType: ''});
       setSuccessMessage('Product added successfully!');
       setInputError('');
       setTimeout(() => setSuccessMessage(''), 3000);
@@ -164,7 +166,7 @@ const Products = () => {
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
   
-    if (!updatedProduct.name || !updatedProduct.description || !updatedProduct.stock) {
+    if (!updatedProduct.name || !updatedProduct.description || !updatedProduct.stock || !updatedProduct.unitCost) {
       setInputError('Please fill out all fields.');
       return;
     }
@@ -232,6 +234,7 @@ const Products = () => {
       code: product.code,
       description: product.description,
       stock: product.stock,
+      unitCost: product.unitCost,
       userName: product.userName,
       productType: product.productType,
     });
@@ -415,7 +418,7 @@ const Products = () => {
                       Select
                     </Typography>
                   </th>
-                  {["Name", "Code", "Description", "Brand", "Type", "Stock", "Entry Date", "Actions"].map((head) => (
+                  {["Name", "Code", "Description", "Brand", "Type", "Stock", "Unit Cost", "Total Value", "Entry Date", "Actions"].map((head) => (
                     <th key={head} className="p-4 border-b border-blue-gray-100">
                       <Typography variant="small" className="font-semibold">
                         {head}
@@ -473,6 +476,16 @@ const Products = () => {
                         color={product.stock > 10 ? 'green' : product.stock > 0 ? 'amber' : 'red'}
                         className="rounded-full"
                       />
+                    </td>
+                    <td className="p-4 border-b border-blue-gray-50">
+                      <Typography variant="small" className="font-medium">
+                        ${parseFloat(product.unitCost || 0).toFixed(2)}
+                      </Typography>
+                    </td>
+                    <td className="p-4 border-b border-blue-gray-50">
+                      <Typography variant="small" className="font-semibold text-blue-600">
+                        ${(parseFloat(product.unitCost || 0) * parseFloat(product.stock || 0)).toFixed(2)}
+                      </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small">
@@ -553,6 +566,17 @@ const Products = () => {
                 onChange={handleInputChange} 
                 required
                 className="bg-gray-50"
+              />
+              <Input 
+                type="number"
+                step="0.01"
+                label="Unit Cost ($)" 
+                name="unitCost" 
+                value={newProduct.unitCost} 
+                onChange={handleInputChange} 
+                required
+                className="bg-gray-50"
+                placeholder="0.00"
               />
               <Input 
                 label="Product Type" 
@@ -642,6 +666,17 @@ const Products = () => {
                 onChange={handleInputChange} 
                 required
                 className="bg-gray-50"
+              />
+              <Input 
+                type="number"
+                step="0.01"
+                label="Unit Cost ($)" 
+                name="unitCost" 
+                value={updatedProduct.unitCost} 
+                onChange={handleInputChange} 
+                required
+                className="bg-gray-50"
+                placeholder="0.00"
               />
               <Input 
                 label="Product Type" 

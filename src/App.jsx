@@ -23,7 +23,7 @@ import Received from './pages/Eac-inventory/received';
 import Outgoing from './pages/Eac-inventory/outgoing';
 import SettingsPage from "./pages/Eac-attendance/attendance/settingspage";
 import Search from "./compnents/search";
-import DailyAttendanceReport from "./pages/Eac-attendance/attendance/dailyAttendanceReport"; // ✅ import added
+import DailyAttendanceReport from "./pages/Eac-attendance/attendance/dailyAttendanceReport";
 import LeaveRequestForm from "./pages/Eac-attendance/attendance/leaveRequestForm";
 import SupervisorDashboard from "./pages/Eac-attendance/attendance/supervisorDashboard";
 import PlannerDashboard from "./pages/Eac-attendance/attendance/plannerDashboard";
@@ -31,6 +31,13 @@ import HRDashboard from "./pages/Eac-attendance/attendance/HRDashboard";
 import LeaveStatus from "./pages/Eac-attendance/attendance/leave-status";
 import EmployeeDashboard from "./pages/Eac-attendance/attendance/employeeDashboard";
 import Payslip from "./pages/Eac-attendance/attendance/payslip";
+
+// ✅ NEW PRODUCT MANAGEMENT IMPORTS (Steps 4-10)
+import ProductRequestForm from './pages/Eac-inventory/ProductRequestForm';
+import ProcurementManagerReview from './pages/Eac-inventory/ProcurementManagerReview';
+import StoreOfficerApproval from './pages/Eac-inventory/StoreOfficerApproval';
+import CostCenterManagement from './pages/Eac-inventory/CostCenterManagement';
+import ReportsDashboard from './pages/Eac-inventory/ReportsDashboard';
 
 function App() {
   return (
@@ -65,8 +72,25 @@ function App() {
                <Route path="/HRDashboard" element={<HRDashboard />} />
                    <Route path="/leave-status" element={<LeaveStatus />} />
                                      <Route path="/employeeDashboard" element={<EmployeeDashboard />} />
-        <Route path="/dailyAttendanceReport" element={<DailyAttendanceReport />} /> {/* ✅ fixed */}
+        <Route path="/dailyAttendanceReport" element={<DailyAttendanceReport />} />
         <Route path="/payslip" element={<Payslip />} />
+
+        {/* ✅ NEW PRODUCT MANAGEMENT ROUTES (Steps 4-10) */}
+        
+        {/* Employee Product Request */}
+        <Route path="/product-request-form" element={<ProductRequestForm />} />
+        
+        {/* Procurement Manager Review */}
+        <Route path="/procurement-manager-review" element={<ProcurementManagerReview />} />
+        
+        {/* Store Officer Approval & Issuance */}
+        <Route path="/store-officer-approval" element={<StoreOfficerApproval />} />
+        
+        {/* Cost Center Management */}
+        <Route path="/cost-center-management" element={<CostCenterManagement />} />
+        
+        {/* Reports Dashboard */}
+        <Route path="/inventory-reports" element={<ReportsDashboard />} />
       </Routes>
     </SettingsProvider>
   );
