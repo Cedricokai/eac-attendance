@@ -47,6 +47,8 @@ function Timesheet() {
     endDate: ""
   });
 
+   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   // Fetch data
   useEffect(() => {
     const fetchData = async () => {
@@ -58,10 +60,10 @@ function Timesheet() {
         };
 
         const [timesheetsRes, employeesRes, attendancesRes, overviewsRes] = await Promise.all([
-          fetch('http://localhost:8080/api/timesheets?includeEmployee=true', { headers }),
-          fetch('http://localhost:8080/api/employee', { headers }),
-          fetch('http://localhost:8080/api/attendance', { headers }),
-          fetch('http://localhost:8080/api/overview', { headers })
+          fetch(`${API_BASE_URL}/api/timesheets?includeEmployee=true`, { headers }),
+          fetch(`${API_BASE_URL}/api/employee`, { headers }),
+          fetch(`${API_BASE_URL}/api/attendance`, { headers }),
+          fetch(`${API_BASE_URL}/api/overview`, { headers })
         ]);
 
         if (!timesheetsRes.ok) throw new Error(`Timesheets fetch failed: ${timesheetsRes.status}`);
@@ -186,7 +188,7 @@ function Timesheet() {
   const handleStatusChange = async (id, status) => {
     try {
       const token = localStorage.getItem("jwtToken");
-      const response = await fetch(`http://localhost:8080/api/timesheets/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/timesheets/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -234,7 +236,7 @@ function Timesheet() {
       }
 
       const response = await fetch(
-        `http://localhost:8080/api/timesheets/generate-from-overview?startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}`,
+        `API_BASE_URL/api/timesheets/generate-from-overview?startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}`,
         {
           method: 'POST',
           headers: {
@@ -253,12 +255,12 @@ function Timesheet() {
 
       // Refresh data
       const [timesheetsRes, overviewRes] = await Promise.all([
-        fetch('http://localhost:8080/api/timesheets', {
+        fetch(`${API_BASE_URL}/api/timesheets`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         }),
-        fetch('http://localhost:8080/api/overview', {
+        fetch(`${API_BASE_URL}/api/overview`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }

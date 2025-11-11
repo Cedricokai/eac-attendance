@@ -1,17 +1,15 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom'; // ← Change this
 import App from './App';
 import './index.css';
 
 import { ThemeProvider } from "@material-tailwind/react";
 
 createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
-      <ThemeProvider>
-    <App />
+  <HashRouter>  {/* ← Change from BrowserRouter to HashRouter */}
+    <ThemeProvider>
+      <App />
     </ThemeProvider>
-  </BrowserRouter>
-
-  
+  </HashRouter>
 );

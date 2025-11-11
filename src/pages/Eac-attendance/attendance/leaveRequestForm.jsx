@@ -1,8 +1,20 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { 
+  CalendarIcon, 
+  UserIcon, 
+  DocumentTextIcon,
+  PaperClipIcon,
+  ArrowUpTrayIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon
+} from "@heroicons/react/24/outline";
 
 const LeaveRequestForm = () => {
   const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentEmployee, setCurrentEmployee] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [formData, setFormData] = useState({
     employeeId: "",
@@ -17,10 +29,12 @@ const LeaveRequestForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [isError, setIsError] = useState(false);
+  const [userRole, setUserRole] = useState("");
+  const [dateWarnings, setDateWarnings] = useState([]);
 
   const leaveTypes = [
     "Annual Leave",
-    "Sick Leave",
+    "Sick Leave", 
     "Casual Leave",
     "Maternity Leave",
     "Paternity Leave",
@@ -31,27 +45,279 @@ const LeaveRequestForm = () => {
     "Sabbatical Leave",
   ];
 
+   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
+  // Function to check if a date is a weekend
+  const isWeekend = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    return day === 0 || day === 6; // 0 = Sunday, 6 = Saturday
+  };
+
+  // Function to get day name
+  const getDayName = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { weekday: 'long' });
+  };
+
+  // Function to get the next weekday from a given date
+  const getNextWeekday = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    
+    if (day === 0) { // Sunday
+      date.setDate(date.getDate() + 1); // Move to Monday
+    } else if (day === 6) { // Saturday
+      date.setDate(date.getDate() + 2); // Move to Monday
+    }
+    
+    return date.toISOString().split('T')[0];
+  };
+
+  // Function to calculate business days between two dates (excludes weekends)
+  const calculateBusinessDays = (startDate, endDate) => {
+    if (!startDate || !endDate) return 0;
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    let businessDays = 0;
+    const currentDate = new Date(start);
+    
+    while (currentDate <= end) {
+      const dayOfWeek = currentDate.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        businessDays++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return businessDays;
+  };
+
+  // Function to validate dates and set warnings
+  const validateDates = (startDate, endDate) => {
+    const warnings = [];
+    
+    if (startDate && isWeekend(startDate)) {
+      warnings.push({
+        type: 'error',
+        message: `Start date (${getDayName(startDate)}) is a weekend. Please select a weekday.`,
+        suggestedDate: getNextWeekday(startDate)
+      });
+    }
+    
+    if (endDate && isWeekend(endDate)) {
+      warnings.push({
+        type: 'error', 
+        message: `End date (${getDayName(endDate)}) is a weekend. Please select a weekday.`,
+        suggestedDate: getNextWeekday(endDate)
+      });
+    }
+    
+    if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+      warnings.push({
+        type: 'error',
+        message: 'End date must be after start date.'
+      });
+    }
+
+    // Check if dates include weekends in the period
+    if (startDate && endDate && !isWeekend(startDate) && !isWeekend(endDate)) {
+      const totalDays = calculateTotalDays(startDate, endDate);
+      const businessDays = calculateBusinessDays(startDate, endDate);
+      const weekendDays = totalDays - businessDays;
+      
+      if (weekendDays > 0) {
+        warnings.push({
+          type: 'warning',
+          message: `This leave period includes ${weekendDays} weekend day(s). Only ${businessDays} business day(s) will be counted.`
+        });
+      }
+    }
+    
+    setDateWarnings(warnings);
+    return warnings.length === 0;
+  };
+
+  // Function to calculate total calendar days
+  const calculateTotalDays = (startDate, endDate) => {
+    if (!startDate || !endDate) return 0;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    return Math.ceil((end - start) / (1000 * 3600 * 24)) + 1;
+  };
+
+  // Function to disable weekends in date input (client-side prevention)
+  const disableWeekends = (dateString) => {
+    return isWeekend(dateString);
+  };
+
+  // Enhanced function to handle start date change
+  const handleStartDateChange = (e) => {
+    const { value } = e.target;
+    
+    if (value && isWeekend(value)) {
+      setSubmitMessage(`Start date cannot be a weekend. Please select a weekday.`);
+      setIsError(true);
+      
+      // Auto-correct to next weekday
+      const nextWeekday = getNextWeekday(value);
+      const updatedFormData = {
+        ...formData,
+        startDate: nextWeekday
+      };
+
+      // If end date is before new start date, clear end date
+      if (formData.endDate && nextWeekday && new Date(formData.endDate) < new Date(nextWeekday)) {
+        updatedFormData.endDate = '';
+      }
+
+      setFormData(updatedFormData);
+      validateDates(nextWeekday, updatedFormData.endDate);
+      return;
+    }
+
+    const updatedFormData = {
+      ...formData,
+      startDate: value
+    };
+
+    // If end date is before new start date, clear end date
+    if (formData.endDate && value && new Date(formData.endDate) < new Date(value)) {
+      updatedFormData.endDate = '';
+    }
+
+    setFormData(updatedFormData);
+    validateDates(value, updatedFormData.endDate);
+    setIsError(false);
+    setSubmitMessage("");
+  };
+
+  // Enhanced function to handle end date change
+  const handleEndDateChange = (e) => {
+    const { value } = e.target;
+    
+    if (value && isWeekend(value)) {
+      setSubmitMessage(`End date cannot be a weekend. Please select a weekday.`);
+      setIsError(true);
+      
+      // Auto-correct to next weekday
+      const nextWeekday = getNextWeekday(value);
+      setFormData({
+        ...formData,
+        endDate: nextWeekday
+      });
+      validateDates(formData.startDate, nextWeekday);
+      return;
+    }
+
+    // Validate that end date is not before start date
+    if (value && formData.startDate && new Date(value) < new Date(formData.startDate)) {
+      setSubmitMessage('End date cannot be before start date.');
+      setIsError(true);
+      return;
+    }
+
+    setFormData({
+      ...formData,
+      endDate: value
+    });
+    validateDates(formData.startDate, value);
+    setIsError(false);
+    setSubmitMessage("");
+  };
+
+  // Custom date validation for the date inputs
+  const handleDateInput = (e, fieldName) => {
+    const value = e.target.value;
+    if (value && isWeekend(value)) {
+      e.preventDefault();
+      e.target.value = formData[fieldName] || ''; // Reset to previous valid value
+      setSubmitMessage(`${fieldName === 'startDate' ? 'Start' : 'End'} date cannot be a weekend.`);
+      setIsError(true);
+    }
+  };
+
   const getValidToken = () => {
     const token = localStorage.getItem("jwtToken");
     if (!token) throw new Error("No authentication token found");
     return token;
   };
 
+  // Fetch current user info and determine role
   useEffect(() => {
-    const fetchEmployees = async () => {
+    const fetchUserData = async () => {
       try {
-        const token = getValidToken();
-        const response = await fetch("http://localhost:8080/api/employee", {
+        const token = localStorage.getItem("jwtToken");
+        if (!token) return;
+
+        // Fetch current user info
+        const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!response.ok) throw new Error("Failed to fetch employees");
-        const data = await response.json();
-        setEmployees(data);
-      } catch (err) {
-        console.error("Error fetching employees:", err);
+
+        if (!userResponse.ok) throw new Error("Failed to load user info");
+        const userData = await userResponse.json();
+        setCurrentUser(userData);
+
+        // Determine user role from authorities or role field
+        const authorities = userData.authorities || [];
+        const roleFromBackend = userData.role || "";
+        
+        let role = "EMPLOYEE";
+        
+        if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
+          role = "ADMIN";
+        } else if (authorities.includes("ROLE_SUPERVISOR") || roleFromBackend === "ROLE_SUPERVISOR") {
+          role = "SUPERVISOR";
+        } else if (authorities.includes("ROLE_PLANNER") || roleFromBackend === "ROLE_PLANNER") {
+          role = "PLANNER";
+        } else if (authorities.includes("ROLE_HR") || roleFromBackend === "ROLE_HR") {
+          role = "HR";
+        } else if (authorities.includes("ROLE_EMPLOYEE") || roleFromBackend === "ROLE_EMPLOYEE") {
+          role = "EMPLOYEE";
+        }
+        
+        setUserRole(role);
+
+        // For ALL roles, try to find their employee record first
+        const empResponse = await fetch(
+          `${API_BASE_URL}/api/employee/email/${userData.email}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (empResponse.ok) {
+          const empData = await empResponse.json();
+          setCurrentEmployee(empData);
+          setFormData((prev) => ({ ...prev, employeeId: empData.id }));
+        } else {
+          console.warn("No employee record found for:", userData.email);
+          setSubmitMessage("No employee record found for your account. Please contact administrator.");
+          setIsError(true);
+        }
+
+        // Only fetch all employees if user is ADMIN and needs to create requests for others
+        if (role === "ADMIN") {
+          const allEmpResponse = await fetch(`${API_BASE_URL}/api/employee`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (allEmpResponse.ok) {
+            const empData = await allEmpResponse.json();
+            setEmployees(empData);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading user data:", error);
+        setSubmitMessage("Error loading user information: " + error.message);
+        setIsError(true);
       }
     };
-    fetchEmployees();
+
+    fetchUserData();
   }, []);
 
   const handleInputChange = (e) => {
@@ -89,14 +355,18 @@ const LeaveRequestForm = () => {
     try {
       const token = getValidToken();
 
-      if (
-        !formData.employeeId ||
-        !formData.leaveType ||
-        !formData.startDate ||
-        !formData.endDate ||
-        !formData.reason
-      ) {
+      if (!formData.employeeId || !formData.leaveType || !formData.startDate || 
+          !formData.endDate || !formData.reason) {
         throw new Error("Please fill in all required fields");
+      }
+
+      // Validate dates are weekdays
+      if (isWeekend(formData.startDate)) {
+        throw new Error("Start date must be a weekday (Monday to Friday)");
+      }
+      
+      if (isWeekend(formData.endDate)) {
+        throw new Error("End date must be a weekday (Monday to Friday)");
       }
 
       if (new Date(formData.startDate) > new Date(formData.endDate)) {
@@ -119,7 +389,7 @@ const LeaveRequestForm = () => {
         hrStatus: "Pending"
       };
 
-      const response = await fetch("http://localhost:8080/api/leave", {
+      const response = await fetch(`${API_BASE_URL}/api/leave`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -136,8 +406,9 @@ const LeaveRequestForm = () => {
         setSubmitMessage("Leave request submitted successfully!");
         setIsError(false);
 
+        // Reset form
         setFormData({
-          employeeId: "",
+          employeeId: currentEmployee?.id || "",
           leaveType: "",
           startDate: "",
           endDate: "",
@@ -146,8 +417,15 @@ const LeaveRequestForm = () => {
         });
         setFile(null);
         setFileName("");
+        setDateWarnings([]);
 
-        setTimeout(() => navigate("/employeeDashboard"), 2000);
+        setTimeout(() => {
+          if (userRole === "EMPLOYEE" || userRole === "SUPERVISOR" || userRole === "PLANNER" || userRole === "HR") {
+            navigate("/employeeDashboard");
+          } else {
+            navigate("/adminDashboard");
+          }
+        }, 2000);
       } else {
         throw new Error("Failed to submit leave request");
       }
@@ -165,14 +443,22 @@ const LeaveRequestForm = () => {
       const formData = new FormData();
       formData.append("file", file);
 
-      await fetch(
-        `http://localhost:8080/api/leave/${leaveData.id}/attachment`,
+      const uploadResponse = await fetch(
+        `${API_BASE_URL}/api/leave/${leaveData.id}/attachment`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { 
+            Authorization: `Bearer ${token}`,
+          },
           body: formData,
         }
       );
+
+      if (!uploadResponse.ok) {
+        throw new Error("Failed to upload attachment");
+      }
+      
+      console.log("Attachment uploaded successfully");
     } catch (error) {
       console.error("Attachment upload failed:", error);
     }
@@ -180,167 +466,343 @@ const LeaveRequestForm = () => {
 
   const calculateLeaveDays = () => {
     if (!formData.startDate || !formData.endDate) return 0;
-    const start = new Date(formData.startDate);
-    const end = new Date(formData.endDate);
-    return Math.ceil((end - start) / (1000 * 3600 * 24)) + 1;
+    return calculateBusinessDays(formData.startDate, formData.endDate);
   };
 
-  return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">
-          New Leave Request
-        </h2>
-        <p className="text-gray-600">
-          Submit a new leave request for approval
-        </p>
-      </div>
+  const getTotalCalendarDays = () => {
+    if (!formData.startDate || !formData.endDate) return 0;
+    return calculateTotalDays(formData.startDate, formData.endDate);
+  };
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Employee Dropdown */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Employee *
-          </label>
-          <select
-            name="employeeId"
-            value={formData.employeeId}
-            onChange={handleInputChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            required
-          >
-            <option value="">Select Employee</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.firstName} {emp.lastName}
-              </option>
-            ))}
-          </select>
-        </div>
+  const getRoleDisplayName = () => {
+    switch(userRole) {
+      case "SUPERVISOR": return "Supervisor";
+      case "PLANNER": return "Planner";
+      case "HR": return "HR Manager";
+      case "ADMIN": return "Administrator";
+      default: return "Employee";
+    }
+  };
 
-        {/* Leave Type */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Leave Type *
-          </label>
-          <select
-            name="leaveType"
-            value={formData.leaveType}
-            onChange={handleInputChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            required
-          >
-            <option value="">Select Leave Type</option>
-            {leaveTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Dates */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Date *
-            </label>
-            <input
-              type="date"
-              name="startDate"
-              value={formData.startDate}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              End Date *
-            </label>
-            <input
-              type="date"
-              name="endDate"
-              value={formData.endDate}
-              onChange={handleInputChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-        </div>
-
-        {formData.startDate && formData.endDate && (
-          <div className="bg-blue-50 p-3 rounded-md">
-            <p className="text-sm text-blue-700">
-              Leave duration:{" "}
-              <span className="font-medium">{calculateLeaveDays()} days</span>
-            </p>
-          </div>
-        )}
-
-        {/* Reason */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Reason for Leave *
-          </label>
-          <textarea
-            name="reason"
-            value={formData.reason}
-            onChange={handleInputChange}
-            rows={4}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Please provide details about your leave request"
-            required
-          />
-        </div>
-
-        {/* Sick Leave File Upload */}
-        {formData.leaveType === "Sick Leave" && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Excuse Duty Document *
-            </label>
-            <div className="flex items-center">
-              <label className="cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500">
-                <span>Upload file</span>
-                <input
-                  type="file"
-                  onChange={handleFileChange}
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  className="sr-only"
-                  required
-                />
-              </label>
-              <span className="ml-3 text-sm text-gray-600">
-                {fileName || "No file chosen"}
-              </span>
+  // Show loading state while determining user role and employee data
+  if (!currentUser || !currentEmployee) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-6"></div>
+          <h3 className="text-xl font-semibold text-gray-800 mb-2">Loading Your Information</h3>
+          <p className="text-gray-600 mb-4">Please wait while we prepare your leave request form</p>
+          {submitMessage && (
+            <div className={`p-4 rounded-xl mt-4 flex items-center space-x-3 ${
+              isError ? "bg-red-50 text-red-700 border border-red-200" : "bg-green-50 text-green-700 border border-green-200"
+            }`}>
+              {isError ? (
+                <ExclamationCircleIcon className="h-5 w-5 flex-shrink-0" />
+              ) : (
+                <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />
+              )}
+              <span className="text-sm font-medium">{submitMessage}</span>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              PDF, JPG or PNG up to 5MB
-            </p>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
+    );
+  }
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isSubmitting ? "Submitting..." : "Submit Leave Request"}
-        </button>
-
-        {/* Message */}
-        {submitMessage && (
-          <div
-            className={`p-3 rounded-md ${
-              isError ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
-            }`}
-          >
-            {submitMessage}
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+      <div className="max-w-2xl mx-auto">
+        {/* Header Card */}
+        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+          <div className="flex items-center space-x-4 mb-4">
+            <div className="p-3 bg-blue-100 rounded-xl">
+              <CalendarIcon className="h-8 w-8 text-blue-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">New Leave Request</h1>
+              <p className="text-gray-600">Submit a new leave request for approval</p>
+            </div>
           </div>
-        )}
-      </form>
+          
+          {currentUser && (
+            <div className="flex items-center space-x-3 bg-gray-50 rounded-lg p-3">
+              <UserIcon className="h-5 w-5 text-gray-400" />
+              <div>
+                <p className="text-sm font-medium text-gray-700">
+                  {currentUser.name || currentUser.username}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {getRoleDisplayName()}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Form Card */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+          <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            {/* Employee Selection */}
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                <UserIcon className="h-4 w-4" />
+                <span>Employee *</span>
+              </label>
+              {userRole !== "ADMIN" ? (
+                <div className="flex items-center space-x-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+                    {currentEmployee?.firstName?.charAt(0)}{currentEmployee?.lastName?.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {currentEmployee ? `${currentEmployee.firstName} ${currentEmployee.lastName}` : "Loading..."}
+                    </p>
+                    <p className="text-sm text-gray-500">{currentEmployee?.employeeId}</p>
+                  </div>
+                </div>
+              ) : (
+                <select
+                  name="employeeId"
+                  value={formData.employeeId}
+                  onChange={handleInputChange}
+                  className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
+                  required
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.firstName} {employee.lastName} ({employee.employeeId})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input type="hidden" name="employeeId" value={formData.employeeId} />
+            </div>
+
+            {/* Leave Type */}
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                <DocumentTextIcon className="h-4 w-4" />
+                <span>Leave Type *</span>
+              </label>
+              <select
+                name="leaveType"
+                value={formData.leaveType}
+                onChange={handleInputChange}
+                className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
+                required
+              >
+                <option value="">Select Leave Type</option>
+                {leaveTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Dates */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                  <CalendarIcon className="h-4 w-4" />
+                  <span>Start Date *</span>
+                </label>
+                <input
+                  type="date"
+                  name="startDate"
+                  value={formData.startDate}
+                  onChange={handleStartDateChange}
+                  onInput={(e) => handleDateInput(e, 'startDate')}
+                  className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                />
+                {formData.startDate && (
+                  <p className={`text-xs ${isWeekend(formData.startDate) ? 'text-red-600' : 'text-green-600'}`}>
+                    {getDayName(formData.startDate)}
+                    {isWeekend(formData.startDate) && ' (Weekend - not allowed)'}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                  <CalendarIcon className="h-4 w-4" />
+                  <span>End Date *</span>
+                </label>
+                <input
+                  type="date"
+                  name="endDate"
+                  value={formData.endDate}
+                  onChange={handleEndDateChange}
+                  onInput={(e) => handleDateInput(e, 'endDate')}
+                  className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
+                  required
+                  min={formData.startDate || new Date().toISOString().split('T')[0]}
+                />
+                {formData.endDate && (
+                  <p className={`text-xs ${isWeekend(formData.endDate) ? 'text-red-600' : 'text-green-600'}`}>
+                    {getDayName(formData.endDate)}
+                    {isWeekend(formData.endDate) && ' (Weekend - not allowed)'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Date Warnings */}
+            {dateWarnings.length > 0 && (
+              <div className="space-y-2">
+                {dateWarnings.map((warning, index) => (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-xl flex items-start space-x-3 ${
+                      warning.type === 'error' 
+                        ? 'bg-red-50 text-red-700 border border-red-200' 
+                        : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                    }`}
+                  >
+                    {warning.type === 'error' ? (
+                      <ExclamationCircleIcon className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <ExclamationTriangleIcon className="h-5 w-5 flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{warning.message}</p>
+                      {warning.suggestedDate && (
+                        <p className="text-xs mt-1">
+                          Suggested date: {new Date(warning.suggestedDate).toLocaleDateString()} ({getDayName(warning.suggestedDate)})
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Leave Duration */}
+            {formData.startDate && formData.endDate && (
+              <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-4 rounded-xl">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm font-medium">Business Days</p>
+                    <p className="text-2xl font-bold">{calculateLeaveDays()} days</p>
+                    <p className="text-xs opacity-90">(Monday - Friday)</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Total Calendar Days</p>
+                    <p className="text-2xl font-bold">{getTotalCalendarDays()} days</p>
+                    <p className="text-xs opacity-90">Including weekends</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-blue-400">
+                  <p className="text-sm text-center">
+                    {new Date(formData.startDate).toLocaleDateString()} - {new Date(formData.endDate).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Reason */}
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                <DocumentTextIcon className="h-4 w-4" />
+                <span>Reason for Leave *</span>
+              </label>
+              <textarea
+                name="reason"
+                value={formData.reason}
+                onChange={handleInputChange}
+                rows={4}
+                className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white resize-none transition-colors"
+                placeholder="Please provide detailed information about your leave request..."
+                required
+              />
+            </div>
+
+            {/* Sick Leave File Upload */}
+            {formData.leaveType === "Sick Leave" && (
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
+                  <PaperClipIcon className="h-4 w-4" />
+                  <span>Medical Certificate *</span>
+                </label>
+                <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-blue-400 transition-colors">
+                  <input
+                    type="file"
+                    onChange={handleFileChange}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    id="file-upload"
+                    required
+                  />
+                  <label htmlFor="file-upload" className="cursor-pointer">
+                    <ArrowUpTrayIcon className="h-8 w-8 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-gray-700 mb-1">
+                      {fileName ? "File Selected" : "Upload Medical Certificate"}
+                    </p>
+                    <p className="text-xs text-gray-500 mb-3">
+                      {fileName || "PDF, JPG or PNG up to 5MB"}
+                    </p>
+                    <button
+                      type="button"
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    >
+                      {fileName ? "Change File" : "Choose File"}
+                    </button>
+                  </label>
+                  {fileName && (
+                    <div className="mt-3 flex items-center justify-center space-x-2 text-sm text-green-600">
+                      <CheckCircleIcon className="h-4 w-4" />
+                      <span>{fileName}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isSubmitting || !formData.employeeId || dateWarnings.some(w => w.type === 'error')}
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-4 px-6 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] shadow-lg"
+            >
+              {isSubmitting ? (
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Submitting Request...</span>
+                </div>
+              ) : (
+                "Submit Leave Request"
+              )}
+            </button>
+
+            {/* Message */}
+            {submitMessage && (
+              <div
+                className={`p-4 rounded-xl flex items-center space-x-3 transition-all duration-300 ${
+                  isError 
+                    ? "bg-red-50 text-red-700 border border-red-200" 
+                    : "bg-green-50 text-green-700 border border-green-200"
+                }`}
+              >
+                {isError ? (
+                  <ExclamationCircleIcon className="h-5 w-5 flex-shrink-0" />
+                ) : (
+                  <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />
+                )}
+                <span className="font-medium">{submitMessage}</span>
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Footer Note */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-500">
+            Only weekdays (Monday-Friday) are allowed for leave dates. Weekends are automatically excluded from business day calculations.
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

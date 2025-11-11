@@ -29,6 +29,8 @@ function Overtime() {
     totalOvertimePay: 0
   });
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
   const settingsMenuRef = useRef(null);
 
@@ -121,13 +123,13 @@ function Overtime() {
       const token = getToken();
       // Fetch both employees and overtimes in parallel
       const [employeesResponse, overtimeResponse] = await Promise.all([
-        fetch('http://localhost:8080/api/employee', {
+        fetch(`${API_BASE_URL}/api/employee`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           }
         }),
-        fetch('http://localhost:8080/api/overtime', {
+        fetch(`${API_BASE_URL}/api/overtime`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -167,7 +169,7 @@ function Overtime() {
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/overtime', {
+      const response = await fetch(`${API_BASE_URL}/api/overtime`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -220,7 +222,7 @@ function Overtime() {
 
         try {
           const token = getToken();
-          const response = await fetch('http://localhost:8080/api/overtime', {
+          const response = await fetch(`${API_BASE_URL}/api/overtime`, {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
@@ -273,7 +275,7 @@ function Overtime() {
         };
 
         const token = getToken();
-        const response = await fetch('http://localhost:8080/api/overtime', {
+        const response = await fetch(`${API_BASE_URL}/api/overtime`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -311,7 +313,7 @@ function Overtime() {
     setIsValidating(true);
     try {
       const token = getToken();
-      const response = await fetch("http://localhost:8080/api/overtime/validate", {
+      const response = await fetch(`${API_BASE_URL}/api/overtime/validate`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -353,7 +355,7 @@ function Overtime() {
     
     try {
       const token = getToken();
-      const response = await fetch("http://localhost:8080/api/overtime/validate", {
+      const response = await fetch(`${API_BASE_URL}/api/overtime/validate`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",

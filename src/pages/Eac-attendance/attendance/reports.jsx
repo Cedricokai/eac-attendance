@@ -21,6 +21,8 @@ function Reports() {
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [employees, setEmployees] = useState([]);
 
+   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   // Fetch departments and employees for filters
   useEffect(() => {
     const fetchData = async () => {
@@ -28,12 +30,12 @@ function Reports() {
         setLoading(true);
         
         // Fetch departments
-        const deptResponse = await fetch('http://localhost:8080/api/departments');
+        const deptResponse = await fetch('API_BASE_URL/api/departments');
         if (!deptResponse.ok) throw new Error('Failed to fetch departments');
         setDepartments(await deptResponse.json());
         
         // Fetch employees
-        const empResponse = await fetch('http://localhost:8080/api/employee');
+        const empResponse = await fetch('API_BASE_URL/api/employee');
         if (!empResponse.ok) throw new Error('Failed to fetch employees');
         setEmployees(await empResponse.json());
         
@@ -55,7 +57,7 @@ function Reports() {
     
     setLoading(true);
     try {
-      let url = `http://localhost:8080/api/payroll/reports?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
+      let url = `${API_BASE_URL}/api/payroll/reports?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
       
       if (departmentFilter !== 'all') {
         url += `&departmentId=${departmentFilter}`;

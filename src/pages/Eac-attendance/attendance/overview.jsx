@@ -16,6 +16,8 @@ function Overview() {
 
   const location = useLocation();
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   // Helper function to get JWT token
   const getToken = () => {
     return localStorage.getItem('jwtToken');
@@ -111,7 +113,7 @@ function Overview() {
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/employee', {
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -128,7 +130,7 @@ function Overview() {
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/overview', {
+      const response = await fetch(`${API_BASE_URL}/api/overview`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -146,7 +148,7 @@ function Overview() {
   const fetchLeaves = async () => {
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/leave', {
+      const response = await fetch(`${API_BASE_URL}/api/leave`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',

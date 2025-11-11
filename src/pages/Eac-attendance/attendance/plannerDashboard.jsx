@@ -26,12 +26,15 @@ const PlannerDashboard = () => {
 
   const getToken = () => localStorage.getItem("jwtToken");
 
+  
+     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   useEffect(() => {
     const fetchLeaveRequests = async () => {
       try {
         setLoading(true);
         const token = getToken();
-        const response = await fetch("http://localhost:8080/api/leave/planner", {
+        const response = await fetch(`{API_BASE_URL}/api/leave/planner`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -97,12 +100,12 @@ const PlannerDashboard = () => {
         let endpoint, body;
         
         if (decision === "Approved") {
-          endpoint = `http://localhost:8080/api/leave/planner/approve/${id}`;
+          endpoint = `${API_BASE_URL}/api/leave/planner/approve/${id}`;
           body = JSON.stringify({
             feedback: plannerNotes || "Approved by planner",
           });
         } else {
-          endpoint = `http://localhost:8080/api/leave/reject/${id}`;
+          endpoint = `${API_BASE_URL}/api/leave/reject/${id}`;
           body = JSON.stringify({
             role: "planner",
             feedback: plannerNotes || "Rejected by planner",

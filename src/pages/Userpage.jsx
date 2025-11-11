@@ -10,8 +10,10 @@ import {
   PencilIcon,
   CheckIcon,
   XMarkIcon,
-  PlusIcon,
-  UserPlusIcon
+  UserPlusIcon,
+  KeyIcon,
+  EyeIcon,
+  EyeSlashIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -25,6 +27,19 @@ const Userpage = () => {
     const [tempRole, setTempRole] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showPasswordModal, setShowPasswordModal] = useState(false);
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [passwordData, setPasswordData] = useState({
+        password: '',
+        confirmPassword: ''
+    });
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [togglingUserId, setTogglingUserId] = useState(null);
+
+    
+   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
     const [createUserData, setCreateUserData] = useState({
         name: '',
         userName: '',
@@ -34,6 +49,7 @@ const Userpage = () => {
         role: 'CUSTOMER'
     });
 
+    // Frontend display roles to backend roles mapping
     const roleMapping = {
         'Admin': 'ROLE_ADMIN',
         'HR': 'ROLE_HR',
@@ -42,6 +58,17 @@ const Userpage = () => {
         'Supervisor': 'ROLE_SUPERVISOR',
         'Planner': 'ROLE_PLANNER',
         'None': null
+    };
+
+    // Backend roles to frontend display mapping
+    const reverseRoleMapping = {
+        'ROLE_ADMIN': 'Admin',
+        'ROLE_HR': 'HR',
+        'ROLE_CUSTOMER': 'Customer',
+        'ROLE_INVENTORY': 'Inventory',
+        'ROLE_SUPERVISOR': 'Supervisor',
+        'ROLE_PLANNER': 'Planner',
+        null: 'None'
     };
 
     const availableRoles = ['Admin', 'HR', 'Customer', 'Inventory', 'Planner', 'Supervisor', 'None'];
@@ -60,7 +87,7 @@ const Userpage = () => {
         }
 
         try {
-            const response = await fetch('http://localhost:8080/auth', {
+            const response = await fetch(`${API_BASE_URL}/auth`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -73,7 +100,12 @@ const Userpage = () => {
             }
 
             const data = await response.json();
-            setUsers(data);
+            // Convert backend roles to display format
+            const usersWithDisplayRoles = data.map(user => ({
+                ...user,
+                displayRole: reverseRoleMapping[user.role] || user.role || 'None'
+            }));
+            setUsers(usersWithDisplayRoles);
         } catch (err) {
             console.error('Fetch error:', err.message);
             setError(err.message);
@@ -87,7 +119,7 @@ const Userpage = () => {
         const token = localStorage.getItem('jwtToken');
 
         try {
-            const response = await fetch('http://localhost:8080/auth/admin/create-user', {
+            const response = await fetch(`${API_BASE_URL}/auth/admin/create-user`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -126,9 +158,100 @@ const Userpage = () => {
         }));
     };
 
+    const handlePasswordInputChange = (e) => {
+        const { name, value } = e.target;
+        setPasswordData(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
+
+    const handleSetPasswordClick = (user) => {
+        setSelectedUser(user);
+        setPasswordData({
+            password: '',
+            confirmPassword: ''
+        });
+        setShowPasswordModal(true);
+    };
+
+    const handleUpdatePassword = async (e) => {
+        e.preventDefault();
+        const token = localStorage.getItem('jwtToken');
+
+        if (passwordData.password !== passwordData.confirmPassword) {
+            toast.error('Passwords do not match');
+            return;
+        }
+
+        if (passwordData.password.length < 4) {
+            toast.error('Password must be at least 4 characters long');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/users/${selectedUser.id}/password`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password: passwordData.password }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to update password');
+            }
+
+            const result = await response.json();
+            toast.success('Password set successfully!');
+            setShowPasswordModal(false);
+            setSelectedUser(null);
+            setPasswordData({
+                password: '',
+                confirmPassword: ''
+            });
+        } catch (err) {
+            toast.error(err.message);
+        }
+    };
+
+    const handleToggleUserStatus = async (user) => {
+        const token = localStorage.getItem('jwtToken');
+        setTogglingUserId(user.id);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/users/${user.id}/toggle-status`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to toggle user status');
+            }
+
+            const result = await response.json();
+            toast.success(result.message);
+            
+            // Update the user in the local state
+            setUsers(users.map(u => 
+                u.id === user.id ? { ...u, enabled: !u.enabled } : u
+            ));
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setTogglingUserId(null);
+        }
+    };
+
     const handleEditClick = (user) => {
         setEditingUserId(user.id);
-        setTempRole(user.role || 'None');
+        setTempRole(user.displayRole || 'None');
     };
 
     const handleRoleChange = (e) => {
@@ -148,9 +271,10 @@ const Userpage = () => {
                 throw new Error('No authentication token found');
             }
 
-            const roleValue = tempRole === 'None' ? null : tempRole;
+            // Convert frontend role to backend role format
+            const roleValue = tempRole === 'None' ? null : roleMapping[tempRole];
 
-            const response = await fetch(`http://localhost:8080/auth/users/${userId}/role`, {
+            const response = await fetch(`${API_BASE_URL}/auth/users/${userId}/role`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -164,9 +288,15 @@ const Userpage = () => {
                 throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
             }
 
-            const updatedUser = await response.json();
+            const result = await response.json();
+            
+            // Update the user in local state
             setUsers(users.map(user => 
-                user.id === userId ? { ...user, role: updatedUser.role || null } : user
+                user.id === userId ? { 
+                    ...user, 
+                    role: roleValue, // Store backend format
+                    displayRole: tempRole // Store display format
+                } : user
             ));
 
             toast.success('Role updated successfully!');
@@ -270,6 +400,7 @@ const Userpage = () => {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mobile</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
@@ -277,7 +408,7 @@ const Userpage = () => {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {users.length === 0 ? (
                                     <tr>
-                                        <td colSpan="6" className="px-6 py-4 text-center text-gray-500">
+                                        <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
                                             No users found in the system
                                         </td>
                                     </tr>
@@ -297,6 +428,31 @@ const Userpage = () => {
                                                 {user.mobile || 'N/A'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
+                                                <button
+                                                    onClick={() => handleToggleUserStatus(user)}
+                                                    disabled={togglingUserId === user.id}
+                                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                                                        user.enabled ? 'bg-green-600' : 'bg-gray-200'
+                                                    } ${togglingUserId === user.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    <span
+                                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                                            user.enabled ? 'translate-x-6' : 'translate-x-1'
+                                                        }`}
+                                                    />
+                                                    {togglingUserId === user.id && (
+                                                        <div className="absolute inset-0 flex items-center justify-center">
+                                                            <ArrowPathIcon className="h-3 w-3 text-gray-400 animate-spin" />
+                                                        </div>
+                                                    )}
+                                                </button>
+                                                <span className={`ml-2 text-xs font-medium ${
+                                                    user.enabled ? 'text-green-600' : 'text-red-600'
+                                                }`}>
+                                                    {user.enabled ? 'Enabled' : 'Disabled'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
                                                 {editingUserId === user.id ? (
                                                     <select
                                                         value={tempRole}
@@ -313,39 +469,50 @@ const Userpage = () => {
                                                     <div className="flex items-center gap-2">
                                                         <ShieldCheckIcon className="h-4 w-4 text-blue-500" />
                                                         <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                                                            {user.role || 'None'}
+                                                            {user.displayRole || 'None'}
                                                         </span>
                                                     </div>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                {editingUserId === user.id ? (
-                                                    <div className="flex space-x-2">
-                                                        <button
-                                                            onClick={() => handleSave(user.id)}
-                                                            disabled={isUpdating}
-                                                            className="text-green-600 hover:text-green-900 flex items-center"
-                                                        >
-                                                            <CheckIcon className="h-5 w-5 mr-1" />
-                                                            {isUpdating ? 'Saving...' : 'Save'}
-                                                        </button>
-                                                        <button
-                                                            onClick={handleCancel}
-                                                            className="text-red-600 hover:text-red-900 flex items-center"
-                                                        >
-                                                            <XMarkIcon className="h-5 w-5 mr-1" />
-                                                            Cancel
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => handleEditClick(user)}
-                                                        className="text-blue-600 hover:text-blue-900 flex items-center"
-                                                    >
-                                                        <PencilIcon className="h-5 w-5 mr-1" />
-                                                        Edit
-                                                    </button>
-                                                )}
+                                                <div className="flex space-x-2">
+                                                    {editingUserId === user.id ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleSave(user.id)}
+                                                                disabled={isUpdating}
+                                                                className="text-green-600 hover:text-green-900 flex items-center"
+                                                            >
+                                                                <CheckIcon className="h-5 w-5 mr-1" />
+                                                                {isUpdating ? 'Saving...' : 'Save'}
+                                                            </button>
+                                                            <button
+                                                                onClick={handleCancel}
+                                                                className="text-red-600 hover:text-red-900 flex items-center"
+                                                            >
+                                                                <XMarkIcon className="h-5 w-5 mr-1" />
+                                                                Cancel
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleEditClick(user)}
+                                                                className="text-blue-600 hover:text-blue-900 flex items-center"
+                                                            >
+                                                                <PencilIcon className="h-5 w-5 mr-1" />
+                                                                Edit Role
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleSetPasswordClick(user)}
+                                                                className="text-green-600 hover:text-green-900 flex items-center"
+                                                            >
+                                                                <KeyIcon className="h-5 w-5 mr-1" />
+                                                                Set Password
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))
@@ -458,6 +625,91 @@ const Userpage = () => {
                                         className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                                     >
                                         Create User
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Set Password Modal */}
+                {showPasswordModal && selectedUser && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white rounded-lg max-w-md w-full p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold">Set Password for {selectedUser.name}</h3>
+                                <button
+                                    onClick={() => setShowPasswordModal(false)}
+                                    className="text-gray-500 hover:text-gray-700"
+                                >
+                                    <XMarkIcon className="h-5 w-5" />
+                                </button>
+                            </div>
+                            
+                            <form onSubmit={handleUpdatePassword} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">New Password</label>
+                                    <div className="mt-1 relative">
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            name="password"
+                                            value={passwordData.password}
+                                            onChange={handlePasswordInputChange}
+                                            className="block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-10"
+                                            required
+                                        />
+                                        <button
+                                            type="button"
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                        >
+                                            {showPassword ? (
+                                                <EyeSlashIcon className="h-5 w-5 text-gray-400" />
+                                            ) : (
+                                                <EyeIcon className="h-5 w-5 text-gray-400" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Confirm Password</label>
+                                    <div className="mt-1 relative">
+                                        <input
+                                            type={showConfirmPassword ? "text" : "password"}
+                                            name="confirmPassword"
+                                            value={passwordData.confirmPassword}
+                                            onChange={handlePasswordInputChange}
+                                            className="block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-10"
+                                            required
+                                        />
+                                        <button
+                                            type="button"
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                        >
+                                            {showConfirmPassword ? (
+                                                <EyeSlashIcon className="h-5 w-5 text-gray-400" />
+                                            ) : (
+                                                <EyeIcon className="h-5 w-5 text-gray-400" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex justify-end space-x-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPasswordModal(false)}
+                                        className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                                    >
+                                        Set Password
                                     </button>
                                 </div>
                             </form>

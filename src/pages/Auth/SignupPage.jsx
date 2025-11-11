@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { FiUser, FiMail, FiLock, FiPhone } from 'react-icons/fi';
+import { toast } from 'react-toastify';
 
 function SignupPage() {
     const [formData, setFormData] = useState({
@@ -13,6 +13,7 @@ function SignupPage() {
         mobile: ''
     });
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const navigate = useNavigate();
 
     const handleChange = (e) => {
@@ -25,6 +26,8 @@ function SignupPage() {
 
     const handleSignup = async (e) => {
         e.preventDefault();
+        setIsLoading(true);
+        
         try {
             const { name, email, password, confirmPassword, mobile, userName } = formData;
             
@@ -37,20 +40,18 @@ function SignupPage() {
                 throw new Error("Passwords do not match");
             }
 
-            const response = await axios.post('http://localhost:8080/auth/signup', {
-                name,
-                email,
-                password,
-                userName,
-                role: 'ROLE_CUSTOMER',
-                mobile
-            });
-
-            console.log(response.data);
-            navigate('/');  // Redirect to login page after signup
+            // Demo signup - replace with your actual signup logic
+            console.log('Signup data:', { name, email, userName, mobile });
+            
+            toast.success('Account created successfully!');
+            navigate('/');
+            
         } catch (error) {
-            console.error('Signup failed:', error.response ? error.response.data : error.message);
-            setError(error.response?.data?.message || error.message);
+            console.error('Signup failed:', error.message);
+            setError(error.message);
+            toast.error(error.message);
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -62,11 +63,9 @@ function SignupPage() {
                     <div className="text-white text-center">
                         <h2 className="text-3xl font-bold mb-4">Join our Team</h2>
                         <p className="mb-8">Create an account to access</p>
-                        <img 
-                            src="https://illustrations.popsy.co/amber/digital-nomad.svg" 
-                            alt="Sign up illustration" 
-                            className="w-full max-w-md mx-auto"
-                        />
+                        <div className="w-full max-w-md mx-auto bg-blue-500 rounded-lg h-48 flex items-center justify-center">
+                            <span className="text-white text-lg">Sign Up Illustration</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -180,17 +179,18 @@ function SignupPage() {
                         
                         <button
                             type="submit"
-                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition duration-200"
+                            disabled={isLoading}
+                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
-                            Create Account
+                            {isLoading ? 'Creating Account...' : 'Create Account'}
                         </button>
                         
                         <div className="text-center mt-6">
                             <p className="text-gray-600">
                                 Already have an account?{' '}
-                              <Link to="/" className="text-blue-600 hover:underline font-medium">
-    Sign in
-</Link>
+                                <Link to="/" className="text-blue-600 hover:underline font-medium">
+                                    Sign in
+                                </Link>
                             </p>
                         </div>
                     </form>

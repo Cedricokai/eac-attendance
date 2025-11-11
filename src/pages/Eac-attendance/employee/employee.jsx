@@ -10,6 +10,28 @@ const getSafeValue = (value) => {
   return value;
 };
 
+// Enhanced Employee ID Generator Function for preview
+const generateEmployeeId = (startDate, index, existingEmployees = []) => {
+  if (!startDate) {
+    // fallback to today’s date
+    const today = new Date();
+    const datePart = today.toISOString().slice(2, 10).replace(/-/g, '');
+    return `E-${datePart}-001`;
+  }
+
+  const date = new Date(startDate);
+  const datePart = date.toISOString().slice(2, 10).replace(/-/g, '');
+
+  // Count how many already exist with this date
+  const existingCount = existingEmployees.filter(emp => emp.startDate === startDate).length;
+
+  // Now add the row index + 1
+  const sequenceNumber = existingCount + index + 1;
+  const seqPart = String(sequenceNumber).padStart(3, '0');
+
+  return `E-${datePart}-${seqPart}`;
+};
+
 function Employee() {
   const { settings, getPositionRate } = useContext(SettingsContext);
   const [employees, setEmployees] = useState([]);
@@ -34,6 +56,8 @@ function Employee() {
     "Ahafo North",
     "NSS"
   ];
+
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
 
   const [newEmployee, setNewEmployee] = useState({
     firstName: "",
@@ -60,13 +84,14 @@ function Employee() {
     : employees;
 
   const createMenuRef = useRef(null);
+  const editMenuRef = useRef(null);
 
   // Fetch employees from the API with token
   const fetchEmployees = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee`, {
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         method: "GET",
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -127,6 +152,10 @@ function Employee() {
       if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
         setIsCreateMenuOpen(false);
       }
+      if (editMenuRef.current && !editMenuRef.current.contains(event.target)) {
+        setIsEditMenuOpen(false);
+        setEditingEmployee(null);
+      }
     };
     
     document.addEventListener("mousedown", handleClickOutside);
@@ -135,147 +164,412 @@ function Employee() {
 
   const parseExcelDate = (value) => {
     if (!value || value === '-' || value === 'null') return null;
+    
+    // Handle Excel serial numbers (dates stored as numbers)
+    if (typeof value === 'number') {
+      const date = new Date((value - (25567 + 2)) * 86400 * 1000);
+      return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+    }
+    
+    // Handle string dates
     const date = new Date(value);
     return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
   };
 
   // Handle displaying the selected file's contents in a popup
-  const handleDisplayFile = () => {
-    if (!selectedFile) return;
+// Handle displaying the selected file's contents in a popup
+const handleDisplayFile = () => {
+  if (!selectedFile) {
+    setError("Please select a file first");
+    return;
+  }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
+  const reader = new FileReader();
+  
+  reader.onload = (event) => {
+    try {
       const data = new Uint8Array(event.target.result);
       const workbook = XLSX.read(data, { type: "array" });
 
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
+      // Convert to JSON with header row
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
       
-      // Extract headers from first row
-      const headers = jsonData[0].map(header => header.toLowerCase().replace(/\s+/g, ''));
+      console.log("Raw Excel Data:", jsonData);
       
-      // Map Excel columns to expected fields
-      const employeesData = jsonData.slice(1).map((row) => {
+      if (jsonData.length < 2) {
+        setError("Excel file doesn't contain enough data (needs at least 1 data row)");
+        return;
+      }
+      
+      // Extract headers from first row with better error handling
+      const headers = jsonData[0].map(header => {
+        try {
+          if (header === null || header === undefined) return '';
+          const headerStr = String(header).trim();
+          return headerStr.toLowerCase().replace(/\s+/g, '');
+        } catch (error) {
+          console.warn('Error processing header:', header, error);
+          return '';
+        }
+      });
+      
+      console.log("Detected Headers:", headers);
+
+      // Map Excel columns to expected fields with comprehensive mapping
+      const employeesData = jsonData.slice(1).map((row, rowIndex) => {
         const employee = {};
         
         headers.forEach((header, index) => {
+          const value = row[index];
+          
+          // Skip if header is empty or value is undefined
+          if (!header || value === undefined) return;
+          
+          // Comprehensive field mapping
           switch(header) {
             case 'firstname':
-              employee.firstName = getSafeValue(row[index]);
+            case 'first_name':
+            case 'fname':
+              employee.firstName = getSafeValue(value);
               break;
             case 'lastname':
-              employee.lastName = getSafeValue(row[index]);
+            case 'last_name':
+            case 'lname':
+              employee.lastName = getSafeValue(value);
               break;
             case 'email':
-              employee.email = getSafeValue(row[index]);
+            case 'emailaddress':
+              employee.email = getSafeValue(value);
               break;
             case 'phone':
-              employee.phone = getSafeValue(row[index]);
+            case 'phonenumber':
+            case 'phone_number':
+            case 'contact':
+            case 'mobilenumber':
+              employee.phone = getSafeValue(value);
               break;
             case 'jobposition':
-              employee.jobPosition = getSafeValue(row[index]);
+            case 'job_position':
+            case 'position':
+            case 'jobtitle':
+              employee.jobPosition = getSafeValue(value);
               break;
             case 'category':
-              employee.category = getSafeValue(row[index]);
+            case 'empcategory':
+            case 'employee_category':
+            case 'dept':
+              employee.category = getSafeValue(value);
               break;
             case 'worktype':
-              employee.workType = getSafeValue(row[index]);
+            case 'work_type':
+            case 'employmenttype':
+            case 'type':
+              employee.workType = getSafeValue(value);
               break;
             case 'rate':
-              employee.minimumRate = getSafeValue(row[index]);
+            case 'hourlyrate':
+            case 'hourly_rate':
+            case 'minimumrate':
+            case 'minimum_rate':
+            case 'salary':
+              employee.minimumRate = getSafeValue(value);
               break;
             case 'ssnitnumber':
-              employee.ssnitNumber = getSafeValue(row[index]);
+            case 'ssnit_number':
+            case 'ssnit':
+            case 'socialsecurity':
+              employee.ssnitNumber = getSafeValue(value);
               break;
             case 'tinnumber':
-              employee.tinNumber = getSafeValue(row[index]);
+            case 'tin_number':
+            case 'tin':
+            case 'taxid':
+              employee.tinNumber = getSafeValue(value);
               break;
             case 'tagnumber':
-              employee.tagNumber = getSafeValue(row[index]);
+            case 'tag_number':
+            case 'tag':
+            case 'badge':
+              employee.tagNumber = getSafeValue(value);
               break;
             case 'dateofbirth':
-              employee.dateOfBirth = parseExcelDate(row[index]);
+            case 'date_of_birth':
+            case 'dob':
+            case 'birthdate':
+              employee.dateOfBirth = parseExcelDate(value);
               break;
             case 'emergencycontact':
-              employee.emergencyContact = getSafeValue(row[index]);
+            case 'emergency_contact':
+            case 'emergencyphone':
+            case 'emergency':
+              employee.emergencyContact = getSafeValue(value);
               break;
             case 'accountnumber':
-              employee.accountNumber = getSafeValue(row[index]);
+            case 'account_number':
+            case 'bankaccount':
+            case 'account':
+              employee.accountNumber = getSafeValue(value);
               break;
             case 'employeeid':
-              employee.employeeId = getSafeValue(row[index]);
+            case 'employee_id':
+            case 'empid':
+            case 'staffid':
+              if (value) employee.originalEmployeeId = getSafeValue(value);
               break;
             case 'department':
-              employee.department = getSafeValue(row[index]);
+            case 'division':
+              employee.department = getSafeValue(value);
               break;
             case 'startdate':
-              employee.startDate = parseExcelDate(row[index]);
+            case 'start_date':
+            case 'hiredate':
+            case 'datehired':
+            case 'joiningdate':
+              employee.startDate = parseExcelDate(value);
               break;
             case 'enddate':
-              employee.endDate = parseExcelDate(row[index]);
+            case 'end_date':
+            case 'terminationdate':
+            case 'leavingdate':
+              employee.endDate = parseExcelDate(value);
               break;
             case 'basicsalary':
-              employee.basicSalary = getSafeValue(row[index]);
+            case 'basic_salary':
+            case 'monthlysalary':
+              employee.basicSalary = getSafeValue(value);
               break;
             case 'graderank':
             case 'grade':
-              employee.grade = getSafeValue(row[index]);
+            case 'jobgrade':
+            case 'job_grade':
+            case 'level':
+              employee.grade = getSafeValue(value);
               break;
             case 'rentallowance':
-              employee.rentAllowance = getSafeValue(row[index]);
+            case 'rent_allowance':
+            case 'housingallowance':
+            case 'accommodation':
+              employee.rentAllowance = getSafeValue(value);
               break;
             case 'transportallowance':
-              employee.transportAllowance = getSafeValue(row[index]);
+            case 'transport_allowance':
+            case 'transport':
+            case 'travelallowance':
+              employee.transportAllowance = getSafeValue(value);
               break;
             case 'clothingallowance':
-              employee.clothingAllowance = getSafeValue(row[index]);
+            case 'clothing_allowance':
+            case 'uniformallowance':
+            case 'dressallowance':
+              employee.clothingAllowance = getSafeValue(value);
               break;
             case 'otherallowance':
-              employee.otherAllowance = getSafeValue(row[index]);
+            case 'other_allowance':
+            case 'additionalallowance':
+            case 'extraallowance':
+              employee.otherAllowance = getSafeValue(value);
               break;
             default:
+              // Fallback mapping for common fields
+              if (header.includes('first')) employee.firstName = getSafeValue(value);
+              else if (header.includes('last')) employee.lastName = getSafeValue(value);
+              else if (header.includes('email')) employee.email = getSafeValue(value);
+              else if (header.includes('phone') || header.includes('mobile')) employee.phone = getSafeValue(value);
               break;
           }
         });
-        
+
+        // Validate required fields
+        if (!employee.firstName || !employee.lastName) {
+          console.warn(`Skipping row ${rowIndex + 2}: Missing first name or last name`);
+          return null;
+        }
+
+        // Set default values for important fields if missing
+        if (!employee.category) employee.category = categories[0] || "Projects";
+        if (!employee.workType) employee.workType = "Regular";
+        if (!employee.jobPosition) employee.jobPosition = "General Worker";
+
         return employee;
-      });
+      }).filter(employee => employee !== null);
+
+      console.log("Processed Employees:", employeesData);
+
+      if (employeesData.length === 0) {
+        setError("No valid employee data found in the Excel file. Please check if the file contains first name and last name columns.");
+        return;
+      }
 
       setUploadedData(employeesData);
       setIsPopupOpen(true);
-    };
+      setError(null);
 
-    reader.readAsArrayBuffer(selectedFile);
-  };
-
-  // Save uploaded data to the database with token
-  const saveUploadedData = async () => {
-    try {
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/bulk`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(uploadedData),
-      });
-
-      if (!response.ok) throw new Error("Failed to save data");
-
-      const data = await response.json();
-      setEmployees((prevEmployees) => [...prevEmployees, ...data]);
-      setUploadedData([]);
-      setIsPopupOpen(false);
-      setSelectedFile(null);
-      setSuccessMessage("Employees imported successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err) {
-      setError(err.message);
+      console.error('Error processing Excel file:', err);
+      setError(`Error reading Excel file: ${err.message}. Please check the file format.`);
     }
   };
+
+  reader.onerror = () => {
+    setError("Error reading file. Please try again.");
+  };
+
+  reader.readAsArrayBuffer(selectedFile);
+};
+
+  // Update the saveUploadedData function
+// Update the saveUploadedData function to handle missing fields
+const saveUploadedData = async () => {
+  try {
+    const token = localStorage.getItem('jwtToken');
+    
+    // First, fetch current employees to ensure we generate unique IDs
+    const currentEmployeesResponse = await fetch(`${API_BASE_URL}/api/employee`, {
+      method: "GET",
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (!currentEmployeesResponse.ok) {
+      throw new Error("Failed to fetch current employees");
+    }
+
+    const currentEmployees = await currentEmployeesResponse.json();
+
+    // Generate employee IDs for each imported record with proper field mapping
+    const employeesWithIds = uploadedData.map((employee, index) => {
+      const employeeId = generateEmployeeId(employee.startDate, index, currentEmployees);
+      
+      // Safely handle firstName and lastName for email generation
+      const safeFirstName = employee.firstName ? String(employee.firstName).trim() : '';
+      const safeLastName = employee.lastName ? String(employee.lastName).trim() : '';
+      
+      // Generate email safely
+      let email = employee.email ? String(employee.email).trim() : '';
+      if (!email && safeFirstName && safeLastName) {
+        email = `${safeFirstName.toLowerCase()}.${safeLastName.toLowerCase()}@company.com`;
+      } else if (!email) {
+        email = `employee${index + 1}@company.com`;
+      }
+
+      // Create a clean employee object that matches backend expectations
+      const cleanEmployee = {
+        // Required fields with defaults
+        firstName: safeFirstName || '',
+        lastName: safeLastName || '',
+        email: email,
+        phone: employee.phone ? String(employee.phone).trim() : '',
+        jobPosition: employee.jobPosition ? String(employee.jobPosition).trim() : 'General Worker',
+        minimumRate: employee.minimumRate ? parseFloat(employee.minimumRate) : 0,
+        category: employee.category ? String(employee.category).trim() : categories[0] || "Projects",
+        workType: employee.workType ? String(employee.workType).trim() : 'Regular',
+           numberOfChildren: employee.numberOfChildren ? parseInt(employee.numberOfChildren) : 0,
+    age: employee.age ? parseInt(employee.age) : 0,
+
+        // Optional fields with null defaults
+        ssnitNumber: employee.ssnitNumber ? String(employee.ssnitNumber).trim() : null,
+        tinNumber: employee.tinNumber ? String(employee.tinNumber).trim() : null,
+        startDate: employee.startDate || new Date().toISOString().split('T')[0],
+        endDate: employee.endDate || null,
+        basicSalary: employee.basicSalary ? parseFloat(employee.basicSalary) : null,
+        accountNumber: employee.accountNumber ? String(employee.accountNumber).trim() : null,
+        
+        // Allowance fields (your backend has these)
+        rentAllowance: employee.rentAllowance ? parseFloat(employee.rentAllowance) : 0,
+        transportAllowance: employee.transportAllowance ? parseFloat(employee.transportAllowance) : 0,
+        clothingAllowance: employee.clothingAllowance ? parseFloat(employee.clothingAllowance) : 0,
+        otherAllowance: employee.otherAllowance ? parseFloat(employee.otherAllowance) : 0,
+        
+        // Additional fields that might be in Excel
+        tagNumber: employee.tagNumber ? String(employee.tagNumber).trim() : null,
+        dateOfBirth: employee.dateOfBirth || null,
+        emergencyContact: employee.emergencyContact ? String(employee.emergencyContact).trim() : null,
+        department: employee.department ? String(employee.department).trim() : null,
+        
+        // System fields
+        employeeId: employeeId,
+        jobGrade: employee.grade || "I",
+        usePositionRate: false,
+        
+        // Handle the allowances field from your form (single field)
+        allowances: employee.allowances ? parseFloat(employee.allowances) : 0
+      };
+
+      // Clean up any undefined or null values that might cause JSON issues
+      Object.keys(cleanEmployee).forEach(key => {
+        if (cleanEmployee[key] === undefined) {
+          cleanEmployee[key] = null;
+        }
+      });
+
+      return cleanEmployee;
+    });
+
+    console.log("Employees with generated IDs:", employeesWithIds);
+
+    // Validate data before sending - only check critical fields
+    const invalidEmployees = employeesWithIds.filter(emp => 
+      !emp.firstName || !emp.lastName
+    );
+    
+    if (invalidEmployees.length > 0) {
+      throw new Error(`Found ${invalidEmployees.length} employees with missing required fields (first name and last name)`);
+    }
+
+    // Log the first employee to see the structure
+    if (employeesWithIds.length > 0) {
+      console.log("First employee data structure:", employeesWithIds[0]);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/employee/bulk`, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(employeesWithIds),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Backend error response:', errorText);
+      console.error('Response status:', response.status);
+      
+      // Try to parse the error response as JSON if possible
+      try {
+        const errorJson = JSON.parse(errorText);
+        console.error('Parsed error response:', errorJson);
+      } catch (e) {
+        console.error('Raw error response:', errorText);
+      }
+      
+      throw new Error(`Failed to save data: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    setEmployees((prevEmployees) => [...prevEmployees, ...data]);
+    setUploadedData([]);
+    setIsPopupOpen(false);
+    setSelectedFile(null);
+    setSuccessMessage(`Successfully imported ${employeesWithIds.length} employees!`);
+    setTimeout(() => setSuccessMessage(""), 5000);
+    
+    // Refresh the employee list
+    fetchEmployees();
+  } catch (err) {
+    setError(err.message);
+    console.error('Import error:', err);
+    console.error('Error details:', {
+      uploadedDataLength: uploadedData.length,
+      firstEmployee: uploadedData[0] // Show first employee for debugging
+    });
+  }
+};
 
   // Create a new employee with token
   const createEmployee = async () => {
@@ -289,21 +583,23 @@ function Employee() {
     const employeeData = {
       ...newEmployee,
       minimumRate: finalRate,
+       numberOfChildren: newEmployee.numberOfChildren ? parseInt(newEmployee.numberOfChildren) : 0,
+  age: newEmployee.age ? parseInt(newEmployee.age) : 0,
       jobGrade: newEmployee.jobGrade || "I"
     };
 
     if (
       !newEmployee.firstName ||
       !newEmployee.lastName ||
-      !newEmployee.email ||
-      !newEmployee.phone ||
-      !newEmployee.jobPosition ||
-      !newEmployee.category ||
-      !newEmployee.ssnitNumber ||
-      !newEmployee.tinNumber ||
-      !newEmployee.startDate ||
-      !newEmployee.allowances ||
-      !newEmployee.accountNumber 
+      !newEmployee.email 
+      // !newEmployee.phone ||
+      // !newEmployee.jobPosition ||
+      // !newEmployee.category ||
+      // !newEmployee.ssnitNumber ||
+      // !newEmployee.tinNumber ||
+      // !newEmployee.startDate ||
+      // !newEmployee.allowances ||
+      // !newEmployee.accountNumber 
     ) {
       setError("Please fill out all fields.");
       return;
@@ -311,7 +607,7 @@ function Employee() {
 
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee`, {
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -359,7 +655,7 @@ function Employee() {
   
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/${editingEmployee.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/employee/${editingEmployee.id}`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",
@@ -392,7 +688,7 @@ function Employee() {
     
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
         method: "DELETE",
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -575,26 +871,39 @@ function Employee() {
                   ))}
                 </select>
 
-                <div className="flex gap-2">
-                  <label className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition duration-200">
-                    <input
-                      type="file"
-                      accept=".xlsx, .xls"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                    Import
-                  </label>
-                  <button
-                    className={`px-4 py-2 rounded-lg transition duration-200 ml-2 ${
-                      !selectedFile ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"
-                    }`}
-                    onClick={handleDisplayFile}
-                    disabled={!selectedFile}
-                  >
-                    Preview
-                  </button>
-                </div>
+               <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex items-center gap-2">
+              <label className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition duration-200">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                {selectedFile ? `File: ${selectedFile.name}` : 'Import Excel'}
+              </label>
+              <button
+                className={`px-4 py-2 rounded-lg transition duration-200 ${
+                  !selectedFile ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"
+                }`}
+                onClick={handleDisplayFile}
+                disabled={!selectedFile}
+              >
+                Preview
+              </button>
+            </div>
+
+            <button
+              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 flex items-center gap-2"
+              onClick={() => setIsCreateMenuOpen(true)}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              Add Employee
+            </button>
+          </div>
+
 
                 <button
                   className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 flex items-center gap-2"
@@ -737,6 +1046,8 @@ function Employee() {
               </div>
             )}
           </section>
+
+          
         </main>
 
         {/* Create Employee Modal */}
@@ -1059,11 +1370,12 @@ function Employee() {
           </div>
         )} 
 
-        {/* Edit Employee Modal */}
+        {/* Edit Employee Modal - NOW SCROLLABLE */}
         {isEditMenuOpen && editingEmployee && (
-          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl w-full max-w-2xl z-50">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-4">
+          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+            <div ref={editMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-800">Edit Employee</h2>
                 <button
                   onClick={() => {
@@ -1078,7 +1390,8 @@ function Employee() {
                 </button>
               </div>
 
-              <div className="space-y-6">
+              {/* Scrollable Form Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
                 {/* Category */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -1341,82 +1654,111 @@ function Employee() {
         {isPopupOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
             <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
-              <h2 className="text-xl font-semibold mb-4">Excel File Contents</h2>
+              <h2 className="text-xl font-semibold mb-4">Excel Import Preview</h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Found {uploadedData.length} employee(s). Employee IDs will be automatically generated.
+              </p>
+              
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th>First Name</th>
-                      <th>Last Name</th>
-                      <th>Email</th>
-                      <th>Phone</th>
-                      <th>SSNIT Number</th>
-                      <th>TIN Number</th>
-                      <th>Tag Number</th>
-                      <th>Date of Birth</th>
-                      <th>Emergency Contact</th>
-                      <th>Account Number</th>
-                      <th>Employee ID</th>
-                      <th>Category</th>
-                      <th>Job Position</th>
-                      <th>Work Type</th>
-                      <th>Department</th>
-                      <th>Start Date</th>
-                      <th>End Date</th>
-                      <th>Basic Salary</th>
-                      <th>Minimum Rate</th>
-                      <th>Grade</th>
-                      <th>Rent Allowance</th>
-                      <th>Transport Allowance</th>
-                      <th>Clothing Allowance</th>
-                      <th>Other Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Generated ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">First Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date of Birth</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Emergency Contact</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Original Employee ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Position</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Basic Salary</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Minimum Rate</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rent Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clothing Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Other Allowance</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {uploadedData.map((employee, index) => (
-                      <tr key={index}>
-                        <td>{getSafeValue(employee.firstName)}</td>
-                        <td>{getSafeValue(employee.lastName)}</td>
-                        <td>{getSafeValue(employee.email)}</td>
-                        <td>{getSafeValue(employee.phone)}</td>
-                        <td>{getSafeValue(employee.ssnitNumber)}</td>
-                        <td>{getSafeValue(employee.tinNumber)}</td>
-                        <td>{getSafeValue(employee.tagNumber)}</td>
-                        <td>{getSafeValue(employee.dateOfBirth)}</td>
-                        <td>{getSafeValue(employee.emergencyContact)}</td>
-                        <td>{getSafeValue(employee.accountNumber)}</td>
-                        <td>{getSafeValue(employee.employeeId)}</td>
-                        <td>{getSafeValue(employee.category)}</td>
-                        <td>{getSafeValue(employee.jobPosition)}</td>
-                        <td>{getSafeValue(employee.workType)}</td>
-                        <td>{getSafeValue(employee.department)}</td>
-                        <td>{getSafeValue(employee.startDate)}</td>
-                        <td>{getSafeValue(employee.endDate)}</td>
-                        <td>{getSafeValue(employee.basicSalary)}</td>
-                        <td>{getSafeValue(employee.minimumRate)}</td>
-                        <td>{getSafeValue(employee.grade)}</td>
-                        <td>{getSafeValue(employee.rentAllowance)}</td>
-                        <td>{getSafeValue(employee.transportAllowance)}</td>
-                        <td>{getSafeValue(employee.clothingAllowance)}</td>
-                        <td>{getSafeValue(employee.otherAllowance)}</td>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                  {uploadedData.map((employee, index) => {
+                    const existingEmployeesArray = Array.isArray(employees) ? employees : [];
+                    const generatedId = generateEmployeeId(employee.startDate, index, existingEmployeesArray);
+                    return (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-medium text-blue-600 whitespace-nowrap">
+                          {generatedId}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.firstName}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.lastName}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.dateOfBirth || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.emergencyContact || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.originalEmployeeId || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            employee.category === "Projects" ? "bg-blue-100 text-blue-800" :
+                            employee.category === "Site Services" ? "bg-green-100 text-green-800" :
+                            employee.category === "Ahafo North" ? "bg-purple-100 text-purple-800" :
+                            employee.category === "NSS" ? "bg-orange-100 text-orange-800" :
+                            "bg-gray-100 text-gray-800"
+                          }`}>
+                            {employee.category || 'Not set'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.jobPosition || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.workType || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.department || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.startDate || 'Not set'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.endDate || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.basicSalary || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.minimumRate || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.grade || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.rentAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.transportAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.clothingAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.otherAllowance || 'N/A'}</td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-200">
-                <button
-                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-                  onClick={() => setIsPopupOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-                  onClick={saveUploadedData}
-                >
-                  Confirm Upload
-                </button>
+              
+              <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
+                <div className="text-sm text-gray-600 max-w-md">
+                  <strong>Note:</strong> Employee IDs follow format: E-YYMMDD-XXX (e.g., E-250301-001). 
+                  Original employee IDs from Excel will be replaced with generated ones.
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    onClick={() => setIsPopupOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                    onClick={saveUploadedData}
+                  >
+                    Import {uploadedData.length} Employee{uploadedData.length !== 1 ? 's' : ''}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

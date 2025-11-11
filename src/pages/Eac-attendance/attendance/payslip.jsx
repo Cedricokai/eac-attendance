@@ -22,10 +22,13 @@ function Payslip() {
 
   const getToken = () => localStorage.getItem('jwtToken');
 
+     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
+
   const fetchPayrollPeriods = async () => {
     try {
       const token = getToken();
-      const res = await fetch('http://localhost:8080/api/payroll/periods', {
+      const res = await fetch(`${API_BASE_URL}/api/payroll/periods`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error('Failed to fetch payroll periods');
@@ -37,7 +40,7 @@ function Payslip() {
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      const res = await fetch('http://localhost:8080/api/employee', {
+      const res = await fetch(`${API_BASE_URL}/api/employee`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error('Failed to fetch employees');
@@ -49,7 +52,7 @@ function Payslip() {
   const fetchEmployeeDetails = async (employeeId) => {
     try {
       const token = getToken();
-      const res = await fetch(`http://localhost:8080/api/employee/${employeeId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/employee/${employeeId}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error('Failed to fetch employee details');
@@ -66,7 +69,7 @@ function Payslip() {
     setLoading(true);
     try {
       const token = getToken();
-      const payrollRes = await fetch(`http://localhost:8080/api/payroll/employee-payslip?periodId=${selectedPeriod}&employeeId=${selectedEmployeeId}`, {
+      const payrollRes = await fetch(`API_BASE_URL/api/payroll/employee-payslip?periodId=${selectedPeriod}&employeeId=${selectedEmployeeId}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       
@@ -99,7 +102,7 @@ function Payslip() {
     
     try {
       const token = getToken();
-      const res = await fetch('http://localhost:8080/api/payroll/generate-payslip-pdf', {
+      const res = await fetch(`${API_BASE_URL}/api/payroll/generate-payslip-pdf`, {
         method: 'POST',
         headers: { 
           'Authorization': `Bearer ${token}`, 

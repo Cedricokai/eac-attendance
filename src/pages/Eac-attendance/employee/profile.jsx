@@ -18,11 +18,13 @@ function Profile() {
     return localStorage.getItem("jwtToken");
   };
 
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   useEffect(() => {
     const fetchEmployee = async () => {
       try {
         const token = getToken();
-        const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+        const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -60,7 +62,7 @@ function Profile() {
     setSaving(true);
     try {
       const token = getToken();
-      const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -112,7 +114,7 @@ function Profile() {
     if (isNaN(num)) return "N/A";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "USD",
+      currency: "GHS",
     }).format(num);
   };
 

@@ -1,390 +1,538 @@
-import { useContext, useState } from 'react';
-import { SettingsContext } from '../context/SettingsContext';
-import { useNavigate } from 'react-router-dom';
-import MainSidebar from '../mainSidebar';
-import { 
-  FiSave, FiPlus, FiTrash2, FiEdit, FiX, FiDollarSign, 
-  FiCalendar, FiClock, FiUsers, FiBriefcase, FiStar,
-  FiChevronRight, FiHome, FiSettings
-} from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
 
-function SettingsPage() {
-  const { settings, updateSettings } = useContext(SettingsContext);
-  const [activeTab, setActiveTab] = useState('rates');
-  const navigate = useNavigate();
-  const [saving, setSaving] = useState(false);
+const SettingsPage = () => {
+  // Local state for all settings
+  const [settings, setSettings] = useState({
+    hourlyRate: 0,
+    overtimeHourlyRate: 0,
+    standardWorkHours: 8,
+    weekendDays: [],
+    doubleTimeOnSunday: false,
+    timeAndHalfAfter8Hours: false,
+    weekendRate: 1.0,
+    holidayRate: 1.0,
+    holidays: [],
+    jobPositions: []
+  });
 
-  const [newCategory, setNewCategory] = useState('');
-  // Pay Rates State
-  const [hourlyRate, setHourlyRate] = useState(settings.hourlyRate || 0);
-  const [overtimeRate, setOvertimeRate] = useState(settings.overtimeHourlyRate || 0);
-  const [weekendRate, setWeekendRate] = useState(settings.weekendRate || 1.25);
-  const [holidayRate, setHolidayRate] = useState(settings.holidayRate || 1.5);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('general');
+  const [message, setMessage] = useState({ type: '', text: '' });
 
-  // Weekend Configuration State
-  const [weekendDays, setWeekendDays] = useState(settings.weekendDays || []);
-  const [dateWeekends, setDateWeekends] = useState(settings.dateWeekends || []);
-  const [newWeekendDate, setNewWeekendDate] = useState('');
-  const [weekendConfigName, setWeekendConfigName] = useState(settings.weekendConfigName || '');
-
-  // Holidays State
-  const [newHoliday, setNewHoliday] = useState({
+  // Form states
+  const [holidayForm, setHolidayForm] = useState({
+    name: '',
     date: '',
-    name: '',
-    recurring: true,
-    payMultiplier: 1.5
+    recurring: false,
+    payMultiplier: 1.0
   });
-
-  // Job Positions State
-  const [newPosition, setNewPosition] = useState({
+  const [jobPositionForm, setJobPositionForm] = useState({
     name: '',
-    description: '',
     category: '',
-    grades: [{ level: 'I', rate: 0 }]
+    description: '',
+    baseRate: 0,
+    standardWorkHours: 8
   });
-  const [editingPositionIndex, setEditingPositionIndex] = useState(null);
+  const [editingHoliday, setEditingHoliday] = useState(null);
+  const [editingPosition, setEditingPosition] = useState(null);
 
-  // Days of week for weekend configuration
-  const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080').replace(/\/$/, '');
 
-  // Tab definitions with icons
+ // And update the loadAllSettings function to use existing endpoints:
+const loadAllSettings = async () => {
+  try {
+    setLoading(true);
+    const token = getToken();
+    
+    if (!token) {
+      console.warn('No JWT token found');
+      setLoading(false);
+      return;
+    }
+
+    // Instead of using /api/settings/all, fetch each endpoint separately
+    const [systemRes, holidaysRes, positionsRes] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/settings/system`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      }),
+      fetch(`${API_BASE_URL}/api/settings/holidays`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      }),
+      fetch(`${API_BASE_URL}/api/settings/job-positions`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      })
+    ]);
+
+    if (!systemRes.ok || !holidaysRes.ok || !positionsRes.ok) {
+      throw new Error('Failed to load some settings');
+    }
+
+    const systemSettings = await systemRes.json();
+    const holidays = await holidaysRes.json();
+    const jobPositions = await positionsRes.json();
+    
+    setSettings(prev => ({
+      ...prev,
+      hourlyRate: systemSettings.hourlyRate || 0,
+      overtimeHourlyRate: systemSettings.overtimeHourlyRate || 0,
+      standardWorkHours: systemSettings.standardWorkHours || 8,
+      weekendDays: systemSettings.weekendDays || [],
+      doubleTimeOnSunday: systemSettings.doubleTimeOnSunday || false,
+      timeAndHalfAfter8Hours: systemSettings.timeAndHalfAfter8Hours || false,
+      weekendRate: systemSettings.weekendRate || 1.0,
+      holidayRate: systemSettings.holidayRate || 1.0,
+      holidays: holidays || [],
+      jobPositions: jobPositions || []
+    }));
+  } catch (error) {
+    console.error('Error loading settings:', error);
+    showMessage('error', 'Failed to load settings');
+  } finally {
+    setLoading(false);
+  }
+};
+
+ useEffect(() => {
+    loadAllSettings();
+  }, []);
+
+  // Helper function to get JWT token
+  const getToken = () => {
+    return localStorage.getItem('jwtToken');
+  };
+
+  // Load all settings from backend
+ 
+
+// In your SettingsPage component, change the API_BASE_URL
+
+
+
+
+  const showMessage = (type, text) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+  };
+
+  // System Settings Handlers
+  const handleSystemSettingsChange = (field, value) => {
+    setSettings(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleWeekendDayToggle = (day) => {
+    const currentDays = settings.weekendDays;
+    const newDays = currentDays.includes(day)
+      ? currentDays.filter(d => d !== day)
+      : [...currentDays, day];
+    
+    handleSystemSettingsChange('weekendDays', newDays);
+  };
+
+  const handleSaveSystemSettings = async (e) => {
+    e.preventDefault();
+    try {
+      const token = getToken();
+      const systemSettings = {
+        hourlyRate: settings.hourlyRate,
+        overtimeHourlyRate: settings.overtimeHourlyRate,
+        standardWorkHours: settings.standardWorkHours,
+        weekendDays: settings.weekendDays,
+        doubleTimeOnSunday: settings.doubleTimeOnSunday,
+        timeAndHalfAfter8Hours: settings.timeAndHalfAfter8Hours,
+        weekendRate: settings.weekendRate,
+        holidayRate: settings.holidayRate
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/settings/system`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(systemSettings)
+      });
+
+      if (response.ok) {
+        showMessage('success', 'System settings updated successfully!');
+        await loadAllSettings(); // Reload to get any server-side changes
+      } else {
+        throw new Error('Failed to update settings');
+      }
+    } catch (error) {
+      console.error('Error updating system settings:', error);
+      showMessage('error', 'Failed to update system settings');
+    }
+  };
+
+  // Holiday Handlers
+  const handleHolidaySubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const token = getToken();
+      const url = editingHoliday 
+        ? `${API_BASE_URL}/api/settings/holidays/${editingHoliday.id}`
+        : `${API_BASE_URL}/api/settings/holidays`;
+      
+      const method = editingHoliday ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(holidayForm)
+      });
+
+      if (response.ok) {
+        showMessage('success', editingHoliday ? 'Holiday updated successfully!' : 'Holiday added successfully!');
+        setHolidayForm({ name: '', date: '', recurring: false, payMultiplier: 1.0 });
+        setEditingHoliday(null);
+        await loadAllSettings();
+      } else {
+        throw new Error('Failed to save holiday');
+      }
+    } catch (error) {
+      console.error('Error saving holiday:', error);
+      showMessage('error', 'Failed to save holiday');
+    }
+  };
+
+  const handleEditHoliday = (holiday) => {
+    setHolidayForm({
+      name: holiday.name,
+      date: holiday.date,
+      recurring: holiday.recurring,
+      payMultiplier: holiday.payMultiplier
+    });
+    setEditingHoliday(holiday);
+  };
+
+  const handleDeleteHoliday = async (id) => {
+    if (window.confirm('Are you sure you want to delete this holiday?')) {
+      try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/api/settings/holidays/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        });
+
+        if (response.ok) {
+          showMessage('success', 'Holiday deleted successfully!');
+          await loadAllSettings();
+        } else {
+          throw new Error('Failed to delete holiday');
+        }
+      } catch (error) {
+        console.error('Error deleting holiday:', error);
+        showMessage('error', 'Failed to delete holiday');
+      }
+    }
+  };
+
+  // Job Position Handlers
+  const handleJobPositionSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const token = getToken();
+      const url = editingPosition 
+        ? `${API_BASE_URL}/api/settings/job-positions/${editingPosition.id}`
+        : `${API_BASE_URL}/api/settings/job-positions`;
+      
+      const method = editingPosition ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(jobPositionForm)
+      });
+
+      if (response.ok) {
+        showMessage('success', editingPosition ? 'Job position updated successfully!' : 'Job position added successfully!');
+        setJobPositionForm({ name: '', category: '', description: '', baseRate: 0, standardWorkHours: 8 });
+        setEditingPosition(null);
+        await loadAllSettings();
+      } else {
+        throw new Error('Failed to save job position');
+      }
+    } catch (error) {
+      console.error('Error saving job position:', error);
+      showMessage('error', 'Failed to save job position');
+    }
+  };
+
+  const handleEditPosition = (position) => {
+    setJobPositionForm({
+      name: position.name,
+      category: position.category,
+      description: position.description,
+      baseRate: position.baseRate,
+      standardWorkHours: position.standardWorkHours
+    });
+    setEditingPosition(position);
+  };
+
+  const handleDeletePosition = async (id) => {
+    if (window.confirm('Are you sure you want to delete this job position?')) {
+      try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/api/settings/job-positions/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        });
+
+        if (response.ok) {
+          showMessage('success', 'Job position deleted successfully!');
+          await loadAllSettings();
+        } else {
+          throw new Error('Failed to delete job position');
+        }
+      } catch (error) {
+        console.error('Error deleting job position:', error);
+        showMessage('error', 'Failed to delete job position');
+      }
+    }
+  };
+
+  // Tab navigation
   const tabs = [
-    { id: 'rates', label: 'Pay Rates', icon: <FiDollarSign className="mr-2" /> },
-    { id: 'holidays', label: 'Holidays', icon: <FiCalendar className="mr-2" /> },
-    { id: 'weekend', label: 'Weekend Config', icon: <FiClock className="mr-2" /> },
-    { id: 'categories', label: 'Categories', icon: <FiUsers className="mr-2" /> },
-    { id: 'positions', label: 'Job Positions', icon: <FiBriefcase className="mr-2" /> },
+    { id: 'general', name: 'General Settings', icon: '⚙️' },
+    { id: 'holidays', name: 'Holidays', icon: '🎉' },
+    { id: 'positions', name: 'Job Positions', icon: '💼' }
   ];
 
-  // Save settings with loading state
-  const saveSettings = async (newSettings) => {
-    setSaving(true);
-    try {
-      await updateSettings(newSettings);
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
-      console.error('Error saving settings:', error);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Toggle day as weekend
-  const toggleWeekendDay = (dayIndex) => {
-    const newDays = weekendDays.includes(dayIndex)
-      ? weekendDays.filter(d => d !== dayIndex)
-      : [...weekendDays, dayIndex];
-    setWeekendDays(newDays);
-  };
-
-  // Add specific date weekend
-  const handleAddWeekendDate = () => {
-    if (!newWeekendDate) return;
-    if (!dateWeekends.includes(newWeekendDate)) {
-      setDateWeekends([...dateWeekends, newWeekendDate].sort());
-      setNewWeekendDate('');
-    }
-  };
-
-  // Remove specific date weekend
-  const handleRemoveWeekendDate = (date) => {
-    setDateWeekends(dateWeekends.filter(d => d !== date));
-  };
-
-  // Save weekend configuration
-  const saveWeekendConfig = () => {
-    saveSettings({
-      weekendDays,
-      weekendRate,
-      dateWeekends,
-      weekendConfigName
-    });
-  };
-
-  // Save pay rates
-  const handleSaveRates = (e) => {
-    e.preventDefault();
-    saveSettings({
-      hourlyRate: parseFloat(hourlyRate),
-      overtimeHourlyRate: parseFloat(overtimeRate),
-      weekendRate: parseFloat(weekendRate),
-      holidayRate: parseFloat(holidayRate)
-    });
-  };
-
-  // Add holiday
-  const handleAddHoliday = (e) => {
-    e.preventDefault();
-    if (!newHoliday.date || !newHoliday.name) return;
-    
-    saveSettings({
-      holidays: [...(settings.holidays || []), {
-        ...newHoliday,
-        date: newHoliday.date,
-        name: newHoliday.name,
-        recurring: newHoliday.recurring,
-        payMultiplier: newHoliday.payMultiplier
-      }]
-    });
-    
-    setNewHoliday({
-      date: '',
-      name: '',
-      recurring: true,
-      payMultiplier: 1.5
-    });
-  };
-
-  // Remove holiday
-  const handleRemoveHoliday = (index) => {
-    const updatedHolidays = [...settings.holidays];
-    updatedHolidays.splice(index, 1);
-    saveSettings({ holidays: updatedHolidays });
-  };
-
-  // Add category
-  const handleAddCategory = () => {
-    if (!newCategory.trim()) return;
-    
-    const currentCategories = settings.employeeCategories || [];
-    if (!currentCategories.includes(newCategory)) {
-      saveSettings({
-        employeeCategories: [...currentCategories, newCategory]
-      });
-      setNewCategory('');
-    }
-  };
-
-  // Remove category
-  const handleRemoveCategory = (index) => {
-    const updatedCategories = [...(settings.employeeCategories || [])];
-    updatedCategories.splice(index, 1);
-    saveSettings({ employeeCategories: updatedCategories });
-  };
-
-  // Job Positions Functions
-  const handleAddGrade = () => {
-    const nextLevel = String.fromCharCode(
-      newPosition.grades[newPosition.grades.length - 1].level.charCodeAt(0) + 1
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
     );
-    setNewPosition({
-      ...newPosition,
-      grades: [...newPosition.grades, { level: nextLevel, rate: 0 }]
-    });
-  };
-
-  const handleRemoveGrade = (index) => {
-    if (newPosition.grades.length <= 1) return;
-    const updatedGrades = [...newPosition.grades];
-    updatedGrades.splice(index, 1);
-    setNewPosition({
-      ...newPosition,
-      grades: updatedGrades
-    });
-  };
-
-  const handleGradeChange = (index, field, value) => {
-    const updatedGrades = [...newPosition.grades];
-    updatedGrades[index][field] = field === 'rate' ? parseFloat(value) || 0 : value;
-    setNewPosition({
-      ...newPosition,
-      grades: updatedGrades
-    });
-  };
-
-  const handleAddPosition = (e) => {
-    e.preventDefault();
-    if (!newPosition.name.trim()) return;
-    
-    const currentPositions = settings.jobPositions || [];
-    
-    if (editingPositionIndex !== null) {
-      // Editing existing position
-      const updatedPositions = [...currentPositions];
-      updatedPositions[editingPositionIndex] = newPosition;
-      saveSettings({ jobPositions: updatedPositions });
-      setEditingPositionIndex(null);
-    } else {
-      // Adding new position
-      saveSettings({
-        jobPositions: [...currentPositions, newPosition]
-      });
-    }
-    
-    // Reset form
-    setNewPosition({
-      name: '',
-      description: '',
-      category: '',
-      grades: [{ level: 'I', rate: 0 }]
-    });
-  };
-
-  const handleEditPosition = (index) => {
-    const positionToEdit = settings.jobPositions[index];
-    setNewPosition(positionToEdit);
-    setEditingPositionIndex(index);
-  };
-
-  const handleDeletePosition = (index) => {
-    const updatedPositions = [...(settings.jobPositions || [])];
-    updatedPositions.splice(index, 1);
-    saveSettings({ jobPositions: updatedPositions });
-  };
-
-  const cancelEdit = () => {
-    setNewPosition({
-      name: '',
-      description: '',
-      category: '',
-      grades: [{ level: 'I', rate: 0 }]
-    });
-    setEditingPositionIndex(null);
-  };
+  }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <MainSidebar />
-      <main className="flex-1 p-6 ml-0 lg:ml-64"> {/* Changed ml-64 to ml-0 lg:ml-64 */}
-        {/* Breadcrumb */}
-        <nav className="flex items-center text-sm text-gray-600 mb-6">
-          <a href="/" className="flex items-center text-blue-500 hover:text-blue-700">
-            <FiHome className="mr-1" /> Home
-          </a>
-          <FiChevronRight className="mx-2" />
-          <a href="/settings" className="flex items-center text-blue-500 hover:text-blue-700">
-            <FiSettings className="mr-1" /> Settings
-          </a>
-          <FiChevronRight className="mx-2" />
-          <span className="text-gray-500 capitalize">{activeTab}</span>
-        </nav>
-
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">System Settings</h1>
-          {saving && (
-            <div className="flex items-center text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2"></div>
-              Saving...
-            </div>
-          )}
-        </div>
-        
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-6 bg-white rounded-lg shadow-sm overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`flex items-center px-4 py-3 font-medium text-sm ${
-                activeTab === tab.id 
-                  ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-              }`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">System Settings</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Manage your payroll system configuration, holidays, and job positions
+          </p>
         </div>
 
-        {/* Pay Rates Tab */}
-        {activeTab === 'rates' && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-gray-50">
-              <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                <FiDollarSign className="mr-2 text-blue-600" /> Pay Rate Configuration
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">Set base pay rates and multipliers for different work conditions</p>
+        {/* Message Alert */}
+        {message.text && (
+          <div className={`mb-6 p-4 rounded-md ${
+            message.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+          }`}>
+            <div className="flex">
+              <div className="flex-shrink-0">
+                {message.type === 'success' ? (
+                  <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+              <div className="ml-3">
+                <p className={`text-sm font-medium ${
+                  message.type === 'success' ? 'text-green-800' : 'text-red-800'
+                }`}>
+                  {message.text}
+                </p>
+              </div>
             </div>
+          </div>
+        )}
 
-            <div className="p-6">
-              <form onSubmit={handleSaveRates} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div className="bg-gray-50 p-4 rounded-lg">
-  <label className="block text-sm font-medium text-gray-700 mb-1">
-    Base Hourly Rate
-  </label>
-  <div className="relative">
-    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-      <span className="text-gray-500">GHS</span>
-    </div>
-    <input
-      type="number"
-      value={hourlyRate}
-      onChange={(e) => setHourlyRate(e.target.value)}
-      className="pl-[300px] w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-      required
-      min="0"
-      step="0.01"
-    />
-  </div>
-</div>
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200 mb-8">
+          <nav className="-mb-px flex space-x-8">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === tab.id
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                <span className="mr-2">{tab.icon}</span>
+                {tab.name}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-                  
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Overtime Rate</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500">GHS</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={overtimeRate}
-                        onChange={(e) => setOvertimeRate(e.target.value)}
-                        className="pl-7 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        required
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
+        {/* General Settings Tab */}
+        {activeTab === 'general' && (
+          <div className="bg-white shadow rounded-lg">
+            <div className="px-4 py-5 sm:p-6">
+              <h3 className="text-lg leading-6 font-medium text-gray-900 mb-6">
+                Payroll & System Settings
+              </h3>
+              
+              <form onSubmit={handleSaveSystemSettings} className="space-y-6">
+                {/* Rate Settings */}
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="hourlyRate" className="block text-sm font-medium text-gray-700">
+                      Standard Hourly Rate (₵)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      id="hourlyRate"
+                      value={settings.hourlyRate}
+                      onChange={(e) => handleSystemSettingsChange('hourlyRate', parseFloat(e.target.value))}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
                   
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Weekend Rate Multiplier</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500">x</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={weekendRate}
-                        onChange={(e) => setWeekendRate(e.target.value)}
-                        step="0.01"
-                        min="1"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Holiday Rate Multiplier</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500">x</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={holidayRate}
-                        onChange={(e) => setHolidayRate(e.target.value)}
-                        step="0.01"
-                        min="1"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        required
-                      />
-                    </div>
+                  <div>
+                    <label htmlFor="overtimeHourlyRate" className="block text-sm font-medium text-gray-700">
+                      Overtime Hourly Rate (₵)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      id="overtimeHourlyRate"
+                      value={settings.overtimeHourlyRate}
+                      onChange={(e) => handleSystemSettingsChange('overtimeHourlyRate', parseFloat(e.target.value))}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-4">
+                {/* Work Hours */}
+                <div>
+                  <label htmlFor="standardWorkHours" className="block text-sm font-medium text-gray-700">
+                    Standard Work Hours Per Day
+                  </label>
+                  <input
+                    type="number"
+                    id="standardWorkHours"
+                    value={settings.standardWorkHours}
+                    onChange={(e) => handleSystemSettingsChange('standardWorkHours', parseInt(e.target.value))}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Weekend Settings */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Weekend Days
+                  </label>
+                  <div className="flex space-x-4">
+                    {[0, 1, 2, 3, 4, 5, 6].map(day => (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => handleWeekendDayToggle(day)}
+                        className={`px-4 py-2 rounded-md text-sm font-medium ${
+                          settings.weekendDays.includes(day)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Rate Multipliers */}
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="weekendRate" className="block text-sm font-medium text-gray-700">
+                      Weekend Pay Multiplier
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      id="weekendRate"
+                      value={settings.weekendRate}
+                      onChange={(e) => handleSystemSettingsChange('weekendRate', parseFloat(e.target.value))}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="holidayRate" className="block text-sm font-medium text-gray-700">
+                      Holiday Pay Multiplier
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      id="holidayRate"
+                      value={settings.holidayRate}
+                      onChange={(e) => handleSystemSettingsChange('holidayRate', parseFloat(e.target.value))}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Toggle Settings */}
+                <div className="space-y-4">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="doubleTimeOnSunday"
+                      checked={settings.doubleTimeOnSunday}
+                      onChange={(e) => handleSystemSettingsChange('doubleTimeOnSunday', e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="doubleTimeOnSunday" className="ml-2 block text-sm text-gray-900">
+                      Double Time on Sundays
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="timeAndHalfAfter8Hours"
+                      checked={settings.timeAndHalfAfter8Hours}
+                      onChange={(e) => handleSystemSettingsChange('timeAndHalfAfter8Hours', e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="timeAndHalfAfter8Hours" className="ml-2 block text-sm text-gray-900">
+                      Time and Half After 8 Hours
+                    </label>
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <div className="flex justify-end">
                   <button
                     type="submit"
-                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    disabled={saving}
+                    className="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   >
-                    <FiSave className="mr-2" />
-                    {saving ? 'Saving...' : 'Save Rates'}
+                    Save Settings
                   </button>
                 </div>
               </form>
@@ -392,80 +540,178 @@ function SettingsPage() {
           </div>
         )}
 
-        {/* Categories Tab */}
-        {activeTab === 'categories' && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-gray-50">
-              <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                <FiUsers className="mr-2 text-blue-600" /> Employee Categories
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">Manage employee categories for better organization</p>
+        {/* Holidays Tab */}
+        {activeTab === 'holidays' && (
+          <div className="space-y-6">
+            {/* Add/Edit Holiday Form */}
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-4 py-5 sm:p-6">
+                <h3 className="text-lg leading-6 font-medium text-gray-900 mb-6">
+                  {editingHoliday ? 'Edit Holiday' : 'Add New Holiday'}
+                </h3>
+                
+                <form onSubmit={handleHolidaySubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="holidayName" className="block text-sm font-medium text-gray-700">
+                        Holiday Name
+                      </label>
+                      <input
+                        type="text"
+                        id="holidayName"
+                        value={holidayForm.name}
+                        onChange={(e) => setHolidayForm(prev => ({ ...prev, name: e.target.value }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="holidayDate" className="block text-sm font-medium text-gray-700">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        id="holidayDate"
+                        value={holidayForm.date}
+                        onChange={(e) => setHolidayForm(prev => ({ ...prev, date: e.target.value }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="payMultiplier" className="block text-sm font-medium text-gray-700">
+                        Pay Multiplier
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        id="payMultiplier"
+                        value={holidayForm.payMultiplier}
+                        onChange={(e) => setHolidayForm(prev => ({ ...prev, payMultiplier: parseFloat(e.target.value) }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+                    
+                    <div className="flex items-center pt-6">
+                      <input
+                        type="checkbox"
+                        id="recurring"
+                        checked={holidayForm.recurring}
+                        onChange={(e) => setHolidayForm(prev => ({ ...prev, recurring: e.target.checked }))}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="recurring" className="ml-2 block text-sm text-gray-900">
+                        Recurring Holiday (Yearly)
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end space-x-3">
+                    {editingHoliday && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingHoliday(null);
+                          setHolidayForm({ name: '', date: '', recurring: false, payMultiplier: 1.0 });
+                        }}
+                        className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      {editingHoliday ? 'Update Holiday' : 'Add Holiday'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
 
-            <div className="p-6">
-              <div className="flex items-end gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Add New Category
-                  </label>
-                  <input
-                    type="text"
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter category name"
-                  />
-                </div>
-                <button
-                  onClick={handleAddCategory}
-                  className="flex items-center px-4 py-2 bg-blue-100 text-white rounded-md hover:bg-blue-700 transition-colors"
-                  disabled={saving}
-                >
-                  <FiPlus className="mr-1" /> Add
-                </button>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-medium text-gray-800 mb-4">Current Categories</h3>
-                {(settings.employeeCategories && settings.employeeCategories.length > 0) ? (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Category Name
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Actions
-                          </th>
+            {/* Holidays List */}
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-4 py-5 sm:p-6">
+                <h3 className="text-lg leading-6 font-medium text-gray-900 mb-6">
+                  Manage Holidays
+                </h3>
+                
+                <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-300">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Name
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Date
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Pay Multiplier
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th scope="col" className="relative px-6 py-3">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {settings.holidays.map((holiday) => (
+                        <tr key={holiday.id}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {holiday.name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {new Date(holiday.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {holiday.payMultiplier}x
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {holiday.recurring ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                Recurring
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                One-time
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              onClick={() => handleEditHoliday(holiday)}
+                              className="text-blue-600 hover:text-blue-900 mr-4"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteHoliday(holiday.id)}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Delete
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {settings.employeeCategories.map((category, index) => (
-                          <tr key={category} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {category}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                onClick={() => handleRemoveCategory(index)}
-                                className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 transition-colors"
-                                title="Remove category"
-                              >
-                                <FiTrash2 />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg">
-                    <FiUsers className="mx-auto h-12 w-12 text-gray-400" />
-                    <p className="mt-2 text-gray-500">No categories configured yet</p>
-                  </div>
-                )}
+                      ))}
+                      {settings.holidays.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-500">
+                            No holidays configured
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -473,470 +719,192 @@ function SettingsPage() {
 
         {/* Job Positions Tab */}
         {activeTab === 'positions' && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <div className="p-6 border border-gray-200 bg-gradient-to-r from-blue-50 to-gray-50">
-              <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                <FiBriefcase className="mr-2 text-blue-600" /> Job Positions Management
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">Define job positions with multiple grade levels and pay rates</p>
-            </div>
-
-            <div className="p-6">
-              <form onSubmit={handleAddPosition} className="space-y-6 mb-8 bg-gray-50 p-6 rounded-lg">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Position Name</label>
-                    <input
-                      type="text"
-                      value={newPosition.name}
-                      onChange={(e) => setNewPosition({...newPosition, name: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      required
-                      placeholder="e.g., Software Engineer"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                    <select
-                      value={newPosition.category}
-                      onChange={(e) => setNewPosition({...newPosition, category: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Select a category</option>
-                      {settings.employeeCategories?.map((category) => (
-                        <option key={category} value={category}>{category}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <textarea
-                    value={newPosition.description}
-                    onChange={(e) => setNewPosition({...newPosition, description: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    rows="3"
-                    placeholder="Describe the responsibilities and requirements for this position"
-                  />
-                </div>
-
-                <div className="border-t pt-4 mt-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-medium text-gray-800">Grade Levels & Rates</h3>
-                    <button
-                      type="button"
-                      onClick={handleAddGrade}
-                      className="flex items-center px-3 py-1 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 transition-colors"
-                    >
-                      <FiPlus className="mr-1" /> Add Grade
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {newPosition.grades.map((grade, index) => (
-                      <div key={index} className="flex items-end gap-2 bg-white p-3 rounded-md border">
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Grade Level</label>
-                          <input
-                            type="text"
-                            value={grade.level}
-                            onChange={(e) => handleGradeChange(index, 'level', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            required
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Hourly Rate (GHS)</label>
-                          <div className="relative">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                              <span className="text-gray-500">GHS</span>
-                            </div>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={grade.rate}
-                              onChange={(e) => handleGradeChange(index, 'rate', e.target.value)}
-                              className="pl-7 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                              required
-                            />
-                          </div>
-                        </div>
-                        {newPosition.grades.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveGrade(index)}
-                            className="p-2 bg-red-100 text-red-600 rounded-md hover:bg-red-200 transition-colors"
-                            title="Remove grade"
-                          >
-                            <FiTrash2 size={16} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4">
-                  {editingPositionIndex !== null && (
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      className="flex items-center px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors"
-                    >
-                      <FiX className="mr-1" /> Cancel
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    disabled={saving}
-                  >
-                    <FiSave className="mr-1" />
-                    {editingPositionIndex !== null ? 'Update Position' : 'Add Position'}
-                  </button>
-                </div>
-              </form>
-
-              <div>
-                <h3 className="text-lg font-medium text-gray-800 mb-4">Current Job Positions</h3>
-                {settings.jobPositions?.length > 0 ? (
-                  <div className="overflow-hidden border border-gray-200 rounded-lg">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Position</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grades</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {settings.jobPositions.map((position, index) => (
-                          <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-6 py-4">
-                              <div className="text-sm font-medium text-gray-900">{position.name}</div>
-                              <div className="text-sm text-gray-500 mt-1">{position.description}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {position.category || <span className="text-gray-400">Uncategorized</span>}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm text-gray-900">
-                                {position.grades.map(grade => (
-                                  <div key={grade.level} className="flex justify-between mb-1 last:mb-0">
-                                    <span className="font-medium">Grade {grade.level}:</span>
-                                    <span className="text-blue-600">GHS{grade.rate.toFixed(2)}/hr</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                onClick={() => handleEditPosition(index)}
-                                className="text-blue-600 hover:text-blue-900 mr-3 p-1 rounded-full hover:bg-blue-50 transition-colors"
-                                title="Edit position"
-                              >
-                                <FiEdit />
-                              </button>
-                              <button
-                                onClick={() => handleDeletePosition(index)}
-                                className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 transition-colors"
-                                title="Delete position"
-                              >
-                                <FiTrash2 />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg">
-                    <FiBriefcase className="mx-auto h-12 w-12 text-gray-400" />
-                    <p className="mt-2 text-gray-500">No job positions configured yet</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Holidays Tab */}
-        {activeTab === 'holidays' && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-gray-50">
-              <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                <FiCalendar className="mr-2 text-blue-600" /> Holiday Management
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">Manage holidays and special pay rates</p>
-            </div>
-
-            <div className="p-6">
-              <form onSubmit={handleAddHoliday} className="space-y-4 bg-blue-50 p-6 rounded-lg">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                    <input
-                      type="date"
-                      value={newHoliday.date}
-                      onChange={(e) => setNewHoliday({...newHoliday, date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Holiday Name</label>
-                    <input
-                      type="text"
-                      value={newHoliday.name}
-                      onChange={(e) => setNewHoliday({...newHoliday, name: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Pay Multiplier</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500">x</span>
-                      </div>
+          <div className="space-y-6">
+            {/* Add/Edit Position Form */}
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-4 py-5 sm:p-6">
+                <h3 className="text-lg leading-6 font-medium text-gray-900 mb-6">
+                  {editingPosition ? 'Edit Job Position' : 'Add New Job Position'}
+                </h3>
+                
+                <form onSubmit={handleJobPositionSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="positionName" className="block text-sm font-medium text-gray-700">
+                        Position Name
+                      </label>
                       <input
-                        type="number"
-                        step="0.1"
-                        min="1"
-                        value={newHoliday.payMultiplier}
-                        onChange={(e) => setNewHoliday({...newHoliday, payMultiplier: parseFloat(e.target.value)})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        type="text"
+                        id="positionName"
+                        value={jobPositionForm.name}
+                        onChange={(e) => setJobPositionForm(prev => ({ ...prev, name: e.target.value }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="positionCategory" className="block text-sm font-medium text-gray-700">
+                        Category
+                      </label>
+                      <input
+                        type="text"
+                        id="positionCategory"
+                        value={jobPositionForm.category}
+                        onChange={(e) => setJobPositionForm(prev => ({ ...prev, category: e.target.value }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
                   </div>
-                  <div className="flex items-end">
-                    <div className="flex items-center h-10">
-                      <input
-                        type="checkbox"
-                        checked={newHoliday.recurring}
-                        onChange={(e) => setNewHoliday({...newHoliday, recurring: e.target.checked})}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label className="ml-2 block text-sm text-gray-700">Recurring annually</label>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    disabled={saving}
-                  >
-                    <FiPlus className="mr-1" /> Add Holiday
-                  </button>
-                </div>
-              </form>
-
-              <div className="mt-8">
-                <h3 className="text-lg font-medium text-gray-800 mb-4">Current Holidays</h3>
-                {settings.holidays?.length > 0 ? (
-                  <div className="overflow-hidden border border-gray-200 rounded-lg">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurring</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {settings.holidays.map((holiday, index) => (
-                          <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {new Date(holiday.date).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{holiday.name}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{holiday.payMultiplier}x</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {holiday.recurring ? 
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Yes</span> : 
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">No</span>
-                              }
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                onClick={() => handleRemoveHoliday(index)}
-                                className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 transition-colors"
-                                title="Remove holiday"
-                              >
-                                <FiTrash2 />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg">
-                    <FiCalendar className="mx-auto h-12 w-12 text-gray-400" />
-                    <p className="mt-2 text-gray-500">No holidays configured yet</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Weekend Config Tab */}
-        {activeTab === 'weekend' && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-gray-50">
-              <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                <FiClock className="mr-2 text-blue-600" /> Weekend Configuration
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">Configure weekend days and special date weekends</p>
-            </div>
-
-            <div className="p-6 space-y-8">
-              {/* Regular Weekend Days */}
-              <div className="bg-gray-50 p-6 rounded-lg">
-                <h3 className="text-lg font-medium text-gray-800 mb-4">Regular Weekend Days</h3>
-                <div className="space-y-4">
+                  
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Select days that are always weekends:
+                    <label htmlFor="positionDescription" className="block text-sm font-medium text-gray-700">
+                      Description
                     </label>
-                    <div className="flex flex-wrap gap-2">
-                      {daysOfWeek.map((day, index) => (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => toggleWeekendDay(index)}
-                          className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                            weekendDays.includes(index)
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
-                          }`}
-                        >
-                          {weekendDays.includes(index) && <FiStar className="mr-1" />}
-                          {day}
-                        </button>
-                      ))}
-                    </div>
+                    <textarea
+                      id="positionDescription"
+                      rows={3}
+                      value={jobPositionForm.description}
+                      onChange={(e) => setJobPositionForm(prev => ({ ...prev, description: e.target.value }))}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
-
-                  <div className="w-full md:w-1/3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Weekend Rate Multiplier</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                        <span className="text-gray-500">x</span>
-                      </div>
+                  
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor="baseRate" className="block text-sm font-medium text-gray-700">
+                        Base Rate (₵)
+                      </label>
                       <input
                         type="number"
-                        step="0.1"
-                        min="1"
-                        value={weekendRate}
-                        onChange={(e) => setWeekendRate(parseFloat(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        step="0.01"
+                        id="baseRate"
+                        value={jobPositionForm.baseRate}
+                        onChange={(e) => setJobPositionForm(prev => ({ ...prev, baseRate: parseFloat(e.target.value) }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="standardWorkHours" className="block text-sm font-medium text-gray-700">
+                        Standard Work Hours
+                      </label>
+                      <input
+                        type="number"
+                        id="standardWorkHours"
+                        value={jobPositionForm.standardWorkHours}
+                        onChange={(e) => setJobPositionForm(prev => ({ ...prev, standardWorkHours: parseInt(e.target.value) }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         required
                       />
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Specific Date Weekends */}
-              <div className="bg-gray-50 p-6 rounded-lg">
-                <h3 className="text-lg font-medium text-gray-800 mb-4">Specific Date Weekends</h3>
-                <div className="flex items-end gap-4 mb-4">
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Add Specific Date</label>
-                    <input
-                      type="date"
-                      value={newWeekendDate}
-                      onChange={(e) => setNewWeekendDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  
+                  <div className="flex justify-end space-x-3">
+                    {editingPosition && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPosition(null);
+                          setJobPositionForm({ name: '', category: '', description: '', baseRate: 0, standardWorkHours: 8 });
+                        }}
+                        className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      {editingPosition ? 'Update Position' : 'Add Position'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddWeekendDate}
-                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                  >
-                    <FiPlus className="mr-1" /> Add Date
-                  </button>
-                </div>
+                </form>
+              </div>
+            </div>
 
-                {dateWeekends.length > 0 ? (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            {/* Positions List */}
+            <div className="bg-white shadow rounded-lg">
+              <div className="px-4 py-5 sm:p-6">
+                <h3 className="text-lg leading-6 font-medium text-gray-900 mb-6">
+                  Manage Job Positions
+                </h3>
+                
+                <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-300">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Name
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Category
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Base Rate
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Work Hours
+                        </th>
+                        <th scope="col" className="relative px-6 py-3">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {settings.jobPositions.map((position) => (
+                        <tr key={position.id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{position.name}</div>
+                            {position.description && (
+                              <div className="text-sm text-gray-500">{position.description}</div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {position.category}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            ₵{position.baseRate}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {position.standardWorkHours} hours
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              onClick={() => handleEditPosition(position)}
+                              className="text-blue-600 hover:text-blue-900 mr-4"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeletePosition(position.id)}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Delete
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {dateWeekends.map((date) => (
-                          <tr key={date} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {new Date(date).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveWeekendDate(date)}
-                                className="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 transition-colors"
-                                title="Remove date"
-                              >
-                                <FiTrash2 />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-white rounded-lg border border-dashed border-gray-300">
-                    <p className="text-gray-500">No specific date weekends configured yet</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Config Name */}
-              <div className="bg-gray-50 p-6 rounded-lg">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Configuration Name</label>
-                <input
-                  type="text"
-                  value={weekendConfigName}
-                  onChange={(e) => setWeekendConfigName(e.target.value)}
-                  placeholder="Name your configuration"
-                  className="w-full md:w-1/2 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={saveWeekendConfig}
-                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                  disabled={saving}
-                >
-                  <FiSave className="mr-1" />
-                  {saving ? 'Saving...' : 'Save Weekend Config'}
-                </button>
+                      ))}
+                      {settings.jobPositions.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-500">
+                            No job positions configured
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
-}
+};
 
 export default SettingsPage;

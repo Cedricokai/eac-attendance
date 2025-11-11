@@ -10,16 +10,18 @@ const LeaveStatus = () => {
     return token;
   };
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+  
   const fetchLeaveRequests = async () => {
     try {
       const token = getValidToken();
-      const userResponse = await fetch("http://localhost:8080/auth/me", {
+      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       
       if (userResponse.ok) {
         const userData = await userResponse.json();
-        const response = await fetch(`http://localhost:8080/api/leave/employee/${userData.username}`, {
+        const response = await fetch(`${API_BASE_URL}/api/leave/employee/${userData.username}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         

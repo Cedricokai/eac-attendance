@@ -15,10 +15,6 @@ import {
   LogOut,
   X
 } from 'lucide-react';
-import AttendanceDashboard from '../Eac-attendance/attendanceDashboard';
-import InventoryDashboard from '../Eac-inventory/InventoryDashboard';
-import Userpage from '../Userpage';
-import companyLogo from "../../assets/companyLogo.jpg";
 
 const CentralizedDashboard = () => {
   const location = useLocation();
@@ -27,67 +23,46 @@ const CentralizedDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-
-  // Mock user data
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const token = localStorage.getItem("jwtToken");
-        const res = await fetch("http://localhost:8080/auth/me", {
-          headers: {
-            "Authorization": `Bearer ${token}`
-          },
-          credentials: "include"
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUser({
-            name: data.username,
-            role: data.role.replace("ROLE_", "").toLowerCase(), 
-            email: data.email
-          });
-        }
-      } catch (err) {
-        console.error("Failed to fetch user", err);
-      }
-    };
-    fetchUser();
+    // Get user data from localStorage
+    const userData = localStorage.getItem("userData");
+    const userRole = localStorage.getItem("userRole");
+    
+    if (userData) {
+      setUser(JSON.parse(userData));
+    } else {
+      // Demo user data
+      setUser({
+        name: "Demo User",
+        role: userRole ? userRole.replace("ROLE_", "").toLowerCase() : 'admin',
+        email: "demo@example.com",
+        id: "1"
+      });
+    }
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      const token = localStorage.getItem("jwtToken");
-
-      await fetch("http://localhost:8080/auth/logout", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-      });
-
-      // Clear local storage
-      localStorage.removeItem("jwtToken");
-      localStorage.removeItem("userRole");
-
-      // Redirect to login
-      navigate("/");
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
+  const handleLogout = () => {
+    // Clear local storage
+    localStorage.removeItem("jwtToken");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("userData");
+    localStorage.removeItem("authToken");
+    
+    // Redirect to login
+    navigate("/");
   };
 
   const dashboards = [
     { 
-      id: 'attendance', 
+      id: 'attendanceDashboard', 
       name: 'Attendance', 
       icon: <Users size={18} />, 
       color: 'bg-blue-100 text-blue-800',
       hover: 'hover:bg-blue-50',
-      roles: ['admin', 'manager', 'supervisor']
+      roles: ['admin', 'hr', 'supervisor']
     },
     { 
       id: 'hr', 
@@ -103,15 +78,15 @@ const CentralizedDashboard = () => {
       icon: <DollarSign size={18} />, 
       color: 'bg-green-100 text-green-800',
       hover: 'hover:bg-green-50',
-      roles: ['admin', 'accountant']
+      roles: ['admin', 'hr', 'accountant']
     },
     { 
       id: 'InventoryDashboard', 
-      name: 'InventoryDashboard', 
+      name: 'Inventory', 
       icon: <Package size={18} />, 
       color: 'bg-amber-100 text-amber-800',
       hover: 'hover:bg-amber-50',
-      roles: ['admin', 'InventoryDashbaord']
+      roles: ['admin', 'inventory']
     },
     { 
       id: 'reports', 
@@ -119,26 +94,18 @@ const CentralizedDashboard = () => {
       icon: <PieChart size={18} />, 
       color: 'bg-cyan-100 text-cyan-800',
       hover: 'hover:bg-cyan-50',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'hr']
     },
     { 
-      id: 'UserPage', 
-      name: 'UserPage', 
-      icon: <PieChart size={18} />, 
-      color: 'bg-cyan-100 text-cyan-800',
-      hover: 'hover:bg-cyan-50',
-      roles: ['admin', 'manager']
-    },
-    { 
-      id: 'quotationMaster', 
-      name: 'Quotation Master', 
-      icon: <Settings size={18} />, 
-      color: 'bg-gray-100 text-gray-800',
-      hover: 'hover:bg-gray-50',
+      id: 'userpage', 
+      name: 'User Management', 
+      icon: <Users size={18} />, 
+      color: 'bg-indigo-100 text-indigo-800',
+      hover: 'hover:bg-indigo-50',
       roles: ['admin']
     },
     { 
-      id: 'settingspage', 
+      id: 'settings', 
       name: 'Settings', 
       icon: <Settings size={18} />, 
       color: 'bg-gray-100 text-gray-800',
@@ -147,31 +114,20 @@ const CentralizedDashboard = () => {
     }
   ];
 
-  const filteredDashboards = dashboards.filter(dashboard => 
-    dashboard.roles.includes(user?.role || 'employee')
-  );
+  // Filter dashboards based on user role
+  const filteredDashboards = dashboards.filter(dashboard => {
+    if (!user?.role) return false;
+    return dashboard.roles.includes(user.role);
+  });
 
   useEffect(() => {
     const path = location.pathname.split('/')[1];
-    if (path && path !== 'dashboard') {
+    if (path && path !== 'centralizedDashboard') {
       setActiveDashboard(path);
     } else {
       setActiveDashboard('main');
     }
   }, [location.pathname]);
-
-  const renderDashboard = () => {
-    switch (activeDashboard) {
-      case 'attendance':
-        return <AttendanceDashboard />;
-      case 'InventoryDashboard':
-        return <InventoryDashboard />;
-      case 'UserPage':
-        return <Userpage />;
-      default:
-        return <MainDashboard />;
-    }
-  };
 
   const MainDashboard = () => (
     <motion.div
@@ -180,32 +136,64 @@ const CentralizedDashboard = () => {
       transition={{ duration: 0.3 }}
       className="p-6"
     >
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Welcome back, {user?.name}</h2>
+      <div className="mb-8">
+        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+          Welcome back, {user?.name || 'User'}!
+        </h2>
+        <p className="text-gray-600">
+          Here's an overview of your available modules
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredDashboards.map((dashboard) => (
-          <motion.div
-            key={dashboard.id}
-            whileHover={{ y: -5 }}
-            onClick={() => {
-              setActiveDashboard(dashboard.id);
-              navigate(`/${dashboard.id}`);
-            }}
-            className={`${dashboard.color} ${dashboard.hover} p-6 rounded-xl shadow-xs border border-gray-100 cursor-pointer transition-all duration-200 flex items-center`}
-          >
-            <div className="p-3 rounded-lg bg-white shadow-xs mr-4">
-              {dashboard.icon}
+        {filteredDashboards.length > 0 ? (
+          filteredDashboards.map((dashboard) => (
+            <motion.div
+              key={dashboard.id}
+              whileHover={{ y: -5, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
+                setActiveDashboard(dashboard.id);
+                navigate(`/${dashboard.id}`);
+              }}
+              className={`${dashboard.color} ${dashboard.hover} p-6 rounded-xl shadow-sm border border-gray-200 cursor-pointer transition-all duration-200 flex items-center group`}
+            >
+              <div className="p-3 rounded-lg bg-white shadow-xs mr-4 group-hover:scale-110 transition-transform">
+                {dashboard.icon}
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold mb-1">{dashboard.name}</h3>
+                <p className="text-sm text-gray-600">
+                  Access {dashboard.name.toLowerCase()} features
+                </p>
+              </div>
+            </motion.div>
+          ))
+        ) : (
+          <div className="col-span-full text-center py-12">
+            <div className="text-gray-500 text-lg">
+              No modules available for your role ({user?.role || 'unknown'})
             </div>
-            <div>
-              <h3 className="text-lg font-semibold">{dashboard.name}</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                View and manage {dashboard.name.toLowerCase()}
-              </p>
-            </div>
-          </motion.div>
-        ))}
+            <p className="text-sm text-gray-400 mt-2">
+              Contact administrator for access
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
+
+  // Add click outside handler for dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userDropdownOpen && !event.target.closest('.user-dropdown')) {
+        setUserDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [userDropdownOpen]);
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -225,7 +213,7 @@ const CentralizedDashboard = () => {
                 className="flex items-center"
               >
                 <div className="w-8 h-8 rounded-md bg-white flex items-center justify-center mr-2">
-                  <span className="text-indigo-800 font-bold">EAC</span>
+                  <span className="text-indigo-800 font-bold text-sm">EAC</span>
                 </div>
                 <h1 className="text-lg font-bold">Employee Portal</h1>
               </motion.div>
@@ -235,7 +223,7 @@ const CentralizedDashboard = () => {
                 animate={{ opacity: 1 }}
                 className="w-8 h-8 rounded-md bg-white flex items-center justify-center mx-auto"
               >
-                <span className="text-indigo-800 font-bold">E</span>
+                <span className="text-indigo-800 font-bold text-sm">E</span>
               </motion.div>
             )}
             <button 
@@ -250,11 +238,11 @@ const CentralizedDashboard = () => {
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto py-4">
             <Link 
-              to="/dashboard"
+              to="/centralizedDashboard"
               className={`flex items-center p-3 mx-2 my-1 rounded-lg transition-colors ${activeDashboard === 'main' ? 'bg-indigo-700' : 'hover:bg-indigo-700'}`}
             >
               <Home size={20} />
-              {sidebarOpen && <span className="ml-3">Dashboards</span>}
+              {sidebarOpen && <span className="ml-3">Dashboard</span>}
             </Link>
 
             {filteredDashboards.map((dashboard) => (
@@ -274,32 +262,33 @@ const CentralizedDashboard = () => {
             <div className={`flex items-center p-3 rounded-lg ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
               {sidebarOpen ? (
                 <>
-                  <div className="flex items-center">
-                    <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
-                      {user?.name?.charAt(0) || 'U'}
+                  <div className="flex items-center min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white flex-shrink-0">
+                      {user?.name?.charAt(0)?.toUpperCase() || 'U'}
                     </div>
-                    <div className="ml-3">
-                      <p className="text-sm font-medium">{user?.name || 'User'}</p>
-                      <p className="text-xs text-indigo-200 capitalize">{user?.role || 'employee'}</p>
+                    <div className="ml-3 min-w-0">
+                      <p className="text-sm font-medium truncate">{user?.name || 'User'}</p>
+                      <p className="text-xs text-indigo-200 capitalize truncate">{user?.role || 'employee'}</p>
                     </div>
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm flex-shrink-0 ml-2"
+                    title="Logout"
                   >
-                    Logout
+                    <LogOut size={16} />
                   </button>
                 </>
               ) : (
                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
-                  {user?.name?.charAt(0) || 'U'}
+                  {user?.name?.charAt(0)?.toUpperCase() || 'U'}
                 </div>
               )}
             </div>
           </div>
         </div>
       </motion.div>
-    
+
       {/* Mobile Sidebar */}
       <AnimatePresence>
         {mobileMenuOpen && (
@@ -335,7 +324,7 @@ const CentralizedDashboard = () => {
 
               <nav className="py-4 overflow-y-auto h-[calc(100%-8rem)]">
                 <Link 
-                  to="/dashboard"
+                  to="/centralizedDashboard"
                   onClick={() => setMobileMenuOpen(false)}
                   className={`flex items-center p-3 mx-2 my-1 rounded-lg transition-colors ${activeDashboard === 'main' ? 'bg-indigo-700' : 'hover:bg-indigo-700'}`}
                 >
@@ -360,7 +349,7 @@ const CentralizedDashboard = () => {
                 <div className="flex items-center justify-between p-3 rounded-lg">
                   <div className="flex items-center">
                     <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
-                      {user?.name?.charAt(0) || 'U'}
+                      {user?.name?.charAt(0)?.toUpperCase() || 'U'}
                     </div>
                     <div className="ml-3">
                       <p className="text-sm font-medium">{user?.name || 'User'}</p>
@@ -369,9 +358,10 @@ const CentralizedDashboard = () => {
                   </div>
                   <button
                     onClick={handleLogout}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    title="Logout"
                   >
-                    Logout
+                    <LogOut size={16} />
                   </button>
                 </div>
               </div>
@@ -380,6 +370,7 @@ const CentralizedDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* Main Content */}
       <div 
         className="flex-1 transition-all duration-300 overflow-auto"
         style={{ marginLeft: sidebarOpen ? '240px' : '80px' }}
@@ -387,9 +378,18 @@ const CentralizedDashboard = () => {
         <header className="bg-white shadow-sm sticky top-0 z-10">
           <div className="flex items-center justify-between p-4 h-16">
             <div className="flex items-center">
-              {/* Hamburger menu button removed from here */}
+              <button 
+                onClick={() => setMobileMenuOpen(true)}
+                className="md:hidden p-2 mr-2 rounded-md hover:bg-gray-100"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
               <div className="flex items-center space-x-2">
-                <img src={companyLogo} alt="Company Logo" className="h-8 w-auto" />
+                <div className="h-8 w-8 rounded-md bg-indigo-600 flex items-center justify-center">
+                  <span className="text-white font-bold text-sm">EAC</span>
+                </div>
                 <span className="text-xl font-semibold text-gray-800">
                   {dashboards.find(d => d.id === activeDashboard)?.name || 'Dashboard'}
                 </span>
@@ -398,15 +398,15 @@ const CentralizedDashboard = () => {
             
             <div className="flex items-center space-x-4">
               {/* User Dropdown Section */}
-              <div className="relative">
+              <div className="relative user-dropdown">
                 <div 
                   className="flex items-center space-x-2 cursor-pointer group"
                   onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                 >
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-indigo-400 flex items-center justify-center text-white">
-                    <span className="font-medium">{user?.name?.charAt(0) || 'U'}</span>
+                    <span className="font-medium text-sm">{user?.name?.charAt(0)?.toUpperCase() || 'U'}</span>
                   </div>
-                  <span className="font-medium text-gray-700 group-hover:text-gray-900">
+                  <span className="font-medium text-gray-700 group-hover:text-gray-900 hidden sm:block">
                     {user?.name || 'User'}
                   </span>
                   <ChevronDown 
@@ -423,10 +423,9 @@ const CentralizedDashboard = () => {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
                       className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200"
-                      onClick={(e) => e.stopPropagation()}
                     >
                       <div className="px-4 py-2 border-b border-gray-100">
-                        <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
+                        <p className="text-sm font-medium text-gray-900 truncate">{user?.name || 'User'}</p>
                         <p className="text-xs text-gray-500 truncate">{user?.email || ''}</p>
                         <p className="text-xs text-indigo-600 capitalize mt-1">{user?.role || 'employee'}</p>
                       </div>
@@ -469,7 +468,7 @@ const CentralizedDashboard = () => {
             transition={{ duration: 0.2 }}
             className="min-h-[calc(100vh-4rem)] bg-gray-50"
           >
-            {renderDashboard()}
+            <MainDashboard />
           </motion.div>
         </AnimatePresence>
       </div>

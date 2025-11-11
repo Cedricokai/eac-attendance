@@ -1,211 +1,439 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Card,
-  Typography,
-  Spinner,
-  Button,
-  Chip // Make sure Chip is imported
-} from "@material-tailwind/react";
-import {
-  HomeIcon,
-  ClockIcon,
-  UserGroupIcon,
   TruckIcon,
-  UserCircleIcon
+  UserCircleIcon,
+  ArrowLeftIcon
 } from "@heroicons/react/24/solid";
+import {
+  XMarkIcon,
+  CalendarIcon,
+  MapPinIcon
+} from "@heroicons/react/24/outline";
+import { SidebarWithBurgerMenu } from './SidebarWithBurgerMenu';
 
 const Outgoing = () => {
-    const [outgoingProducts, setOutgoingProducts] = useState([]);
+    const [outgoingRecords, setOutgoingRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [filteredRecords, setFilteredRecords] = useState([]);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [dateFilter, setDateFilter] = useState('');
+    const [locationFilter, setLocationFilter] = useState('');
     const navigate = useNavigate();
 
-    useEffect(() => {
-        const fetchOutgoingProducts = async () => {
-            const token = localStorage.getItem('jwtToken');
-            try {
-                const response = await fetch('http://localhost:8080/api/outgoing', {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                    }
-                });
-                if (!response.ok) throw new Error(`Network error: ${response.status}`);
-                const data = await response.json();
-                setOutgoingProducts(data);
-            } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
+    const locations = ['AHAFO_NORTH', 'NPI', 'LAYDOWN', 'MKV', 'SUG', 'PROCESS PLANT', 'AROPLANT', 'PLANT SITE'];
+
+    const getApiBaseUrl = () => {
+        const hostname = window.location.hostname;
+        if (hostname.startsWith("192.168.") || hostname === "localhost") {
+            return import.meta.env.VITE_API_BASE_URL_LOCAL;
+        } else {
+            return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+        }
+    };
+
+    // Get auth token
+    const getAuthToken = () => {
+        return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
+    };
+
+    // Fetch Outgoing Records
+    const fetchOutgoingRecords = async () => {
+        try {
+            setLoading(true);
+            const token = getAuthToken();
+            const API_BASE_URL = getApiBaseUrl();
+
+            if (!token) {
+                setError('Authentication token not found. Please login again.');
+                return;
             }
-        };
-        fetchOutgoingProducts();
+
+            const response = await fetch(`${API_BASE_URL}/api/outgoing`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch outgoing records: ${response.status}`);
+            }
+
+            const data = await response.json();
+            setOutgoingRecords(data);
+            setFilteredRecords(data);
+
+        } catch (err) {
+            console.error('Error fetching outgoing records:', err);
+            setError('Failed to load outgoing inventory data');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchOutgoingRecords();
     }, []);
 
+    // Apply filters
+    useEffect(() => {
+        let filtered = outgoingRecords;
+
+        // Search filter
+        if (searchTerm) {
+            filtered = filtered.filter(record =>
+                record.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                record.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                record.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                record.requestedBy?.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
+
+        // Date filter
+        if (dateFilter) {
+            filtered = filtered.filter(record => {
+                const recordDate = new Date(record.movementDate).toISOString().split('T')[0];
+                return recordDate === dateFilter;
+            });
+        }
+
+        // Location filter
+        if (locationFilter) {
+            filtered = filtered.filter(record => record.location === locationFilter);
+        }
+
+        setFilteredRecords(filtered);
+    }, [searchTerm, dateFilter, locationFilter, outgoingRecords]);
+
     const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
         const date = new Date(dateString);
-        return date.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        return date.toLocaleString();
+    };
+
+    const formatDateForInput = (dateString) => {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return date.toISOString().split('T')[0];
+    };
+
+    const getStatusColor = (quantityMoved) => {
+        if (quantityMoved > 10) return 'bg-green-100 text-green-800';
+        if (quantityMoved > 5) return 'bg-amber-100 text-amber-800';
+        return 'bg-blue-100 text-blue-800';
+    };
+
+    const clearFilters = () => {
+        setSearchTerm('');
+        setDateFilter('');
+        setLocationFilter('');
     };
 
     if (loading) return (
         <div className="flex justify-center items-center h-screen">
-            <Spinner className="h-12 w-12" />
+            <div className="h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
     );
 
     if (error) return (
-        <div className="flex justify-center items-center h-screen">
-            <Card className="p-6">
-                <Typography variant="h5" color="red">
-                    Error: {error}
-                </Typography>
-            </Card>
+        <div className="mx-auto mt-10 w-96 bg-white rounded-lg shadow-md border border-gray-200">
+            <div className="p-6">
+                <h2 className="text-xl text-red-600 font-semibold mb-4">Error</h2>
+                <p className="text-red-600">{error}</p>
+                <button 
+                    onClick={() => window.location.reload()}
+                    className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                    Retry
+                </button>
+            </div>
         </div>
     );
 
     return (
         <div className="flex min-h-screen bg-gray-50">
-            {/* Sidebar */}
-            <div className="w-64 bg-gradient-to-b from-blue-800 to-blue-900 shadow-xl text-white">
-                <div className="p-6 border-b border-blue-700 flex items-center gap-3">
-                    <TruckIcon className="h-7 w-7 text-blue-300" />
-                    <Typography variant="h5" className="font-bold">StockFlow</Typography>
+            {/* Fixed Header with Burger Menu at TOP */}
+            <div className="fixed top-0 left-0 right-0 bg-white shadow-sm z-50">
+                <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                    <div className="flex items-center gap-4">
+                        <SidebarWithBurgerMenu onToggle={() => {}} />
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+                        >
+                            <ArrowLeftIcon className="h-5 w-5" />
+                            Back
+                        </button>
+                        <h1 className="text-2xl font-bold text-gray-900">Outgoing Inventory</h1>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <div className="text-sm text-gray-600">
+                            Welcome, Admin
+                        </div>
+                        <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                            <UserCircleIcon className="h-5 w-5 text-blue-600" />
+                        </div>
+                    </div>
                 </div>
-                <nav className="p-4">
-                    <ul className="space-y-1">
-                        <li>
-                            <Button
-                                variant="text"
-                                color="white"
-                                className="flex items-center gap-3 w-full justify-start hover:bg-blue-700/50 rounded-lg p-3"
-                                onClick={() => navigate('/MasterPage')}
-                            >
-                                <HomeIcon className="h-5 w-5" />
-                                <span className="font-medium">Dashboard</span>
-                            </Button>
-                        </li>
-                        <li>
-                            <Button
-                                variant="text"
-                                color="white"
-                                className="flex items-center gap-3 w-full justify-start hover:bg-blue-700/50 rounded-lg p-3"
-                                onClick={() => navigate('/History')}
-                            >
-                                <ClockIcon className="h-5 w-5" />
-                                <span className="font-medium">History</span>
-                            </Button>
-                        </li>
-                        <li>
-                            <Button
-                                variant="text"
-                                color="white"
-                                className="flex items-center gap-3 w-full justify-start hover:bg-blue-700/50 rounded-lg p-3"
-                                onClick={() => navigate('/Userpage')}
-                            >
-                                <UserGroupIcon className="h-5 w-5" />
-                                <span className="font-medium">Users</span>
-                            </Button>
-                        </li>
-                    </ul>
-                </nav>
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 p-6 overflow-auto">
-                <Typography variant="h3" color="blue-gray" className="mb-8">Outgoing Products</Typography>
-                <Card className="overflow-hidden border border-gray-200 shadow-sm">
-                    <div className="overflow-x-auto">
-                        <table className="w-full table-auto">
-    <thead>
-      <tr className="bg-gray-100">
-        <th className="w-[15%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Name</Typography>
-        </th>
-        <th className="w-[10%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Code</Typography>
-        </th>
-        <th className="w-[20%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Description</Typography>
-        </th>
-        <th className="w-[10%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Stock</Typography>
-        </th>
-        <th className="w-[15%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Moved By</Typography>
-        </th>
-        <th className="w-[15%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Requested By</Typography>
-        </th>
-        <th className="w-[10%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Location</Typography>
-        </th>
-        <th className="w-[15%] p-4 text-left border-b border-blue-gray-100">
-          <Typography variant="small" className="font-semibold">Movement Date</Typography>
-        </th>
-      </tr>
-    </thead>
-    <tbody>
-      {outgoingProducts.map((product) => (
-        <tr key={product.id} className="hover:bg-blue-gray-50/50">
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="font-medium truncate">
-              {product.name}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="truncate">
-              {product.code}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="truncate">
-              {product.description}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Chip 
-              value={product.stock} 
-              color={
-                product.stock > 10 ? 'green' : 
-                product.stock > 0 ? 'amber' : 'red'
-              }
-              className="w-fit"
-            />
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="truncate">
-              {product.userName}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="truncate">
-              {product.requestedBy}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small" className="truncate">
-              {product.location}
-            </Typography>
-          </td>
-          <td className="p-4 border-b border-blue-gray-50">
-            <Typography variant="small">
-              {formatDate(product.movementDate)}
-            </Typography>
-          </td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
+            <div className="flex-1 mt-16">
+                <div className="p-6 overflow-auto">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-600">Total Transfers</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">{outgoingRecords.length}</p>
+                                </div>
+                                <div className="h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <TruckIcon className="h-6 w-6 text-blue-600" />
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-600">Total Items Moved</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                                        {outgoingRecords.reduce((sum, record) => sum + (record.quantityMoved || 0), 0)}
+                                    </p>
+                                </div>
+                                <div className="h-12 w-12 bg-green-100 rounded-full flex items-center justify-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-600">Unique Products</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                                        {new Set(outgoingRecords.map(record => record.productId)).size}
+                                    </p>
+                                </div>
+                                <div className="h-12 w-12 bg-purple-100 rounded-full flex items-center justify-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-600">Active Locations</p>
+                                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                                        {new Set(outgoingRecords.map(record => record.location)).size}
+                                    </p>
+                                </div>
+                                <div className="h-12 w-12 bg-amber-100 rounded-full flex items-center justify-center">
+                                    <MapPinIcon className="h-6 w-6 text-amber-600" />
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </Card>
+
+                    {/* Filters Section */}
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+                        <div className="flex flex-col lg:flex-row gap-4 items-end">
+                            <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Search Products
+                                </label>
+                                <input
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    placeholder="Search by name, code, description, or requester..."
+                                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            
+                            <div className="w-full lg:w-48">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    <CalendarIcon className="h-4 w-4 inline mr-1" />
+                                    Date
+                                </label>
+                                <input
+                                    type="date"
+                                    value={dateFilter}
+                                    onChange={(e) => setDateFilter(e.target.value)}
+                                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            
+                            <div className="w-full lg:w-48">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    <MapPinIcon className="h-4 w-4 inline mr-1" />
+                                    Location
+                                </label>
+                                <select
+                                    value={locationFilter}
+                                    onChange={(e) => setLocationFilter(e.target.value)}
+                                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                    <option value="">All Locations</option>
+                                    {locations.map((location) => (
+                                        <option key={location} value={location}>
+                                            {location.replace('_', ' ')}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            
+                            <button
+                                onClick={clearFilters}
+                                className="px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+                            >
+                                Clear Filters
+                            </button>
+                        </div>
+                        
+                        {/* Active Filters */}
+                        {(searchTerm || dateFilter || locationFilter) && (
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                {searchTerm && (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                                        Search: "{searchTerm}"
+                                        <button onClick={() => setSearchTerm('')} className="ml-1 hover:text-blue-900">
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </span>
+                                )}
+                                {dateFilter && (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                                        Date: {dateFilter}
+                                        <button onClick={() => setDateFilter('')} className="ml-1 hover:text-green-900">
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </span>
+                                )}
+                                {locationFilter && (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-amber-100 text-amber-800">
+                                        Location: {locationFilter.replace('_', ' ')}
+                                        <button onClick={() => setLocationFilter('')} className="ml-1 hover:text-amber-900">
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Outgoing Records Table */}
+                    <div className="overflow-hidden border border-gray-200 shadow-sm bg-white rounded-lg">
+                        <div className="p-4 bg-gray-50 border-b">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-semibold text-gray-900">
+                                    Transfer History ({filteredRecords.length} records)
+                                </h2>
+                                <span className="text-sm text-gray-600">
+                                    Last updated: {new Date().toLocaleTimeString()}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div className="p-0 overflow-x-auto">
+                            {filteredRecords.length === 0 ? (
+                                <div className="p-8 text-center text-gray-500">
+                                    {outgoingRecords.length === 0 ? 
+                                        "No outgoing records found" : 
+                                        "No records match your filters"
+                                    }
+                                </div>
+                            ) : (
+                                <table className="w-full min-w-max table-auto">
+                                    <thead>
+                                        <tr>
+                                            {["Product", "Code", "Description", "Brand", "Quantity", "Location", "Requested By", "Transfer Date"].map((head) => (
+                                                <th key={head} className="border-b border-gray-200 bg-gray-50 p-4">
+                                                    <div className="text-sm font-semibold text-gray-700 text-left">
+                                                        {head}
+                                                    </div>
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredRecords.map((record) => (
+                                            <tr key={record.id} className="hover:bg-gray-50/50 transition-colors">
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm font-medium text-gray-900">
+                                                        {record.name}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        ID: {record.productId}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm text-gray-700 font-mono">
+                                                        {record.code || 'N/A'}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm text-gray-700 max-w-xs truncate">
+                                                        {record.description}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm text-gray-700">
+                                                        {record.userName}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(record.quantityMoved)}`}>
+                                                        {record.stock}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="flex items-center gap-2">
+                                                        <MapPinIcon className="h-4 w-4 text-gray-400" />
+                                                        <span className="text-sm text-gray-700">
+                                                            {record.location?.replace('_', ' ') || 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm text-gray-700">
+                                                        {record.requestedBy}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 border-b border-gray-200">
+                                                    <div className="text-sm text-gray-700">
+                                                        {formatDate(record.movementDate)}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Refresh Button */}
+                    <div className="mt-6 flex justify-center">
+                        <button
+                            onClick={fetchOutgoingRecords}
+                            className="flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                            </svg>
+                            Refresh Data
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     );

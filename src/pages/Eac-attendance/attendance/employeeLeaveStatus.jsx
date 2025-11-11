@@ -5,6 +5,8 @@ const EmployeeLeaveStatus = () => {
   const [loading, setLoading] = useState(true);
   const [employeeId, setEmployeeId] = useState(""); // Get from auth context
 
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   useEffect(() => {
     // Get employee ID from authentication context or localStorage
     const userData = localStorage.getItem('userData');
@@ -21,7 +23,7 @@ const EmployeeLeaveStatus = () => {
   const fetchEmployeeLeaves = async () => {
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/leave/employee/${employeeId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/leave/employee/${employeeId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         }
