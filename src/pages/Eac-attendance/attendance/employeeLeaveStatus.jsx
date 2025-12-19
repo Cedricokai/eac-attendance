@@ -4,6 +4,38 @@ const EmployeeLeaveStatus = () => {
   const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [employeeId, setEmployeeId] = useState(""); // Get from auth context
+  
+ const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
+
+  console.log("🖥️ Current hostname:", hostname);
+  console.log("🔌 Current port:", port);
+
+  // If frontend is opened via localhost → use localhost backend
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    console.log("🏠 Using LOCALHOST API URL");
+    return "http://localhost:8080";
+  }
+
+  // LAN access
+  if (hostname.startsWith("192.168.")) {
+    console.log("🏠 Using LAN API URL");
+    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  }
+
+  // Public / Tailscale / Cloudflare IP
+  if (hostname === "100.114.178.13") {
+    console.log("🌐 Using PUBLIC API URL");
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  }
+
+  // Default fallback
+  console.log("🌍 Using PUBLIC API URL (fallback)");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+
+  const API_BASE_URL = getApiBaseUrl();
 
   useEffect(() => {
     // Get employee ID from authentication context or localStorage
@@ -21,7 +53,7 @@ const EmployeeLeaveStatus = () => {
   const fetchEmployeeLeaves = async () => {
     try {
       const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/leave/employee/${employeeId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/leave/employee/${employeeId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         }

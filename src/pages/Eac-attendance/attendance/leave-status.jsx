@@ -10,16 +10,48 @@ const LeaveStatus = () => {
     return token;
   };
 
+  const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
+
+  console.log("🖥️ Current hostname:", hostname);
+  console.log("🔌 Current port:", port);
+
+  // If frontend is opened via localhost → use localhost backend
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    console.log("🏠 Using LOCALHOST API URL");
+    return "http://localhost:8080";
+  }
+
+  // LAN access
+  if (hostname.startsWith("192.168.")) {
+    console.log("🏠 Using LAN API URL");
+    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  }
+
+  // Public / Tailscale / Cloudflare IP
+  if (hostname === "100.114.178.13") {
+    console.log("🌐 Using PUBLIC API URL");
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  }
+
+  // Default fallback
+  console.log("🌍 Using PUBLIC API URL (fallback)");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+
+  const API_BASE_URL = getApiBaseUrl();
+  
   const fetchLeaveRequests = async () => {
     try {
       const token = getValidToken();
-      const userResponse = await fetch("http://localhost:8080/auth/me", {
+      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       
       if (userResponse.ok) {
         const userData = await userResponse.json();
-        const response = await fetch(`http://localhost:8080/api/leave/employee/${userData.username}`, {
+        const response = await fetch(`${API_BASE_URL}/api/leave/employee/${userData.username}`, {
           headers: { "Authorization": `Bearer ${token}` }
         });
         

@@ -1,6 +1,6 @@
 import { getToken, handleSessionExpired } from '../utils/auth';
 
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = 'http://http://192.168.1.98:8080';
 
 const handleResponse = async (response) => {
   if (response.status === 401) {
@@ -30,7 +30,7 @@ export const apiRequest = async (endpoint, options = {}) => {
     ...options.headers,
   };
   
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `http://192.168.1.98:8080${endpoint}`;
   
   try {
     const response = await fetch(url, { ...options, headers });

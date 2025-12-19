@@ -1,39 +1,35 @@
-import { useState, useEffect, useRef, useContext } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
-import { SettingsContext } from '../context/SettingsContext';
 import MainSidebar from "../mainSidebar";
 
-// Safe value handler utility
 const getSafeValue = (value) => {
   if (value === null || value === undefined) return "";
   return value;
 };
 
 function Employee() {
-  const { settings, getPositionRate } = useContext(SettingsContext);
+  const [settings, setSettings] = useState({
+    jobPositions: [],
+    categories: []
+  });
   const [employees, setEmployees] = useState([]);
   const [query, setQuery] = useState("");
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [error, setError] = useState(null);
   const [uploadedData, setUploadedData] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [expandedRows, setExpandedRows] = useState({});
   const menuRefs = useRef({});
   const [selectedCategory, setSelectedCategory] = useState("");
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [isEditMenuOpen, setIsEditMenuOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [isBasicSalaryEditable, setIsBasicSalaryEditable] = useState(false);
-
-  const categories = settings?.employeeCategories || [
-    "Projects", 
-    "Site Services", 
-    "Ahafo North",
-    "NSS"
-  ];
 
   const [newEmployee, setNewEmployee] = useState({
     firstName: "",
@@ -52,7 +48,26 @@ function Employee() {
     accountNumber: "",
     allowances: "",
     employeeId: "",
-    usePositionRate: true
+    usePositionRate: true,
+    dateOfBirth: "",
+    location: "",
+    ghanaCard: "",
+    bank: "",
+    bankBranch: "",
+    contactPerson: "",
+    relationship: "",
+    townOfResidence: "",
+    houseNumber: "",
+    spouse: "",
+    numberOfChildren: 0,
+    age: 0,
+    tagNumber: "",
+    emergencyContact: "",
+    department: "",
+    rentAllowance: "",
+    transportAllowance: "",
+    clothingAllowance: "",
+    otherAllowance: ""
   });
 
   const filteredEmployees = selectedCategory 
@@ -60,13 +75,38 @@ function Employee() {
     : employees;
 
   const createMenuRef = useRef(null);
+  const editMenuRef = useRef(null);
 
-  // Fetch employees from the API with token
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8080";
+    }
+
+    if (hostname.startsWith("192.168.")) {
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
+
+    if (hostname === "100.114.178.13") {
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  };
+
+  const API_BASE_URL = getApiBaseUrl();
+
+  const getToken = () => {
+    return localStorage.getItem('jwtToken');
+  };
+
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee`, {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         method: "GET",
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -93,6 +133,24 @@ function Employee() {
     return position?.grades || [];
   };
 
+  const getPositionRate = (positionName, gradeLevel) => {
+    const position = settings.jobPositions?.find(p => p.name === positionName);
+    if (!position || !position.grades) return null;
+    
+    const grade = position.grades.find(g => g.level === gradeLevel);
+    return grade ? grade.rate : null;
+  };
+
+  const getDefaultGradeForPosition = (positionName) => {
+    const grades = getPositionGrades(positionName);
+    return grades.length > 0 ? grades[0].level : "I";
+  };
+
+  const getDefaultRateForPosition = (positionName) => {
+    const grades = getPositionGrades(positionName);
+    return grades.length > 0 ? grades[0].rate : 0;
+  };
+
   useEffect(() => {
     if (newEmployee.usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
       const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
@@ -103,20 +161,78 @@ function Employee() {
         }));
       }
     }
-  }, [newEmployee.jobPosition, newEmployee.jobGrade, newEmployee.usePositionRate, getPositionRate]);
+  }, [newEmployee.jobPosition, newEmployee.jobGrade, newEmployee.usePositionRate]);
+
+  useEffect(() => {
+    fetchEmployees();
+    fetchSettings();
+  }, []);
 
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
   const settingsMenuRef = useRef(null); 
 
-  useEffect(() => {
-    fetchEmployees();
-  }, []);
-
-  // Handle file selection
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setSelectedFile(file);
+  };
+
+  const fetchSettings = async () => {
+    try {
+      setLoadingCategories(true);
+      const token = getToken();
+      const [positionsRes, categoriesRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/settings/job-positions`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/settings/categories`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+      ]);
+
+      if (positionsRes.ok) {
+        const positions = await positionsRes.json();
+        setSettings(prev => ({ ...prev, jobPositions: positions }));
+      }
+
+      if (categoriesRes.ok) {
+        const categories = await categoriesRes.json();
+        setSettings(prev => ({ 
+          ...prev, 
+          categories: categories
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
+  const getCategories = () => {
+    try {
+      if (settings?.categories && Array.isArray(settings.categories)) {
+        return settings.categories.map(cat => cat.name || String(cat)).filter(Boolean);
+      }
+      
+      return ["General"];
+    } catch (error) {
+      console.error('Error getting categories:', error);
+      return ["General"];
+    }
+  };
+
+  const categories = getCategories();
+
+  const getCategoryIdFromName = (categoryName) => {
+    const category = settings.categories?.find(cat => cat.name === categoryName);
+    return category ? category.id : null;
   };
 
   useEffect(() => {
@@ -127,6 +243,10 @@ function Employee() {
       if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
         setIsCreateMenuOpen(false);
       }
+      if (editMenuRef.current && !editMenuRef.current.contains(event.target)) {
+        setIsEditMenuOpen(false);
+        setEditingEmployee(null);
+      }
     };
     
     document.addEventListener("mousedown", handleClickOutside);
@@ -135,149 +255,484 @@ function Employee() {
 
   const parseExcelDate = (value) => {
     if (!value || value === '-' || value === 'null') return null;
+    
+    if (typeof value === 'number') {
+      const date = new Date((value - (25567 + 2)) * 86400 * 1000);
+      return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+    }
+    
     const date = new Date(value);
     return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
   };
 
-  // Handle displaying the selected file's contents in a popup
   const handleDisplayFile = () => {
-    if (!selectedFile) return;
+    if (!selectedFile) {
+      setError("Please select a file first");
+      return;
+    }
 
     const reader = new FileReader();
+    
     reader.onload = (event) => {
-      const data = new Uint8Array(event.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
+      try {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
 
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
 
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      
-      // Extract headers from first row
-      const headers = jsonData[0].map(header => header.toLowerCase().replace(/\s+/g, ''));
-      
-      // Map Excel columns to expected fields
-      const employeesData = jsonData.slice(1).map((row) => {
-        const employee = {};
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        headers.forEach((header, index) => {
-          switch(header) {
-            case 'firstname':
-              employee.firstName = getSafeValue(row[index]);
-              break;
-            case 'lastname':
-              employee.lastName = getSafeValue(row[index]);
-              break;
-            case 'email':
-              employee.email = getSafeValue(row[index]);
-              break;
-            case 'phone':
-              employee.phone = getSafeValue(row[index]);
-              break;
-            case 'jobposition':
-              employee.jobPosition = getSafeValue(row[index]);
-              break;
-            case 'category':
-              employee.category = getSafeValue(row[index]);
-              break;
-            case 'worktype':
-              employee.workType = getSafeValue(row[index]);
-              break;
-            case 'rate':
-              employee.minimumRate = getSafeValue(row[index]);
-              break;
-            case 'ssnitnumber':
-              employee.ssnitNumber = getSafeValue(row[index]);
-              break;
-            case 'tinnumber':
-              employee.tinNumber = getSafeValue(row[index]);
-              break;
-            case 'tagnumber':
-              employee.tagNumber = getSafeValue(row[index]);
-              break;
-            case 'dateofbirth':
-              employee.dateOfBirth = parseExcelDate(row[index]);
-              break;
-            case 'emergencycontact':
-              employee.emergencyContact = getSafeValue(row[index]);
-              break;
-            case 'accountnumber':
-              employee.accountNumber = getSafeValue(row[index]);
-              break;
-            case 'employeeid':
-              employee.employeeId = getSafeValue(row[index]);
-              break;
-            case 'department':
-              employee.department = getSafeValue(row[index]);
-              break;
-            case 'startdate':
-              employee.startDate = parseExcelDate(row[index]);
-              break;
-            case 'enddate':
-              employee.endDate = parseExcelDate(row[index]);
-              break;
-            case 'basicsalary':
-              employee.basicSalary = getSafeValue(row[index]);
-              break;
-            case 'graderank':
-            case 'grade':
-              employee.grade = getSafeValue(row[index]);
-              break;
-            case 'rentallowance':
-              employee.rentAllowance = getSafeValue(row[index]);
-              break;
-            case 'transportallowance':
-              employee.transportAllowance = getSafeValue(row[index]);
-              break;
-            case 'clothingallowance':
-              employee.clothingAllowance = getSafeValue(row[index]);
-              break;
-            case 'otherallowance':
-              employee.otherAllowance = getSafeValue(row[index]);
-              break;
-            default:
-              break;
+        if (jsonData.length < 2) {
+          setError("Excel file doesn't contain enough data (needs at least 1 data row)");
+          return;
+        }
+        
+        const headers = jsonData[0].map(header => {
+          try {
+            if (header === null || header === undefined) return '';
+            const headerStr = String(header).trim();
+            return headerStr.toLowerCase().replace(/\s+/g, '');
+          } catch (error) {
+            console.warn('Error processing header:', header, error);
+            return '';
           }
         });
-        
-        return employee;
-      });
 
-      setUploadedData(employeesData);
-      setIsPopupOpen(true);
+        const employeesData = jsonData.slice(1).map((row, rowIndex) => {
+          const employee = {};
+          
+          headers.forEach((header, index) => {
+            const value = row[index];
+            
+            if (!header || value === undefined) return;
+            
+            switch(header) {
+              case 'firstname':
+              case 'first_name':
+              case 'fname':
+                employee.firstName = getSafeValue(value);
+                break;
+              case 'lastname':
+              case 'last_name':
+              case 'lname':
+                employee.lastName = getSafeValue(value);
+                break;
+              case 'email':
+              case 'emailaddress':
+                employee.email = getSafeValue(value);
+                break;
+              case 'phone':
+              case 'phonenumber':
+              case 'phone_number':
+              case 'contact':
+              case 'mobilenumber':
+                employee.phone = getSafeValue(value);
+                break;
+              case 'jobposition':
+              case 'job_position':
+              case 'position':
+              case 'jobtitle':
+                const jobPositionValue = getSafeValue(value);
+                // Check if job position exists in settings, otherwise use default
+                const jobPositionExists = settings.jobPositions?.some(p => 
+                  p.name.toLowerCase() === jobPositionValue.toLowerCase()
+                );
+                employee.jobPosition = jobPositionExists ? jobPositionValue : 'General Worker';
+                break;
+              case 'category':
+              case 'empcategory':
+              case 'employee_category':
+              case 'dept':
+                const categoryName = getSafeValue(value);
+                const validCategory = settings.categories?.find(cat => 
+                  cat.name.toLowerCase() === categoryName.toLowerCase()
+                )?.name || categories[0] || "General";
+                employee.category = validCategory;
+                break;
+              case 'worktype':
+              case 'work_type':
+              case 'employmenttype':
+              case 'type':
+                employee.workType = getSafeValue(value);
+                break;
+              case 'rate':
+              case 'hourlyrate':
+              case 'hourly_rate':
+              case 'minimumrate':
+              case 'minimum_rate':
+              case 'salary':
+                employee.minimumRate = getSafeValue(value);
+                break;
+              case 'ssnitnumber':
+              case 'ssnit_number':
+              case 'ssnit':
+              case 'socialsecurity':
+                employee.ssnitNumber = getSafeValue(value);
+                break;
+              case 'tinnumber':
+              case 'tin_number':
+              case 'tin':
+              case 'taxid':
+                employee.tinNumber = getSafeValue(value);
+                break;
+              case 'tagnumber':
+              case 'tag_number':
+              case 'tag':
+              case 'badge':
+                employee.tagNumber = getSafeValue(value);
+                break;
+              case 'dateofbirth':
+              case 'date_of_birth':
+              case 'dob':
+              case 'birthdate':
+                employee.dateOfBirth = parseExcelDate(value);
+                break;
+              case 'emergencycontact':
+              case 'emergency_contact':
+              case 'emergencyphone':
+              case 'emergency':
+                employee.emergencyContact = getSafeValue(value);
+                break;
+              case 'accountnumber':
+              case 'account_number':
+              case 'bankaccount':
+              case 'account':
+                employee.accountNumber = getSafeValue(value);
+                break;
+              case 'employeeid':
+              case 'employee_id':
+              case 'empid':
+              case 'staffid':
+                if (value) employee.originalEmployeeId = getSafeValue(value);
+                break;
+              case 'department':
+              case 'division':
+                employee.department = getSafeValue(value);
+                break;
+              case 'startdate':
+              case 'start_date':
+              case 'hiredate':
+              case 'datehired':
+              case 'joiningdate':
+                employee.startDate = parseExcelDate(value);
+                break;
+              case 'enddate':
+              case 'end_date':
+              case 'terminationdate':
+              case 'leavingdate':
+                employee.endDate = parseExcelDate(value);
+                break;
+              case 'basicsalary':
+              case 'basic_salary':
+              case 'monthlysalary':
+                employee.basicSalary = getSafeValue(value);
+                break;
+              case 'graderank':
+              case 'grade':
+              case 'jobgrade':
+              case 'job_grade':
+              case 'level':
+                employee.grade = getSafeValue(value);
+                break;
+              case 'rentallowance':
+              case 'rent_allowance':
+              case 'housingallowance':
+              case 'accommodation':
+                employee.rentAllowance = getSafeValue(value);
+                break;
+              case 'transportallowance':
+              case 'transport_allowance':
+              case 'transport':
+              case 'travelallowance':
+                employee.transportAllowance = getSafeValue(value);
+                break;
+              case 'clothingallowance':
+              case 'clothing_allowance':
+              case 'uniformallowance':
+              case 'dressallowance':
+                employee.clothingAllowance = getSafeValue(value);
+                break;
+              case 'otherallowance':
+              case 'other_allowance':
+              case 'additionalallowance':
+              case 'extraallowance':
+                employee.otherAllowance = getSafeValue(value);
+                break;
+              case 'location':
+              case 'address':
+              case 'residence':
+                employee.location = getSafeValue(value);
+                break;
+              case 'ghanacard':
+              case 'ghana_card':
+              case 'nationalid':
+              case 'national_id':
+                employee.ghanaCard = getSafeValue(value);
+                break;
+              case 'bank':
+              case 'bankname':
+              case 'bank_name':
+                employee.bank = getSafeValue(value);
+                break;
+              case 'bankbranch':
+              case 'bank_branch':
+              case 'branch':
+                employee.bankBranch = getSafeValue(value);
+                break;
+              case 'contactperson':
+              case 'contact_person':
+              case 'emergencycontactperson':
+                employee.contactPerson = getSafeValue(value);
+                break;
+              case 'relationship':
+              case 'contactrelationship':
+              case 'emergencyrelationship':
+                employee.relationship = getSafeValue(value);
+                break;
+              case 'townofresidence':
+              case 'town_of_residence':
+              case 'town':
+              case 'city':
+                employee.townOfResidence = getSafeValue(value);
+                break;
+              case 'housenumber':
+              case 'house_number':
+              case 'houseno':
+                employee.houseNumber = getSafeValue(value);
+                break;
+              case 'spouse':
+              case 'spousename':
+              case 'partner':
+                employee.spouse = getSafeValue(value);
+                break;
+              case 'numberofchildren':
+              case 'number_of_children':
+              case 'children':
+              case 'dependents':
+                employee.numberOfChildren = getSafeValue(value) ? parseInt(getSafeValue(value)) : 0;
+                break;
+              case 'age':
+                employee.age = getSafeValue(value) ? parseInt(getSafeValue(value)) : null;
+                break;
+              default:
+                if (header.includes('first')) employee.firstName = getSafeValue(value);
+                else if (header.includes('last')) employee.lastName = getSafeValue(value);
+                else if (header.includes('email')) employee.email = getSafeValue(value);
+                else if (header.includes('phone') || header.includes('mobile')) employee.phone = getSafeValue(value);
+                break;
+            }
+          });
+
+          if (!employee.firstName || !employee.lastName) {
+            console.warn(`Skipping row ${rowIndex + 2}: Missing first name or last name`);
+            return null;
+          }
+
+          if (!employee.category) employee.category = categories[0] || "General";
+          if (!employee.workType) employee.workType = "Regular";
+          if (!employee.jobPosition) employee.jobPosition = "General Worker";
+
+          return employee;
+        }).filter(employee => employee !== null);
+
+        if (employeesData.length === 0) {
+          setError("No valid employee data found in the Excel file. Please check if the file contains first name and last name columns.");
+          return;
+        }
+
+        setUploadedData(employeesData);
+        setIsPopupOpen(true);
+        setError(null);
+
+      } catch (err) {
+        console.error('Error processing Excel file:', err);
+        setError(`Error reading Excel file: ${err.message}. Please check the file format.`);
+      }
+    };
+
+    reader.onerror = () => {
+      setError("Error reading file. Please try again.");
     };
 
     reader.readAsArrayBuffer(selectedFile);
   };
 
-  // Save uploaded data to the database with token
+  const exportToExcel = () => {
+    const dataToExport = employees.map(employee => ({
+      'Employee ID': employee.employeeId,
+      'First Name': employee.firstName,
+      'Last Name': employee.lastName,
+      'Email': employee.email,
+      'Phone': employee.phone,
+      'Job Position': employee.jobPosition,
+      'Job Grade': employee.jobGrade,
+      'Work Type': employee.workType,
+      'Category': employee.category,
+      'Minimum Rate': employee.minimumRate,
+      'Basic Salary': employee.basicSalary,
+      'SSNIT Number': employee.ssnitNumber,
+      'TIN Number': employee.tinNumber,
+      'Start Date': employee.startDate,
+      'End Date': employee.endDate,
+      'Account Number': employee.accountNumber,
+      'Date of Birth': employee.dateOfBirth,
+      'Location': employee.location,
+      'Ghana Card': employee.ghanaCard,
+      'Bank': employee.bank,
+      'Bank Branch': employee.bankBranch,
+      'Contact Person': employee.contactPerson,
+      'Relationship': employee.relationship,
+      'Town of Residence': employee.townOfResidence,
+      'House Number': employee.houseNumber,
+      'Spouse': employee.spouse,
+      'Number of Children': employee.numberOfChildren,
+      'Age': employee.age,
+      'Rent Allowance': employee.rentAllowance,
+      'Transport Allowance': employee.transportAllowance,
+      'Clothing Allowance': employee.clothingAllowance,
+      'Other Allowance': employee.otherAllowance,
+      'Emergency Contact': employee.emergencyContact,
+      'Department': employee.department,
+      'Tag Number': employee.tagNumber,
+      'Hourly Rate': employee.hourlyRate,
+      'Overtime Rate': employee.overtimeRate,
+      'Active Status': employee.active ? 'Active' : 'Inactive',
+      'Supervisor': employee.isSupervisor ? 'Yes' : 'No',
+      'Supervisor Name': employee.supervisor ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}` : 'N/A',
+      'Supervisor ID': employee.supervisor ? employee.supervisor.employeeId : 'N/A',
+      'Job Assigned': employee.job ? employee.job.name : 'N/A',
+      'Job Code': employee.job ? employee.job.code : 'N/A',
+      'Supervised Job': employee.supervisedJob ? employee.supervisedJob.name : 'N/A',
+      'Total Allowances': (employee.rentAllowance || 0) + 
+                          (employee.transportAllowance || 0) + 
+                          (employee.clothingAllowance || 0) + 
+                          (employee.otherAllowance || 0),
+      'Total Monthly Cost': (employee.basicSalary || 0) + 
+                           (employee.rentAllowance || 0) + 
+                           (employee.transportAllowance || 0) + 
+                           (employee.clothingAllowance || 0) + 
+                           (employee.otherAllowance || 0),
+      'Years of Service': employee.startDate ? 
+                         Math.floor((new Date() - new Date(employee.startDate)) / (365.25 * 24 * 60 * 60 * 1000)) : 0
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Employees");
+    XLSX.writeFile(workbook, "employees_data.xlsx");
+  };
+
   const saveUploadedData = async () => {
     try {
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/bulk`, {
+      const token = getToken();
+      
+      const employeesToSave = uploadedData.map((employee, index) => {
+        const safeFirstName = employee.firstName ? String(employee.firstName).trim() : '';
+        const safeLastName = employee.lastName ? String(employee.lastName).trim() : '';
+        
+        let email = employee.email ? String(employee.email).trim() : '';
+        if (!email && safeFirstName && safeLastName) {
+          email = `${safeFirstName.toLowerCase()}.${safeLastName.toLowerCase()}@company.com`;
+        } else if (!email) {
+          email = `employee${index + 1}@company.com`;
+        }
+
+        const cleanEmployee = {
+          firstName: safeFirstName || '',
+          lastName: safeLastName || '',
+          email: email,
+          phone: employee.phone ? String(employee.phone).trim() : '',
+          jobPosition: employee.jobPosition ? String(employee.jobPosition).trim() : 'General Worker',
+          minimumRate: employee.minimumRate ? parseFloat(employee.minimumRate) : 0,
+          category: employee.category || categories[0] || "General",
+          workType: employee.workType ? String(employee.workType).trim() : 'Regular',
+          numberOfChildren: employee.numberOfChildren ? parseInt(employee.numberOfChildren) : 0,
+          age: employee.age ? parseInt(employee.age) : 0,
+          ssnitNumber: employee.ssnitNumber ? String(employee.ssnitNumber).trim() : null,
+          tinNumber: employee.tinNumber ? String(employee.tinNumber).trim() : null,
+          startDate: employee.startDate || new Date().toISOString().split('T')[0],
+          endDate: employee.endDate || null,
+          basicSalary: employee.basicSalary ? parseFloat(employee.basicSalary) : null,
+          accountNumber: employee.accountNumber ? String(employee.accountNumber).trim() : null,
+          rentAllowance: employee.rentAllowance ? parseFloat(employee.rentAllowance) : 0,
+          transportAllowance: employee.transportAllowance ? parseFloat(employee.transportAllowance) : 0,
+          clothingAllowance: employee.clothingAllowance ? parseFloat(employee.clothingAllowance) : 0,
+          otherAllowance: employee.otherAllowance ? parseFloat(employee.otherAllowance) : 0,
+          tagNumber: employee.tagNumber ? String(employee.tagNumber).trim() : null,
+          dateOfBirth: employee.dateOfBirth || null,
+          emergencyContact: employee.emergencyContact ? String(employee.emergencyContact).trim() : null,
+          department: employee.department ? String(employee.department).trim() : null,
+          location: employee.location ? String(employee.location).trim() : null,
+          ghanaCard: employee.ghanaCard ? String(employee.ghanaCard).trim() : null,
+          bank: employee.bank ? String(employee.bank).trim() : null,
+          bankBranch: employee.bankBranch ? String(employee.bankBranch).trim() : null,
+          contactPerson: employee.contactPerson ? String(employee.contactPerson).trim() : null,
+          relationship: employee.relationship ? String(employee.relationship).trim() : null,
+          townOfResidence: employee.townOfResidence ? String(employee.townOfResidence).trim() : null,
+          houseNumber: employee.houseNumber ? String(employee.houseNumber).trim() : null,
+          spouse: employee.spouse ? String(employee.spouse).trim() : null,
+          jobGrade: employee.grade || "I",
+          allowances: employee.allowances ? parseFloat(employee.allowances) : 0
+        };
+
+        Object.keys(cleanEmployee).forEach(key => {
+          if (cleanEmployee[key] === undefined) {
+            cleanEmployee[key] = null;
+          }
+        });
+
+        return cleanEmployee;
+      });
+
+      const invalidEmployees = employeesToSave.filter(emp => 
+        !emp.firstName || !emp.lastName
+      );
+      
+      if (invalidEmployees.length > 0) {
+        throw new Error(`Found ${invalidEmployees.length} employees with missing required fields (first name and last name)`);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/employee/bulk`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(uploadedData),
+        body: JSON.stringify(employeesToSave),
       });
 
-      if (!response.ok) throw new Error("Failed to save data");
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `Failed to save data: ${response.status} - ${errorText}`;
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          }
+        } catch (e) {
+          // If not JSON, use the text as is
+        }
+        
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
       setEmployees((prevEmployees) => [...prevEmployees, ...data]);
       setUploadedData([]);
       setIsPopupOpen(false);
       setSelectedFile(null);
-      setSuccessMessage("Employees imported successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
+      setSuccessMessage(`Successfully imported ${employeesToSave.length} employees!`);
+      setTimeout(() => setSuccessMessage(""), 5000);
+      
+      fetchEmployees();
     } catch (err) {
       setError(err.message);
+      console.error('Import error:', err);
     }
   };
 
-  // Create a new employee with token
   const createEmployee = async () => {
     let finalRate = newEmployee.minimumRate;
 
@@ -286,32 +741,35 @@ function Employee() {
       finalRate = positionRate || newEmployee.minimumRate;
     }
 
+    const selectedCategoryObj = settings.categories?.find(cat => cat.name === newEmployee.category);
+    
     const employeeData = {
       ...newEmployee,
       minimumRate: finalRate,
-      jobGrade: newEmployee.jobGrade || "I"
+      jobGrade: newEmployee.jobGrade || "I",
+      numberOfChildren: newEmployee.numberOfChildren ? parseInt(newEmployee.numberOfChildren) : 0,
+      age: newEmployee.age ? parseInt(newEmployee.age) : 0,
+      hourlyRate: parseFloat(finalRate) || 0.0,
+      overtimeRate: (parseFloat(finalRate) * 1.5) || 0.0,
+      basicSalary: newEmployee.basicSalary ? parseFloat(newEmployee.basicSalary) : 0.0,
+      rentAllowance: newEmployee.rentAllowance ? parseFloat(newEmployee.rentAllowance) : 0.0,
+      transportAllowance: newEmployee.transportAllowance ? parseFloat(newEmployee.transportAllowance) : 0.0,
+      clothingAllowance: newEmployee.clothingAllowance ? parseFloat(newEmployee.clothingAllowance) : 0.0,
+      otherAllowance: newEmployee.otherAllowance ? parseFloat(newEmployee.otherAllowance) : 0.0,
+      categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
     };
 
-    if (
-      !newEmployee.firstName ||
-      !newEmployee.lastName ||
-      !newEmployee.email ||
-      !newEmployee.phone ||
-      !newEmployee.jobPosition ||
-      !newEmployee.category ||
-      !newEmployee.ssnitNumber ||
-      !newEmployee.tinNumber ||
-      !newEmployee.startDate ||
-      !newEmployee.allowances ||
-      !newEmployee.accountNumber 
-    ) {
-      setError("Please fill out all fields.");
+    delete employeeData.usePositionRate;
+    delete employeeData.allowances;
+
+    if (!employeeData.firstName || !employeeData.lastName || !employeeData.email) {
+      setError("Please fill out all required fields (First Name, Last Name, Email).");
       return;
     }
 
     try {
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee`, {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -324,8 +782,7 @@ function Employee() {
 
       const data = await response.json();
       setEmployees((prevEmployees) => [...prevEmployees, data]);
-   
-      // Reset form
+      
       setNewEmployee({
         firstName: "",
         lastName: "",
@@ -342,7 +799,26 @@ function Employee() {
         accountNumber: "",
         allowances: "",
         employeeId: "",
-        usePositionRate: true
+        usePositionRate: true,
+        numberOfChildren: 0,
+        age: 0,
+        dateOfBirth: "",
+        location: "",
+        ghanaCard: "",
+        bank: "",
+        bankBranch: "",
+        contactPerson: "",
+        relationship: "",
+        townOfResidence: "",
+        houseNumber: "",
+        spouse: "",
+        tagNumber: "",
+        emergencyContact: "",
+        department: "",
+        rentAllowance: "",
+        transportAllowance: "",
+        clothingAllowance: "",
+        otherAllowance: ""
       });
 
       setIsCreateMenuOpen(false);
@@ -353,19 +829,25 @@ function Employee() {
     }
   };
 
-  // Update employee with token
   const updateEmployee = async () => {
     if (!editingEmployee) return;
   
     try {
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/${editingEmployee.id}`, {
+      const token = getToken();
+      const selectedCategoryObj = settings.categories?.find(cat => cat.name === editingEmployee.category);
+      
+      const employeeData = {
+        ...editingEmployee,
+        categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/employee/${editingEmployee.id}`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(editingEmployee),
+        body: JSON.stringify(employeeData),
       });
   
       if (!response.ok) {
@@ -384,15 +866,14 @@ function Employee() {
     } catch (err) {
       setError(err.message);
     }
-  }
+  };
 
-  // Delete employee with token
   const deleteEmployee = async (id) => {
     if (!window.confirm("Are you sure you want to delete this employee?")) return;
     
     try {
-      const token = localStorage.getItem('jwtToken');
-      const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
         method: "DELETE",
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -410,7 +891,6 @@ function Employee() {
     }
   };
 
-  // Close all modals
   const closeAllModals = () => {
     setIsCreateMenuOpen(false);
     setIsEditMenuOpen(false);
@@ -418,21 +898,55 @@ function Employee() {
     setEditingEmployee(null);
   };
 
+  const toggleRowExpansion = (id) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const formatCurrency = (amount) => {
+    if (amount === null || amount === undefined || amount === "") return "N/A";
+    const num = typeof amount === "number" ? amount : parseFloat(amount);
+    if (isNaN(num)) return "N/A";
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "GHS",
+    }).format(num);
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return "N/A";
+    try {
+      const options = { year: "numeric", month: "short", day: "numeric" };
+      return new Date(dateString).toLocaleDateString(undefined, options);
+    } catch (error) {
+      return "Invalid Date";
+    }
+  };
+
+  const handleEditEmployee = (employee) => {
+    setEditingEmployee({
+      ...employee,
+      usePositionRate: employee.usePositionRate !== false, // Ensure boolean
+      jobGrade: employee.jobGrade || "I",
+      minimumRate: employee.minimumRate || 0
+    });
+    setIsEditMenuOpen(true);
+    setOpenMenuId(null);
+  };
+
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      {/* Sidebar */}
       <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-md z-30">
         <MainSidebar />
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 ml-64">
-        {/* Overlay for modals */}
         {(isCreateMenuOpen || isEditMenuOpen || isPopupOpen) && (
           <div className="fixed inset-0 bg-black/50 z-40" onClick={closeAllModals}></div>
         )}
 
-        {/* Notification Messages */}
         {error && (
           <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50 flex justify-between items-center w-96">
             <span>{error}</span>
@@ -451,11 +965,8 @@ function Employee() {
           </div>
         )}
 
-        {/* Main Content */}
         <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          {/* Top Bar */}
           <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            {/* Menu Icon */}
             <button className="p-1 hover:bg-gray-100 rounded-md">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -468,9 +979,7 @@ function Employee() {
               </svg>
             </button>
 
-            {/* Right Icons */}
             <div className="flex items-center gap-5">
-              {/* Settings Icon */}
               <div className="relative" ref={settingsMenuRef}>
                 <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
                   <svg
@@ -484,8 +993,7 @@ function Employee() {
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004-.827c.424.350.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-                    />
+                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004-.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
                 </Link>
@@ -493,7 +1001,6 @@ function Employee() {
 
               <div className="border-l border-gray-300 h-8"></div>
 
-              {/* Notifications Icon */}
               <button className="p-1 hover:bg-gray-200 rounded-full relative">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -514,7 +1021,6 @@ function Employee() {
 
               <div className="border-l border-gray-300 h-8"></div>
 
-              {/* User Profile */}
               <div className="flex items-center gap-2">
                 <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
                   A
@@ -527,7 +1033,6 @@ function Employee() {
             </div>
           </header>
 
-          {/* Employee List Section */}
           <section className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
               <div>
@@ -575,36 +1080,48 @@ function Employee() {
                   ))}
                 </select>
 
-                <div className="flex gap-2">
-                  <label className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition duration-200">
-                    <input
-                      type="file"
-                      accept=".xlsx, .xls"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                    Import
-                  </label>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition duration-200">
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                      {selectedFile ? `File: ${selectedFile.name}` : 'Import Excel'}
+                    </label>
+                    <button
+                      className={`px-4 py-2 rounded-lg transition duration-200 ${
+                        !selectedFile ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"
+                      }`}
+                      onClick={handleDisplayFile}
+                      disabled={!selectedFile}
+                    >
+                      Preview
+                    </button>
+                  </div>
+
                   <button
-                    className={`px-4 py-2 rounded-lg transition duration-200 ml-2 ${
-                      !selectedFile ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-500 text-white hover:bg-green-600"
-                    }`}
-                    onClick={handleDisplayFile}
-                    disabled={!selectedFile}
+                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-200 flex items-center gap-2"
+                    onClick={exportToExcel}
                   >
-                    Preview
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Export Excel
+                  </button>
+
+                  <button
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 flex items-center gap-2"
+                    onClick={() => setIsCreateMenuOpen(true)}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                    </svg>
+                    Add Employee
                   </button>
                 </div>
-
-                <button
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 flex items-center gap-2"
-                  onClick={() => setIsCreateMenuOpen(true)}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                  </svg>
-                  Add Employee
-                </button>
               </div>
             </div>
 
@@ -645,92 +1162,211 @@ function Employee() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredEmployees.map((employee) => (
-                      <tr key={employee.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
-                          <Link to={`/profile/${employee.id}`} className="hover:underline">
-                            {employee.id}
-                          </Link>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {employee.firstName} {employee.lastName}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {employee.email}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {employee.jobPosition}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            employee.category === "Projects" ? "bg-blue-100 text-blue-800" :
-                            employee.category === "Site Services" ? "bg-green-100 text-green-800" :
-                            "bg-purple-100 text-purple-800"
-                          }`}>
-                            {employee.category}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {employee.workType}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <div>
-                            <span>GHS{employee.minimumRate}/hr</span>
-                            <span className={`ml-2 text-xs px-1 rounded ${
-                              employee.usePositionRate !== false ? 
-                                'bg-green-100 text-green-800' : 
-                                'bg-blue-100 text-blue-800'
-                            }`}>
-                              {employee.usePositionRate !== false ? 'Position' : 'Custom'}
+                      <>
+                        <tr key={employee.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
+                            <Link to={`/profile/${employee.id}`} className="hover:underline">
+                              {employee.id}
+                            </Link>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {employee.firstName} {employee.lastName}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {employee.email}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {employee.jobPosition}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                              {employee.category || 'General'}
                             </span>
-                            {employee.usePositionRate !== false && employee.jobGrade && (
-                              <span className="ml-1 text-xs text-gray-500">(Grade {employee.jobGrade})</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="relative">
-                            <button
-                              onClick={() => setOpenMenuId(openMenuId === employee.id ? null : employee.id)}
-                              className="text-gray-400 hover:text-gray-600 focus:outline-none"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                              </svg>
-                            </button>
-                            {openMenuId === employee.id && (
-                              <div
-                                ref={el => {
-                                  if (el) {
-                                    menuRefs.current[employee.id] = el;
-                                  } else {
-                                    delete menuRefs.current[employee.id];
-                                  }
-                                }}
-                                className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200"
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {employee.workType}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <div>
+                              <span>GHS{employee.minimumRate}/hr</span>
+                              <span className={`ml-2 text-xs px-1 rounded ${
+                                employee.usePositionRate !== false ? 
+                                  'bg-green-100 text-green-800' : 
+                                  'bg-blue-100 text-blue-800'
+                              }`}>
+                                {employee.usePositionRate !== false ? 'Position' : 'Custom'}
+                              </span>
+                              {employee.usePositionRate !== false && employee.jobGrade && (
+                                <span className="ml-1 text-xs text-gray-500">(Grade {employee.jobGrade})</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <div className="flex justify-end items-center gap-3">
+                              <button
+                                onClick={() => toggleRowExpansion(employee.id)}
+                                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
                               >
-                                <div className="py-1">
-                                  <button
-                                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    onClick={() => {
-                                      setEditingEmployee(employee);
-                                      setIsEditMenuOpen(true);
-                                      setOpenMenuId(null);
+                                {expandedRows[employee.id] ? 'Hide Details' : 'View All Info'}
+                                <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${expandedRows[employee.id] ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                </svg>
+                              </button>
+                              
+                              <div className="relative">
+                                <button
+                                  onClick={() => setOpenMenuId(openMenuId === employee.id ? null : employee.id)}
+                                  className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                                  </svg>
+                                </button>
+                                {openMenuId === employee.id && (
+                                  <div
+                                    ref={el => {
+                                      if (el) {
+                                        menuRefs.current[employee.id] = el;
+                                      } else {
+                                        delete menuRefs.current[employee.id];
+                                      }
                                     }}
+                                    className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200"
                                   >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-                                    onClick={() => deleteEmployee(employee.id)}
-                                  >
-                                    Delete
-                                  </button>
+                                    <div className="py-1">
+                                      <button
+                                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                        onClick={() => handleEditEmployee(employee)}
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                                        onClick={() => deleteEmployee(employee.id)}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                        
+                        {expandedRows[employee.id] && (
+                          <tr className="bg-blue-50">
+                            <td colSpan="8" className="px-6 py-4">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                  <p className="text-xs text-gray-500">Phone</p>
+                                  <p className="text-sm font-medium">{employee.phone || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">SSNIT</p>
+                                  <p className="text-sm font-medium">{employee.ssnitNumber || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">TIN</p>
+                                  <p className="text-sm font-medium">{employee.tinNumber || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Tag Number</p>
+                                  <p className="text-sm font-medium">{employee.tagNumber || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Date of Birth</p>
+                                  <p className="text-sm font-medium">{formatDate(employee.dateOfBirth)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Emergency Contact</p>
+                                  <p className="text-sm font-medium">{employee.emergencyContact || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Account Number</p>
+                                  <p className="text-sm font-medium">{employee.accountNumber || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Location</p>
+                                  <p className="text-sm font-medium">{employee.location || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Ghana Card</p>
+                                  <p className="text-sm font-medium">{employee.ghanaCard || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Bank</p>
+                                  <p className="text-sm font-medium">{employee.bank || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Bank Branch</p>
+                                  <p className="text-sm font-medium">{employee.bankBranch || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Contact Person</p>
+                                  <p className="text-sm font-medium">{employee.contactPerson || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Relationship</p>
+                                  <p className="text-sm font-medium">{employee.relationship || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Town of Residence</p>
+                                  <p className="text-sm font-medium">{employee.townOfResidence || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">House Number</p>
+                                  <p className="text-sm font-medium">{employee.houseNumber || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Spouse</p>
+                                  <p className="text-sm font-medium">{employee.spouse || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Children</p>
+                                  <p className="text-sm font-medium">{employee.numberOfChildren || 0}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Age</p>
+                                  <p className="text-sm font-medium">{employee.age || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Department</p>
+                                  <p className="text-sm font-medium">{employee.department || 'N/A'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Basic Salary</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.basicSalary)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Rent Allowance</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.rentAllowance)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Transport Allowance</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.transportAllowance)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Clothing Allowance</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.clothingAllowance)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Other Allowance</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.otherAllowance)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Start Date</p>
+                                  <p className="text-sm font-medium">{formatDate(employee.startDate)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">End Date</p>
+                                  <p className="text-sm font-medium">{formatDate(employee.endDate)}</p>
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     ))}
                   </tbody>
                 </table>
@@ -739,11 +1375,9 @@ function Employee() {
           </section>
         </main>
 
-        {/* Create Employee Modal */}
         {isCreateMenuOpen && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
             <div ref={createMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-              {/* Header */}
               <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-800">Add New Employee</h2>
                 <button
@@ -756,26 +1390,29 @@ function Employee() {
                 </button>
               </div>
               
-              {/* Scrollable Form Content */}
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-                {/* Category */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select
-                    value={getSafeValue(newEmployee.category)}
-                    onChange={(e) => setNewEmployee({...newEmployee, category: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">Select Category</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
+                  {loadingCategories ? (
+                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100">
+                      <span className="text-gray-500">Loading categories...</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={getSafeValue(newEmployee.category)}
+                      onChange={(e) => setNewEmployee({...newEmployee, category: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select Category</option>
+                      {categories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
-                {/* Names */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
@@ -800,7 +1437,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Email */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
@@ -812,7 +1448,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Job Position and Grade */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
@@ -820,15 +1455,14 @@ function Employee() {
                       value={getSafeValue(newEmployee.jobPosition)}
                       onChange={(e) => {
                         const selectedPosition = e.target.value;
-                        const position = settings.jobPositions?.find(p => p.name === selectedPosition);
-                        const defaultGrade = position?.grades?.[0]?.level || "I";
-                        const defaultRate = position?.grades?.find(g => g.level === defaultGrade)?.rate || "";
+                        const defaultGrade = getDefaultGradeForPosition(selectedPosition);
+                        const defaultRate = getDefaultRateForPosition(selectedPosition);
                         
                         setNewEmployee({ 
                           ...newEmployee, 
                           jobPosition: selectedPosition,
                           jobGrade: defaultGrade,
-                          minimumRate: defaultRate.toString()
+                          minimumRate: newEmployee.usePositionRate ? defaultRate.toString() : newEmployee.minimumRate
                         });
                       }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -836,7 +1470,7 @@ function Employee() {
                       <option value="">Select Job Position</option>
                       {settings.jobPositions?.map((position) => (
                         <option key={position.name} value={position.name}>
-                          {position.name} ({position.category})
+                          {position.name} {position.category ? `(${position.category})` : ''}
                         </option>
                       ))}
                     </select>
@@ -849,13 +1483,12 @@ function Employee() {
                         value={getSafeValue(newEmployee.jobGrade)}
                         onChange={(e) => {
                           const selectedGrade = e.target.value;
-                          const position = settings.jobPositions?.find(p => p.name === newEmployee.jobPosition);
-                          const gradeRate = position?.grades?.find(g => g.level === selectedGrade)?.rate || "";
+                          const gradeRate = getPositionRate(newEmployee.jobPosition, selectedGrade) || newEmployee.minimumRate;
                           
                           setNewEmployee({ 
                             ...newEmployee, 
                             jobGrade: selectedGrade,
-                            minimumRate: gradeRate.toString()
+                            minimumRate: newEmployee.usePositionRate ? gradeRate.toString() : newEmployee.minimumRate
                           });
                         }}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -870,7 +1503,6 @@ function Employee() {
                   )}
                 </div>
 
-                {/* Work Type */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
                   <input
@@ -882,7 +1514,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Rate Configuration */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
@@ -916,12 +1547,12 @@ function Employee() {
                   </label>
                 </div>
 
-                {/* Custom Rate Input (only show when not using position rate) */}
                 {!newEmployee.usePositionRate && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Custom Hourly Rate (GHS)</label>
                     <input
                       type="number"
+                      step="0.01"
                       value={getSafeValue(newEmployee.minimumRate)}
                       onChange={(e) => setNewEmployee({ ...newEmployee, minimumRate: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -929,7 +1560,6 @@ function Employee() {
                   </div>
                 )}
 
-                {/* Current Rate Display */}
                 {newEmployee.jobPosition && newEmployee.jobGrade && (
                   <div className="p-3 bg-blue-50 rounded-lg">
                     <p className="text-sm text-blue-700">
@@ -940,7 +1570,6 @@ function Employee() {
                   </div>
                 )}
 
-                {/* Phone */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input
@@ -952,7 +1581,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* SSNIT + TIN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
@@ -977,7 +1605,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Start Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
                   <input
@@ -988,7 +1615,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Allowances */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
                   <input
@@ -999,7 +1625,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Basic Salary + Account Number */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -1040,7 +1665,6 @@ function Employee() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
                 <button
                   className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -1059,11 +1683,10 @@ function Employee() {
           </div>
         )} 
 
-        {/* Edit Employee Modal */}
         {isEditMenuOpen && editingEmployee && (
-          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl w-full max-w-2xl z-50">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-4">
+          <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+            <div ref={editMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-800">Edit Employee</h2>
                 <button
                   onClick={() => {
@@ -1078,25 +1701,29 @@ function Employee() {
                 </button>
               </div>
 
-              <div className="space-y-6">
-                {/* Category */}
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select
-                    value={getSafeValue(editingEmployee.category)}
-                    onChange={(e) => setEditingEmployee({ ...editingEmployee, category: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">Select Category</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
+                  {loadingCategories ? (
+                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100">
+                      <span className="text-gray-500">Loading categories...</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={getSafeValue(editingEmployee.category)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, category: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select Category</option>
+                      {categories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
-                {/* Names */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
@@ -1119,7 +1746,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Email */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
@@ -1130,7 +1756,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Job Position and Grade */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
@@ -1138,9 +1763,8 @@ function Employee() {
                       value={getSafeValue(editingEmployee.jobPosition)}
                       onChange={(e) => {
                         const selectedPosition = e.target.value;
-                        const position = settings.jobPositions?.find(p => p.name === selectedPosition);
-                        const defaultGrade = position?.grades?.[0]?.level || "I";
-                        const defaultRate = position?.grades?.find(g => g.level === defaultGrade)?.rate || editingEmployee.minimumRate;
+                        const defaultGrade = getDefaultGradeForPosition(selectedPosition);
+                        const defaultRate = getDefaultRateForPosition(selectedPosition);
                         
                         setEditingEmployee({ 
                           ...editingEmployee, 
@@ -1166,8 +1790,7 @@ function Employee() {
                       value={getSafeValue(editingEmployee.jobGrade) || "I"}
                       onChange={(e) => {
                         const selectedGrade = e.target.value;
-                        const position = settings.jobPositions?.find(p => p.name === editingEmployee.jobPosition);
-                        const gradeRate = position?.grades?.find(g => g.level === selectedGrade)?.rate || editingEmployee.minimumRate;
+                        const gradeRate = getPositionRate(editingEmployee.jobPosition, selectedGrade) || editingEmployee.minimumRate;
                         
                         setEditingEmployee({ 
                           ...editingEmployee, 
@@ -1190,7 +1813,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Work Type */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
                   <input
@@ -1201,7 +1823,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Rate Configuration */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
@@ -1235,7 +1856,6 @@ function Employee() {
                   </label>
                 </div>
 
-                {/* Custom Rate Input */}
                 {editingEmployee.usePositionRate === false && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Custom Hourly Rate (GHS)</label>
@@ -1248,7 +1868,6 @@ function Employee() {
                   </div>
                 )}
 
-                {/* Current Rate Display */}
                 <div className="p-3 bg-blue-50 rounded-lg">
                   <p className="text-sm text-blue-700">
                     <strong>Current Rate:</strong> {editingEmployee.usePositionRate !== false ? 
@@ -1257,7 +1876,6 @@ function Employee() {
                   </p>
                 </div>
 
-                {/* SSNIT + TIN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
@@ -1280,7 +1898,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Start Date + Account Number */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -1303,7 +1920,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Allowances */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
                   <input
@@ -1314,7 +1930,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* Actions */}
                 <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
                   <button
                     className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -1337,86 +1952,125 @@ function Employee() {
           </div>
         )}
 
-        {/* Excel Import Popup Modal */}
         {isPopupOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
             <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
-              <h2 className="text-xl font-semibold mb-4">Excel File Contents</h2>
+              <h2 className="text-xl font-semibold mb-4">Excel Import Preview</h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Found {uploadedData.length} employee(s). Employee IDs will be automatically generated.
+              </p>
+              
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th>First Name</th>
-                      <th>Last Name</th>
-                      <th>Email</th>
-                      <th>Phone</th>
-                      <th>SSNIT Number</th>
-                      <th>TIN Number</th>
-                      <th>Tag Number</th>
-                      <th>Date of Birth</th>
-                      <th>Emergency Contact</th>
-                      <th>Account Number</th>
-                      <th>Employee ID</th>
-                      <th>Category</th>
-                      <th>Job Position</th>
-                      <th>Work Type</th>
-                      <th>Department</th>
-                      <th>Start Date</th>
-                      <th>End Date</th>
-                      <th>Basic Salary</th>
-                      <th>Minimum Rate</th>
-                      <th>Grade</th>
-                      <th>Rent Allowance</th>
-                      <th>Transport Allowance</th>
-                      <th>Clothing Allowance</th>
-                      <th>Other Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Generated ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">First Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date of Birth</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Emergency Contact</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Original Employee ID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Position</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Grade</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Basic Salary</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Minimum Rate</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rent Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clothing Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Other Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ghana Card</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank Branch</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact Person</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relationship</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Town of Residence</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">House Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Spouse</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Number of Children</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="bg-white divide-y divide-gray-200">
                     {uploadedData.map((employee, index) => (
-                      <tr key={index}>
-                        <td>{getSafeValue(employee.firstName)}</td>
-                        <td>{getSafeValue(employee.lastName)}</td>
-                        <td>{getSafeValue(employee.email)}</td>
-                        <td>{getSafeValue(employee.phone)}</td>
-                        <td>{getSafeValue(employee.ssnitNumber)}</td>
-                        <td>{getSafeValue(employee.tinNumber)}</td>
-                        <td>{getSafeValue(employee.tagNumber)}</td>
-                        <td>{getSafeValue(employee.dateOfBirth)}</td>
-                        <td>{getSafeValue(employee.emergencyContact)}</td>
-                        <td>{getSafeValue(employee.accountNumber)}</td>
-                        <td>{getSafeValue(employee.employeeId)}</td>
-                        <td>{getSafeValue(employee.category)}</td>
-                        <td>{getSafeValue(employee.jobPosition)}</td>
-                        <td>{getSafeValue(employee.workType)}</td>
-                        <td>{getSafeValue(employee.department)}</td>
-                        <td>{getSafeValue(employee.startDate)}</td>
-                        <td>{getSafeValue(employee.endDate)}</td>
-                        <td>{getSafeValue(employee.basicSalary)}</td>
-                        <td>{getSafeValue(employee.minimumRate)}</td>
-                        <td>{getSafeValue(employee.grade)}</td>
-                        <td>{getSafeValue(employee.rentAllowance)}</td>
-                        <td>{getSafeValue(employee.transportAllowance)}</td>
-                        <td>{getSafeValue(employee.clothingAllowance)}</td>
-                        <td>{getSafeValue(employee.otherAllowance)}</td>
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm font-medium text-blue-600 whitespace-nowrap">
+                          Auto-generated
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.firstName}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.lastName}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.dateOfBirth || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.emergencyContact || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.originalEmployeeId || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                          <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                            {employee.category || 'Not set'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.jobPosition || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.grade || employee.jobGrade || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.workType || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.department || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.startDate || 'Not set'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.endDate || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.basicSalary || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.minimumRate || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.rentAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.transportAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.clothingAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.otherAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.location || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ghanaCard || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bank || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bankBranch || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.contactPerson || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.relationship || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.townOfResidence || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.houseNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.spouse || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.numberOfChildren || '0'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.age || 'N/A'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-end gap-4 mt-6 pt-4 border-t border-gray-200">
-                <button
-                  className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-                  onClick={() => setIsPopupOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-                  onClick={saveUploadedData}
-                >
-                  Confirm Upload
-                </button>
+              
+              <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
+                <div className="text-sm text-gray-600 max-w-md">
+                  <strong>Note:</strong> Employee IDs will be automatically generated by the system.
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    onClick={() => setIsPopupOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                    onClick={saveUploadedData}
+                  >
+                    Import {uploadedData.length} Employee{uploadedData.length !== 1 ? 's' : ''}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

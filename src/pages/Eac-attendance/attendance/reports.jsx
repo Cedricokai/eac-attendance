@@ -1,473 +1,1074 @@
-import { useState, useEffect, useContext } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { SettingsContext } from '../context/SettingsContext';
-import * as XLSX from 'xlsx';
-import MainSidebar from "../mainSidebar";
+import { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
+import * as XLSX from "xlsx";
+import {
+  Download,
+  Filter,
+  Search,
+  Calendar,
+  Users,
+  Clock,
+  FileText,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Printer,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  DollarSign
+} from "lucide-react";
 
-function Reports() {
-  const { settings } = useContext(SettingsContext);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [reportType, setReportType] = useState('payroll-summary');
-  const [reportData, setReportData] = useState([]);
-  const [dateRange, setDateRange] = useState({
-    startDate: '',
-    endDate: ''
-  });
-  const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [departments, setDepartments] = useState([]);
-  const [employeeFilter, setEmployeeFilter] = useState('all');
+function Report() {
+  const [attendanceData, setAttendanceData] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  
+  const [filters, setFilters] = useState({
+    startDate: "",
+    endDate: "",
+    employeeId: "",
+    category: "",
+    department: "",
+    workType: "",
+    status: "",
+    shift: ""
+  });
+  
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  const [viewOptions, setViewOptions] = useState({
+    groupBy: "date",
+    showDetails: true,
+    showSummary: true,
+    includeLeave: true,
+    includeOvertime: true
+  });
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+  
+  const [expandedRows, setExpandedRows] = useState([]);
+  
+  const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
 
-  // Fetch departments and employees for filters
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch departments
-        const deptResponse = await fetch('http://localhost:8080/api/departments');
-        if (!deptResponse.ok) throw new Error('Failed to fetch departments');
-        setDepartments(await deptResponse.json());
-        
-        // Fetch employees
-        const empResponse = await fetch('http://localhost:8080/api/employee');
-        if (!empResponse.ok) throw new Error('Failed to fetch employees');
-        setEmployees(await empResponse.json());
-        
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchData();
-  }, []);
+  console.log("🖥️ Current hostname:", hostname);
+  console.log("🔌 Current port:", port);
 
-  const generateReport = async () => {
-    if (!dateRange.startDate || !dateRange.endDate) {
-      alert('Please select a date range first');
-      return;
-    }
-    
+  // If frontend is opened via localhost → use localhost backend
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    console.log("🏠 Using LOCALHOST API URL");
+    return "http://localhost:8080";
+  }
+
+  // LAN access
+  if (hostname.startsWith("192.168.")) {
+    console.log("🏠 Using LAN API URL");
+    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  }
+
+  // Public / Tailscale / Cloudflare IP
+  if (hostname === "100.114.178.13") {
+    console.log("🌐 Using PUBLIC API URL");
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  }
+
+  // Default fallback
+  console.log("🌍 Using PUBLIC API URL (fallback)");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+
+  const API_BASE_URL = getApiBaseUrl();
+
+  const getToken = () => {
+    return localStorage.getItem('jwtToken');
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-GH', {
+      style: 'currency',
+      currency: 'GHS',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount || 0);
+  };
+
+  const fetchData = async () => {
     setLoading(true);
     try {
-      let url = `http://localhost:8080/api/payroll/reports?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
+      const token = getToken();
       
-      if (departmentFilter !== 'all') {
-        url += `&departmentId=${departmentFilter}`;
+      const attendanceUrl = filters.startDate && filters.endDate 
+        ? `${API_BASE_URL}/api/attendance?startDate=${filters.startDate}&endDate=${filters.endDate}`
+        : `${API_BASE_URL}/api/attendance`;
+      
+      const [attendanceRes, employeesRes, payrollRes] = await Promise.all([
+        fetch(attendanceUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/employee`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/payroll/summary?startDate=${filters.startDate || '2024-01-01'}&endDate=${filters.endDate || '2024-12-31'}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+      ]);
+
+      if (!attendanceRes.ok) throw new Error('Failed to fetch attendance data');
+      if (!employeesRes.ok) throw new Error('Failed to fetch employees');
+
+      const attendance = await attendanceRes.json();
+      const employeesData = await employeesRes.json();
+      let payrollSummary = {};
+      
+      if (payrollRes.ok) {
+        payrollSummary = await payrollRes.json();
       }
-      
-      if (employeeFilter !== 'all') {
-        url += `&employeeId=${employeeFilter}`;
-      }
-      
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to generate report');
-      
-      const data = await response.json();
-      setReportData(data);
+
+      const enrichedData = attendance.map(record => {
+        const employee = employeesData.find(emp => emp.id === record.employee?.id);
+        const employeeSalary = employee?.salary || employee?.hourlyRate * 8 * 20 || 0;
+        
+        return {
+          ...record,
+          employeeDetails: employee || {},
+          fullName: employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown',
+          department: employee?.department || 'N/A',
+          category: employee?.category || 'N/A',
+          workType: employee?.workType || 'N/A',
+          employeeId: employee?.employeeId || 'N/A',
+          salary: employeeSalary,
+          dailyPay: employeeSalary / 20,
+          overtimePay: record.overtimeHours ? (record.overtimeHours * (employee?.overtimeRate || employee?.hourlyRate * 1.5 || 0)) : 0,
+          totalPay: 0
+        };
+      });
+
+      const dataWithPay = enrichedData.map(record => {
+        let totalPay = 0;
+        
+        if (record.status.includes('Present')) {
+          totalPay += record.dailyPay || 0;
+        }
+        
+        if (record.overtimeHours) {
+          totalPay += record.overtimePay || 0;
+        }
+        
+        if (record.status === 'Weekend Present' || record.status === 'Holiday Present') {
+          totalPay += (record.dailyPay || 0) * 1.5;
+        }
+        
+        if (record.status === 'On Leave' && record.leaveType === 'Paid') {
+          totalPay += record.dailyPay || 0;
+        }
+        
+        return {
+          ...record,
+          totalPay: parseFloat(totalPay.toFixed(2))
+        };
+      });
+
+      setAttendanceData(dataWithPay);
+      setEmployees(employeesData);
+      setError("");
     } catch (err) {
       setError(err.message);
+      console.error("Fetch error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const exportToExcel = () => {
-    if (reportData.length === 0) {
-      alert('No data to export');
-      return;
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const filteredData = useMemo(() => {
+    return attendanceData.filter(record => {
+      if (filters.startDate && record.date < filters.startDate) return false;
+      if (filters.endDate && record.date > filters.endDate) return false;
+      
+      if (filters.employeeId && record.employee?.id !== filters.employeeId) return false;
+      
+      if (filters.category && record.employeeDetails?.category !== filters.category) return false;
+      
+      if (filters.department && record.department !== filters.department) return false;
+      
+      if (filters.workType && record.workType !== filters.workType) return false;
+      
+      if (filters.status && record.status !== filters.status) return false;
+      
+      if (filters.shift && record.shift !== filters.shift) return false;
+      
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          record.fullName.toLowerCase().includes(query) ||
+          record.employeeId.toLowerCase().includes(query) ||
+          record.department.toLowerCase().includes(query) ||
+          record.status.toLowerCase().includes(query)
+        );
+      }
+      
+      return true;
+    });
+  }, [attendanceData, filters, searchQuery]);
+
+  const groupedData = useMemo(() => {
+    if (viewOptions.groupBy === "date") {
+      const groups = {};
+      filteredData.forEach(record => {
+        if (!groups[record.date]) {
+          groups[record.date] = [];
+        }
+        groups[record.date].push(record);
+      });
+      return Object.entries(groups).map(([date, records]) => ({
+        key: date,
+        label: new Date(date).toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        }),
+        records,
+        summary: calculateDateSummary(records)
+      }));
+    } else if (viewOptions.groupBy === "employee") {
+      const groups = {};
+      filteredData.forEach(record => {
+        const key = record.employee?.id || 'unknown';
+        if (!groups[key]) {
+          groups[key] = [];
+        }
+        groups[key].push(record);
+      });
+      return Object.entries(groups).map(([key, records]) => ({
+        key,
+        label: records[0].fullName,
+        records,
+        summary: calculateEmployeeSummary(records)
+      }));
+    } else if (viewOptions.groupBy === "department") {
+      const groups = {};
+      filteredData.forEach(record => {
+        const key = record.department;
+        if (!groups[key]) {
+          groups[key] = [];
+        }
+        groups[key].push(record);
+      });
+      return Object.entries(groups).map(([key, records]) => ({
+        key,
+        label: key,
+        records,
+        summary: calculateDepartmentSummary(records)
+      }));
     }
     
-    // Format data for Excel
-    const excelData = reportData.map(item => {
-      return {
-        'Employee ID': item.employee?.employeeId || 'N/A',
-        'Employee Name': item.employee ? `${item.employee.firstName} ${item.employee.lastName}` : 'N/A',
-        'Department': item.employee?.department?.name || 'N/A',
-        'Position': item.employee?.position || 'N/A',
-        'Days Worked': item.workingDays,
-        'Regular Hours': item.regularHours?.toFixed(2) || '0.00',
-        'Overtime Hours': item.overtimeHours?.toFixed(2) || '0.00',
-        'Regular Pay': `$${item.regularPay?.toFixed(2) || '0.00'}`,
-        'Overtime Pay': `$${item.overtimePay?.toFixed(2) || '0.00'}`,
-        'Gross Pay': `$${item.grossPay?.toFixed(2) || '0.00'}`,
-        'Tax': `$${item.tax?.toFixed(2) || '0.00'}`,
-        'Net Pay': `$${item.netPay?.toFixed(2) || '0.00'}`,
-        'Status': item.status || 'N/A'
-      };
-    });
+    return [];
+  }, [filteredData, viewOptions.groupBy]);
 
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
+  const totalPages = Math.ceil(groupedData.length / itemsPerPage);
+  const paginatedData = groupedData.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const overallSummary = useMemo(() => {
+    return calculateOverallSummary(filteredData);
+  }, [filteredData]);
+
+  function calculateDateSummary(records) {
+    const present = records.filter(r => r.status.includes('Present')).length;
+    const absent = records.filter(r => r.status === 'Absent').length;
+    const late = records.filter(r => r.status === 'Late').length;
+    const leave = records.filter(r => r.status === 'On Leave').length;
+    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
+    const totalPay = records.reduce((sum, r) => sum + (r.totalPay || 0), 0);
     
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payroll Report');
+    return { present, absent, late, leave, totalHours, totalEmployees: records.length, totalPay };
+  }
+
+  function calculateEmployeeSummary(records) {
+    const presentDays = records.filter(r => r.status.includes('Present')).length;
+    const absentDays = records.filter(r => r.status === 'Absent').length;
+    const lateDays = records.filter(r => r.status === 'Late').length;
+    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
+    const totalPay = records.reduce((sum, r) => sum + (r.totalPay || 0), 0);
+    const avgHours = records.length > 0 ? totalHours / records.length : 0;
     
-    // Generate Excel file
-    XLSX.writeFile(workbook, `Payroll_Report_${dateRange.startDate}_to_${dateRange.endDate}.xlsx`);
+    return { presentDays, absentDays, lateDays, totalHours, avgHours, totalDays: records.length, totalPay };
+  }
+
+  function calculateDepartmentSummary(records) {
+    const employees = [...new Set(records.map(r => r.employee?.id))].length;
+    const present = records.filter(r => r.status.includes('Present')).length;
+    const absent = records.filter(r => r.status === 'Absent').length;
+    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
+    const totalPay = records.reduce((sum, r) => sum + (r.totalPay || 0), 0);
+    const attendanceRate = records.length > 0 ? (present / records.length) * 100 : 0;
+    
+    return { employees, present, absent, totalHours, attendanceRate, totalRecords: records.length, totalPay };
+  }
+
+  function calculateOverallSummary(allRecords) {
+    const totalRecords = allRecords.length;
+    const totalEmployees = [...new Set(allRecords.map(r => r.employee?.id))].length;
+    const totalDepartments = [...new Set(allRecords.map(r => r.department))].length;
+    const totalPay = allRecords.reduce((sum, r) => sum + (r.totalPay || 0), 0);
+    const late = allRecords.filter(r => r.status === 'Late').length;
+    
+    const statusCounts = {
+  Present: allRecords.filter(r => r.status.includes('Present')).length,
+  Absent: allRecords.filter(r => r.status === 'Absent').length,
+  Late: late,
+  'On Leave': allRecords.filter(r => r.status === 'On Leave').length
+};
+    
+    const totalHours = allRecords.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
+    const avgHours = totalRecords > 0 ? totalHours / totalRecords : 0;
+    const avgPay = totalEmployees > 0 ? totalPay / totalEmployees : 0;
+    
+    const attendanceRate = totalRecords > 0 ? (statusCounts.Present / totalRecords) * 100 : 0;
+    
+    const deptBreakdown = {};
+    allRecords.forEach(record => {
+      if (!deptBreakdown[record.department]) {
+        deptBreakdown[record.department] = { present: 0, total: 0, totalPay: 0 };
+      }
+      deptBreakdown[record.department].total++;
+      deptBreakdown[record.department].totalPay += record.totalPay || 0;
+      if (record.status.includes('Present')) {
+        deptBreakdown[record.department].present++;
+      }
+    });
+    
+    const categoryBreakdown = {};
+    allRecords.forEach(record => {
+      if (!categoryBreakdown[record.category]) {
+        categoryBreakdown[record.category] = { present: 0, total: 0, totalPay: 0 };
+      }
+      categoryBreakdown[record.category].total++;
+      categoryBreakdown[record.category].totalPay += record.totalPay || 0;
+      if (record.status.includes('Present')) {
+        categoryBreakdown[record.category].present++;
+      }
+    });
+    
+    return {
+      totalRecords,
+      totalEmployees,
+      totalDepartments,
+      statusCounts,
+      totalHours,
+      totalPay,
+      avgHours,
+      avgPay,
+      attendanceRate,
+      deptBreakdown,
+      categoryBreakdown
+    };
+  }
+
+  const toggleRow = (key) => {
+    if (expandedRows.includes(key)) {
+      setExpandedRows(expandedRows.filter(k => k !== key));
+    } else {
+      setExpandedRows([...expandedRows, key]);
+    }
   };
 
-  const printReport = () => {
+  const handleRowClick = (group) => {
+    if (viewOptions.groupBy === 'date') {
+      window.location.href = `/attendance?date=${group.key}`;
+    } else if (viewOptions.groupBy === 'employee') {
+      window.location.href = `/employee/${group.key}`;
+    } else if (viewOptions.groupBy === 'department') {
+      window.location.href = `/attendance?department=${encodeURIComponent(group.label)}`;
+    }
+  };
+
+  const exportToExcel = () => {
+    const wsData = [
+      ['Attendance Report - Ghana Cedis (GHS)', 'Generated', new Date().toLocaleDateString()],
+      [''],
+      ['Overall Summary', '', ''],
+      ['Total Records', overallSummary.totalRecords],
+      ['Total Employees', overallSummary.totalEmployees],
+      ['Total Hours', overallSummary.totalHours.toFixed(2)],
+      ['Total Payroll Cost', formatCurrency(overallSummary.totalPay)],
+      ['Average Salary per Employee', formatCurrency(overallSummary.avgPay)],
+      ['Attendance Rate', `${overallSummary.attendanceRate.toFixed(1)}%`],
+      [''],
+      ['Status Breakdown', '', ''],
+      ['Present', overallSummary.statusCounts.Present],
+      ['Absent', overallSummary.statusCounts.Absent],
+      ['Late', overallSummary.statusCounts.Late],
+      ['On Leave', overallSummary.statusCounts['On Leave']],
+      [''],
+      ['Department Breakdown', '', '', ''],
+      ['Department', 'Employees', 'Attendance Rate', 'Payroll Cost']
+    ];
+
+    Object.entries(overallSummary.deptBreakdown).forEach(([dept, data]) => {
+      const rate = data.total > 0 ? (data.present / data.total) * 100 : 0;
+      wsData.push([dept, data.total, `${rate.toFixed(1)}%`, formatCurrency(data.totalPay)]);
+    });
+
+    wsData.push(['', '', '', '']);
+wsData.push(['', '', '', '', '', '', '', '', '', '', '', '']);
+wsData.push(['Date', 'Employee ID', 'Employee Name', 'Department', 'Category', 'Check In', 'Check Out', 'Hours', 'Status', 'Late', 'Shift', 'Pay (GHS)']);
+
+
+    filteredData.forEach(record => {
+      wsData.push([
+        record.date,
+        record.employeeId,
+        record.fullName,
+        record.department,
+        record.category,
+        record.checkIn || '--:--',
+        record.checkOut || '--:--',
+        record.minimumHour || 0,
+        record.status,
+        isLate ? 'Yes' : 'No',
+        record.shift,
+        record.totalPay || 0
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
+    
+    const wscols = [
+      { wch: 12 },
+      { wch: 15 },
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 15 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 12 },
+      { wch: 8 },
+      { wch: 12 }
+    ];
+    ws['!cols'] = wscols;
+
+    XLSX.writeFile(wb, `attendance_report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    setSuccess("Report exported successfully!");
+    setTimeout(() => setSuccess(""), 3000);
+  };
+
+  const exportToPDF = () => {
     window.print();
   };
 
+  const resetFilters = () => {
+    setFilters({
+      startDate: "",
+      endDate: "",
+      employeeId: "",
+      category: "",
+      department: "",
+      workType: "",
+      status: "",
+      shift: ""
+    });
+    setSearchQuery("");
+    setCurrentPage(1);
+  };
+
+  const uniqueCategories = [...new Set(employees.map(e => e.category))].filter(Boolean);
+  const uniqueDepartments = [...new Set(employees.map(e => e.department))].filter(Boolean);
+  const uniqueWorkTypes = [...new Set(employees.map(e => e.workType))].filter(Boolean);
+  const uniqueStatuses = ['Present', 'Absent', 'Late', 'On Leave', 'Weekend Present', 'Holiday Present'];
+
   return (
-    <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-md z-30">
-        <MainSidebar />
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Attendance Report (GHS)</h1>
+              <p className="text-gray-600">Comprehensive attendance analysis and reporting in Ghana Cedis</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={fetchData}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+              >
+                <RefreshCw size={18} />
+                Refresh
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                <Printer size={18} />
+                Print
+              </button>
+              <button
+                onClick={exportToExcel}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+              >
+                <Download size={18} />
+                Export Excel
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 ml-64">
-        <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          {/* Top Bar - Same as other pages */}
-          <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            <button className="p-1 hover:bg-gray-100 rounded-md">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                strokeWidth="1.5"
-                stroke="currentColor"
-                className="size-6"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              </svg>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {error && (
+          <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="mb-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+            {success}
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+              <Filter size={20} />
+              Filters & Search
+            </h2>
+            <button
+              onClick={resetFilters}
+              className="text-sm text-gray-600 hover:text-gray-900"
+            >
+              Reset All Filters
             </button>
-
-            <div className="flex items-center gap-5">
-              <div className="relative">
-                <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="size-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                  </svg>
-                </Link>
-              </div>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <button className="p-1 hover:bg-gray-200 rounded-full relative">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="size-6"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0M3.124 7.5A8.969 8.969 0 0 1 5.292 3m13.416 0a8.969 8.969 0 0 1 2.168 4.5"
-                  />
-                </svg>
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">3</span>
-              </button>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                  A
-                </div>
-                <span className="font-medium">Adams</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-          </header>
-
-          {/* Page Header */}
-          <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-6 bg-white rounded-xl shadow-sm mt-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">Payroll Reports</h1>
-              <p className="text-gray-600">Generate and analyze payroll reports</p>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-              <button
-                onClick={generateReport}
-                disabled={loading || !dateRange.startDate || !dateRange.endDate}
-                className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${loading || !dateRange.startDate || !dateRange.endDate ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {loading ? 'Generating...' : 'Generate Report'}
-              </button>
-            </div>
-          </section>
-
-          {/* Navigation Tabs */}
-          <div className="flex items-center justify-start mt-6 mb-4 rounded-lg shadow-sm overflow-hidden w-max border border-gray-200">
-            <Link to="/payroll" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/payroll" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">Payroll</span>
-              </div>
-            </Link>
-
-            <Link to="/payroll/reports" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/payroll/reports" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">Reports</span>
-              </div>
-            </Link>
-
-            <Link to="/payroll/history" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
-                location.pathname === "/payroll/history" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
-              }`}>
-                <span className="font-medium">History</span>
-              </div>
-            </Link>
           </div>
 
-          {/* Report Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 p-6 bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Report Type</label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="payroll-summary">Payroll Summary</option>
-                <option value="tax-summary">Tax Summary</option>
-                <option value="overtime-summary">Overtime Summary</option>
-                <option value="department-summary">Department Summary</option>
-              </select>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input
                 type="date"
-                value={dateRange.startDate}
-                onChange={(e) => setDateRange({...dateRange, startDate: e.target.value})}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.startDate}
+                onChange={(e) => setFilters({...filters, startDate: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
               <input
                 type="date"
-                value={dateRange.endDate}
-                onChange={(e) => setDateRange({...dateRange, endDate: e.target.value})}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.endDate}
+                onChange={(e) => setFilters({...filters, endDate: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
-
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <select
+                value={filters.category}
+                onChange={(e) => setFilters({...filters, category: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Categories</option>
+                {uniqueCategories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
               <select
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.department}
+                onChange={(e) => setFilters({...filters, department: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="all">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                <option value="">All Departments</option>
+                {uniqueDepartments.map(dept => (
+                  <option key={dept} value={dept}>{dept}</option>
                 ))}
               </select>
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
+              <select
+                value={filters.workType}
+                onChange={(e) => setFilters({...filters, workType: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Work Types</option>
+                {uniqueWorkTypes.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={filters.status}
+                onChange={(e) => setFilters({...filters, status: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Status</option>
+                {uniqueStatuses.map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Shift</label>
+              <select
+                value={filters.shift}
+                onChange={(e) => setFilters({...filters, shift: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Shifts</option>
+                <option value="Day">Day</option>
+                <option value="Night">Night</option>
+              </select>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
               <select
-                value={employeeFilter}
-                onChange={(e) => setEmployeeFilter(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.employeeId}
+                onChange={(e) => setFilters({...filters, employeeId: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="all">All Employees</option>
+                <option value="">All Employees</option>
                 {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>
+                  <option key={emp.id} value={emp.id}>
+                    {emp.firstName} {emp.lastName} ({emp.employeeId})
+                  </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Report Actions */}
-          <div className="flex flex-wrap gap-3 mb-6">
-            <button
-              onClick={exportToExcel}
-              disabled={reportData.length === 0}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg ${reportData.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export to Excel
-            </button>
-
-            <button
-              onClick={printReport}
-              disabled={reportData.length === 0}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg ${reportData.length === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
-              Print Report
-            </button>
-          </div>
-
-          {/* Report Results */}
-          {loading ? (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search size={20} className="text-gray-400" />
             </div>
-          ) : error ? (
-            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
+            <input
+              type="text"
+              placeholder="Search by name, employee ID, department, or status..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">View Options</h3>
+          <div className="flex flex-wrap gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Group By</label>
+              <select
+                value={viewOptions.groupBy}
+                onChange={(e) => setViewOptions({...viewOptions, groupBy: e.target.value})}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="date">Date</option>
+                <option value="employee">Employee</option>
+                <option value="department">Department</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="showDetails"
+                checked={viewOptions.showDetails}
+                onChange={(e) => setViewOptions({...viewOptions, showDetails: e.target.checked})}
+                className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="showDetails" className="text-sm text-gray-700">
+                Show Details
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="showSummary"
+                checked={viewOptions.showSummary}
+                onChange={(e) => setViewOptions({...viewOptions, showSummary: e.target.checked})}
+                className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="showSummary" className="text-sm text-gray-700">
+                Show Summary
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {viewOptions.showSummary && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Overall Summary</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <p className="text-sm text-blue-600">Total Records</p>
+                <p className="text-2xl font-bold text-gray-900">{overallSummary.totalRecords}</p>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg">
+                <p className="text-sm text-green-600">Total Employees</p>
+                <p className="text-2xl font-bold text-gray-900">{overallSummary.totalEmployees}</p>
+              </div>
+              <div className="bg-purple-50 p-4 rounded-lg">
+                <p className="text-sm text-purple-600">Total Hours</p>
+                <p className="text-2xl font-bold text-gray-900">{overallSummary.totalHours.toFixed(2)}</p>
+              </div>
+              <div className="bg-amber-50 p-4 rounded-lg">
+                <p className="text-sm text-amber-600">Total Payroll</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrency(overallSummary.totalPay)}</p>
+              </div>
+              <div className="bg-indigo-50 p-4 rounded-lg">
+                <p className="text-sm text-indigo-600">Avg Salary</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrency(overallSummary.avgPay)}</p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm text-gray-600">Departments</p>
+                <p className="text-2xl font-bold text-gray-900">{overallSummary.totalDepartments}</p>
               </div>
             </div>
-          ) : (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+
+            <div className="mt-6">
+              <h4 className="text-md font-medium text-gray-700 mb-3">Status Breakdown</h4>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(overallSummary.statusCounts).map(([status, count]) => (
+  <div key={status} className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg">
+    <span className={`w-2 h-2 rounded-full ${
+      status === 'Present' ? 'bg-green-500' :
+      status === 'Absent' ? 'bg-red-500' :
+      status === 'Late' ? 'bg-yellow-500' :
+      'bg-blue-500'
+    }`}></span>
+    <span className="text-sm text-gray-700">{status}:</span>
+    <span className="font-medium">{count}</span>
+    <span className="text-sm text-gray-500">
+      ({((count / overallSummary.totalRecords) * 100).toFixed(1)}%)
+    </span>
+  </div>
+))}
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 p-4 rounded-lg">
+  <p className="text-sm text-yellow-600">Late Arrivals</p>
+  <p className="text-2xl font-bold text-gray-900">
+    {overallSummary.statusCounts.Late || 0}
+  </p>
+  <p className="text-xs text-yellow-500 mt-1">
+    {overallSummary.totalRecords > 0 
+      ? `${((overallSummary.statusCounts.Late / overallSummary.totalRecords) * 100).toFixed(1)}% of total`
+      : '0%'
+    }
+  </p>
+</div>
+
+            <div className="mt-6">
+              <h4 className="text-md font-medium text-gray-700 mb-3">Department Performance</h4>
+              <div className="space-y-2">
+                {Object.entries(overallSummary.deptBreakdown).map(([dept, data]) => {
+                  const rate = data.total > 0 ? (data.present / data.total) * 100 : 0;
+                  return (
+                    <div key={dept} className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700">{dept}</span>
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm text-gray-500">
+                          {data.present}/{data.total} ({rate.toFixed(1)}%)
+                        </span>
+                        <span className="text-sm font-medium text-green-600">
+                          {formatCurrency(data.totalPay)}
+                        </span>
+                        <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-green-500"
+                            style={{ width: `${rate}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days Worked</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Regular Hours</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overtime Hours</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Regular Pay</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overtime Pay</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tax</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        {viewOptions.groupBy === 'date' ? 'Date' : 
+                         viewOptions.groupBy === 'employee' ? 'Employee' : 'Department'}
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Summary
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Payroll Cost (GHS)
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Details
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {reportData.length > 0 ? (
-                      reportData.map((item) => {
-                        const employee = item.employee || {};
-                        return (
-                          <tr key={item.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                                  <span className="text-gray-700 font-medium">
-                                    {employee?.firstName?.charAt(0)}{employee?.lastName?.charAt(0)}
-                                  </span>
-                                </div>
-                                <div className="ml-4">
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {employee?.firstName} {employee?.lastName}
-                                  </div>
-                                  <div className="text-sm text-gray-500">{employee?.employeeId || 'N/A'}</div>
+                    {paginatedData.map((group) => (
+                      <>
+                        <tr key={group.key} className="hover:bg-gray-50 cursor-pointer" onClick={() => handleRowClick(group)}>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRow(group.key);
+                                }}
+                                className="mr-2 text-gray-500 hover:text-gray-700"
+                              >
+                                {expandedRows.includes(group.key) ? (
+                                  <ChevronUp size={20} />
+                                ) : (
+                                  <ChevronDown size={20} />
+                                )}
+                              </button>
+                              <div>
+                                <div className="font-medium text-gray-900">{group.label}</div>
+                                <div className="text-sm text-gray-500">
+                                  {group.records.length} record{group.records.length !== 1 ? 's' : ''}
                                 </div>
                               </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {employee?.department?.name || 'N/A'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {item.workingDays}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {item.regularHours?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {item.overtimeHours?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              ${item.regularPay?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              ${item.overtimePay?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              ${item.grossPay?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              ${item.tax?.toFixed(2) || '0.00'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              ${item.netPay?.toFixed(2) || '0.00'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-2">
+                              {viewOptions.groupBy === 'date' && (
+                                <>
+                                  <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                                    {group.summary.present} Present
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                                    {group.summary.absent} Absent
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded-full">
+                                    {group.summary.late} Late
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                    {group.summary.totalHours.toFixed(1)} hrs
+                                  </span>
+                                </>
+                              )}
+                              {viewOptions.groupBy === 'employee' && (
+                                <>
+                                  <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                                    {group.summary.presentDays} Days Present
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                    {group.summary.avgHours.toFixed(1)} avg hrs
+                                  </span>
+                                </>
+                              )}
+                              {viewOptions.groupBy === 'department' && (
+                                <>
+                                  <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                                    {group.summary.employees} Employees
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                    {group.summary.totalHours.toFixed(1)} hrs
+                                  </span>
+                                  <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                                    {group.summary.attendanceRate.toFixed(1)}% Rate
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-green-600">
+                              {formatCurrency(group.summary.totalPay || 0)}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleRow(group.key);
+                              }}
+                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                              {expandedRows.includes(group.key) ? 'Hide Details' : 'Show Details'}
+                            </button>
+                          </td>
+                        </tr>
+                        
+                        {expandedRows.includes(group.key) && viewOptions.showDetails && (
+                          <tr>
+                            <td colSpan="4" className="px-6 py-4 bg-gray-50">
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                  <thead>
+                                    <tr>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Employee</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Check In</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Check Out</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Hours</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Shift</th>
+                                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Pay (GHS)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {group.records.map((record) => (
+                                      <tr key={record.id} className="hover:bg-white">
+                                        <td className="px-4 py-2 text-sm">{record.date}</td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <div className="font-medium">{record.fullName}</div>
+                                          <div className="text-xs text-gray-500">{record.employeeId}</div>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">{record.checkIn || '--:--'}</td>
+                                        <td className="px-4 py-2 text-sm">{record.checkOut || '--:--'}</td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                            {record.minimumHour || 0} hrs
+                                          </span>
+                                        </td>
+<td className="px-6 py-2 text-sm">
+  <span className={`px-2 py-1 text-xs rounded-full ${
+    record.status.includes('Present') ? 'bg-green-100 text-green-800' :
+    record.status === 'Absent' ? 'bg-red-100 text-red-800' :
+    record.status === 'Late' ? 'bg-yellow-100 text-yellow-800' :
+    'bg-blue-100 text-blue-800'
+  }`}>
+    {record.status}
+  </span>
+</td>
+                                        <td className="px-4 py-2 text-sm">{record.shift}</td>
+                                        <td className="px-4 py-2 text-sm font-medium text-green-600">
+                                          {formatCurrency(record.totalPay || 0)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             </td>
                           </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan="10" className="px-6 py-4 text-center text-sm text-gray-500">
-                          No report data available. Generate a report using the filters above.
-                        </td>
-                      </tr>
-                    )}
+                        )}
+                      </>
+                    ))}
                   </tbody>
-                  {reportData.length > 0 && (
-                    <tfoot className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Totals</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          {reportData.reduce((sum, item) => sum + item.workingDays, 0)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          {reportData.reduce((sum, item) => sum + (item.regularHours || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          {reportData.reduce((sum, item) => sum + (item.overtimeHours || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          ${reportData.reduce((sum, item) => sum + (item.regularPay || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          ${reportData.reduce((sum, item) => sum + (item.overtimePay || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          ${reportData.reduce((sum, item) => sum + (item.grossPay || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          ${reportData.reduce((sum, item) => sum + (item.tax || 0), 0).toFixed(2)}
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          ${reportData.reduce((sum, item) => sum + (item.netPay || 0), 0).toFixed(2)}
-                        </th>
-                      </tr>
-                    </tfoot>
-                  )}
                 </table>
               </div>
             </div>
-          )}
-        </main>
+
+            {totalPages > 1 && (
+              <div className="flex justify-between items-center bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                <div className="text-sm text-gray-700">
+                  Showing <span className="font-medium">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
+                  <span className="font-medium">
+                    {Math.min(currentPage * itemsPerPage, groupedData.length)}
+                  </span>{' '}
+                  of <span className="font-medium">{groupedData.length}</span> groups
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Previous
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`px-3 py-1 rounded-lg ${
+                          currentPage === pageNum
+                            ? 'bg-blue-600 text-white'
+                            : 'border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {!loading && filteredData.length === 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+            <FileText size={48} className="mx-auto text-gray-400 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No attendance records found</h3>
+            <p className="text-gray-600 mb-6">
+              Try adjusting your filters or date range to see more results.
+            </p>
+            <button
+              onClick={resetFilters}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Reset Filters
+            </button>
+          </div>
+        )}
+
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>Report generated on {new Date().toLocaleString()} (All amounts in Ghana Cedis - GHS)</p>
+          <p className="mt-1">Total records analyzed: {attendanceData.length}</p>
+          <p className="mt-1">Total payroll cost: {formatCurrency(overallSummary.totalPay)}</p>
+        </div>
       </div>
     </div>
   );
 }
 
-export default Reports;
+export default Report;

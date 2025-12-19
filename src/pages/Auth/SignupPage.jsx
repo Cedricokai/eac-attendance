@@ -37,7 +37,7 @@ function SignupPage() {
                 throw new Error("Passwords do not match");
             }
 
-            const response = await axios.post('http://localhost:8080/auth/signup', {
+            const response = await axios.post('http://http://192.168.1.98:8080/auth/signup', {
                 name,
                 email,
                 password,

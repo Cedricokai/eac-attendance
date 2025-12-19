@@ -13,16 +13,95 @@ function Profile() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [formData, setFormData] = useState({});
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [jobPositions, setJobPositions] = useState([]);
 
   const getToken = () => {
     return localStorage.getItem("jwtToken");
   };
+  
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8080";
+    }
+
+    if (hostname.startsWith("192.168.")) {
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
+
+    if (hostname === "100.114.178.13") {
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  };
+
+  const getCategoryName = (category) => {
+    if (!category) return '';
+    if (typeof category === 'string') return category;
+    if (typeof category === 'object' && category !== null) {
+      return category.name || '';
+    }
+    return '';
+  };
+
+  const API_BASE_URL = getApiBaseUrl();
+
+  const fetchSettings = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/job-positions`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const positions = await response.json();
+        setJobPositions(positions);
+      }
+    } catch (error) {
+      console.error('Error fetching job positions:', error);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      setLoadingCategories(true);
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/categories`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setCategories(data);
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSettings();
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     const fetchEmployee = async () => {
       try {
         const token = getToken();
-        const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+        const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -32,8 +111,18 @@ function Profile() {
           throw new Error(`Failed to fetch employee: ${response.status}`);
         }
         const data = await response.json();
-        setEmployee(data);
-        setFormData(data || {});
+        
+        const categoryName = data.category?.name || data.category || '';
+        
+        setEmployee({
+          ...data,
+          category: categoryName
+        });
+        
+        setFormData({
+          ...data,
+          category: categoryName
+        });
       } catch (err) {
         setError(err.message);
       } finally {
@@ -50,23 +139,50 @@ function Profile() {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    
+    if (name === "category") {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: type === "checkbox" ? checked : value,
+      }));
+    }
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const token = getToken();
-      const response = await fetch(`http://localhost:8080/api/employee/${id}`, {
+      
+      let categoryId = null;
+      let categoryName = formData.category;
+      
+      if (typeof formData.category === 'object' && formData.category !== null) {
+        categoryName = formData.category.name;
+        categoryId = formData.category.id;
+      } else {
+        const selectedCategoryObj = categories.find(cat => cat.name === formData.category);
+        categoryId = selectedCategoryObj ? selectedCategoryObj.id : null;
+      }
+      
+      const dataToSend = {
+        ...formData,
+        categoryId: categoryId
+      };
+      
+      delete dataToSend.category;
+
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dataToSend),
       });
 
       if (!response.ok) {
@@ -75,7 +191,14 @@ function Profile() {
       }
 
       const updatedEmployee = await response.json();
-      setEmployee(updatedEmployee);
+      
+      const updatedWithCategory = {
+        ...updatedEmployee,
+        category: categoryName
+      };
+      
+      setEmployee(updatedWithCategory);
+      setFormData(updatedWithCategory);
       setIsEditModalOpen(false);
       alert("Profile updated successfully!");
     } catch (err) {
@@ -112,7 +235,7 @@ function Profile() {
     if (isNaN(num)) return "N/A";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "USD",
+      currency: "GHS",
     }).format(num);
   };
 
@@ -246,6 +369,9 @@ function Profile() {
                   {employee.workType || 'No Work Type'}
                 </span>
                 <span className="bg-purple-100 text-purple-800 text-xs px-3 py-1 rounded-full">
+                  {getCategoryName(employee.category) || 'No Category'}
+                </span>
+                <span className="bg-purple-100 text-purple-800 text-xs px-3 py-1 rounded-full">
                   Joined: {formatDate(employee.startDate)}
                 </span>
               </div>
@@ -288,6 +414,12 @@ function Profile() {
               Employment Details
             </button>
             <button
+              onClick={() => setActiveTab("family")}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === "family" ? "bg-blue-100 text-blue-700" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              Family & Residence
+            </button>
+            <button
               onClick={() => setActiveTab("documents")}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === "documents" ? "bg-blue-100 text-blue-700" : "text-gray-500 hover:text-gray-700"}`}
             >
@@ -320,6 +452,9 @@ function Profile() {
                 <Info label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
                 <Info label="Emergency Contact" value={employee.emergencyContact} />
                 <Info label="Account Number" value={employee.accountNumber} />
+                <Info label="Ghana Card" value={employee.ghanaCard} />
+                <Info label="Location" value={employee.location} />
+                <Info label="Age" value={employee.age} />
               </div>
             </div>
           )}
@@ -338,7 +473,8 @@ function Profile() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Info label="Employee ID" value={employee.employeeId} />
-                <Info label="Category" value={employee.category} />
+                <Info label="Tag Number" value={employee.tagNumber} />
+                <Info label="Category" value={getCategoryName(employee.category) || 'N/A'} />
                 <Info label="Job Title" value={employee.jobPosition} />
                 <Info label="Employment Type" value={employee.workType} />
                 <Info label="Hire Date" value={formatDate(employee.startDate)} />
@@ -350,6 +486,31 @@ function Profile() {
                 <Info label="Transport Allowance" value={formatCurrency(employee.transportAllowance)} />
                 <Info label="Clothing Allowance" value={formatCurrency(employee.clothingAllowance)} />
                 <Info label="Other Allowances" value={formatCurrency(employee.otherAllowance)} />
+              </div>
+            </div>
+          )}
+
+          {activeTab === "family" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-semibold text-gray-800">Family & Residence Information</h2>
+                <button onClick={handleEdit} className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                  </svg>
+                  Edit
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Info label="Bank" value={employee.bank} />
+                <Info label="Bank Branch" value={employee.bankBranch} />
+                <Info label="Contact Person" value={employee.contactPerson} />
+                <Info label="Relationship" value={employee.relationship} />
+                <Info label="Town of Residence" value={employee.townOfResidence} />
+                <Info label="House Number" value={employee.houseNumber} />
+                <Info label="Spouse" value={employee.spouse} />
+                <Info label="Number of Children" value={employee.numberOfChildren} />
               </div>
             </div>
           )}
@@ -379,10 +540,9 @@ function Profile() {
           )}
         </div>
 
-        {/* Edit Modal */}
         {isEditModalOpen && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-6xl max-h-[90vh] overflow-y-auto">
               <div className="sticky top-0 bg-white border-b p-6 rounded-t-xl">
                 <div className="flex justify-between items-center">
                   <h2 className="text-xl font-semibold text-gray-800">Edit Employee Profile</h2>
@@ -398,8 +558,7 @@ function Profile() {
               </div>
 
               <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Personal Information */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="space-y-4">
                     <h3 className="text-lg font-medium text-gray-800 border-b pb-2">Personal Information</h3>
 
@@ -448,49 +607,54 @@ function Profile() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
                       <input
-                        type="text"
-                        name="ssnitNumber"
-                        value={formData.ssnitNumber || ""}
+                        type="date"
+                        name="dateOfBirth"
+                        value={formData.dateOfBirth ? formData.dateOfBirth.split("T")[0] : ""}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
                       <input
-                        type="text"
-                        name="tinNumber"
-                        value={formData.tinNumber || ""}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-                      <input
-                        type="text"
-                        name="accountNumber"
-                        value={formData.accountNumber || ""}
+                        type="number"
+                        name="age"
+                        value={formData.age || ""}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                   </div>
 
-                  {/* Employment Information */}
                   <div className="space-y-4">
                     <h3 className="text-lg font-medium text-gray-800 border-b pb-2">Employment Information</h3>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
-                      <input
-                        type="text"
+                      <select
                         name="jobPosition"
                         value={formData.jobPosition || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select Job Position</option>
+                        {jobPositions.map((position) => (
+                          <option key={position.id} value={position.name}>
+                            {position.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Tag number</label>
+                      <input
+                        type="text"
+                        name="tagNumber"
+                        value={formData.tagNumber || ""}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -498,13 +662,25 @@ function Profile() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                      <input
-                        type="text"
-                        name="category"
-                        value={formData.category || ""}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      {loadingCategories ? (
+                        <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100">
+                          <span className="text-gray-500">Loading categories...</span>
+                        </div>
+                      ) : (
+                        <select
+                          name="category"
+                          value={formData.category || ""}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">Select Category</option>
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.name}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
 
                     <div>
@@ -555,13 +731,116 @@ function Profile() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium text-gray-800 border-b pb-2">Family & Residence</h3>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Minimum Rate</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
+                      <input
+                        type="text"
+                        name="ghanaCard"
+                        value={formData.ghanaCard || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+                      <input
+                        type="text"
+                        name="location"
+                        value={formData.location || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+                      <input
+                        type="text"
+                        name="bank"
+                        value={formData.bank || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
+                      <input
+                        type="text"
+                        name="bankBranch"
+                        value={formData.bankBranch || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
+                      <input
+                        type="text"
+                        name="contactPerson"
+                        value={formData.contactPerson || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
+                      <input
+                        type="text"
+                        name="relationship"
+                        value={formData.relationship || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
+                      <input
+                        type="text"
+                        name="townOfResidence"
+                        value={formData.townOfResidence || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
+                      <input
+                        type="text"
+                        name="houseNumber"
+                        value={formData.houseNumber || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
+                      <input
+                        type="text"
+                        name="spouse"
+                        value={formData.spouse || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
                       <input
                         type="number"
-                        name="minimumRate"
-                        value={formData.minimumRate || ""}
+                        name="numberOfChildren"
+                        value={formData.numberOfChildren || ""}
                         onChange={handleInputChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -569,7 +848,52 @@ function Profile() {
                   </div>
                 </div>
 
-                {/* Allowances Section */}
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
+                    <input
+                      type="text"
+                      name="ssnitNumber"
+                      value={formData.ssnitNumber || ""}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
+                    <input
+                      type="text"
+                      name="tinNumber"
+                      value={formData.tinNumber || ""}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      name="accountNumber"
+                      value={formData.accountNumber || ""}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
+                    <input
+                      type="text"
+                      name="emergencyContact"
+                      value={formData.emergencyContact || ""}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
                 <div className="mt-6">
                   <h3 className="text-lg font-medium text-gray-800 border-b pb-2 mb-4">Allowances</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -642,7 +966,6 @@ function Profile() {
           </div>
         )}
 
-        {/* Message Modal */}
         {isMessageModalOpen && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
             <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-md">
@@ -685,7 +1008,6 @@ function Profile() {
   );
 }
 
-// Reusable Info component for consistent styling
 function Info({ label, value }) {
   return (
     <div className="space-y-1">

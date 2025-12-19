@@ -1,15 +1,28 @@
-import { useState, useEffect, useRef, useContext } from "react";
-import { SettingsContext } from '../context/SettingsContext';
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
 
 function Overtime() {
   const [query, setQuery] = useState('');
-  const { settings } = useContext(SettingsContext);
-  const { overtimeHourlyRate } = settings;
+  const [settings, setSettings] = useState({
+    employee: { id: '' },
+    date: new Date().toISOString().split('T')[0],
+    startTime: '',
+    endTime: '',
+    status: 'Pending',
+    overtimeHours: 0,
+    totalOvertimePay: 0,
+    defaultOvertimeMultiplier: 1.5,
+    hourlyRate: 0,
+    doubleTimeOnSunday: false,
+    sundayOvertimeMultiplier: 2.0,
+    enableTimeAndHalfAfter8Hours: false,
+    timeAndHalfMultiplier: 1.5
+  });
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [overtimes, setOvertimes] = useState([]);
+  const [filteredOvertimes, setFilteredOvertimes] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const location = useLocation();
@@ -18,6 +31,22 @@ function Overtime() {
   const [selectAllEmployees, setSelectAllEmployees] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [isAllSelected, setIsAllSelected] = useState(false);
+  const [searchFilters, setSearchFilters] = useState({
+    employeeName: '',
+    dateFilterType: 'single',
+    singleDate: new Date().toISOString().split('T')[0],
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    status: '',
+    minHours: '',
+    maxHours: '',
+    minAmount: '',
+    maxAmount: ''
+  });
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [user, setUser] = useState(null);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [newOvertime, setNewOvertime] = useState({
     employee: { id: '' },
@@ -26,45 +55,165 @@ function Overtime() {
     endTime: '',
     status: 'Pending',
     overtimeHours: 0,
-    totalOvertimePay: 0
+    totalOvertimePay: 0,
+    overtimeMultiplier: 1.5
   });
 
-  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const settingsMenuRef = useRef(null);
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
 
-  // Helper function to get JWT token
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8080";
+    }
+
+    if (hostname.startsWith("192.168.")) {
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
+
+    if (hostname === "100.114.178.13") {
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  };
+
+  const API_BASE_URL = getApiBaseUrl();
+
   const getToken = () => {
     return localStorage.getItem('jwtToken');
   };
 
-  // Calculate overtime hours and pay when times change
-  useEffect(() => {
-    if (newOvertime.startTime && newOvertime.endTime) {
-      const [startHours, startMinutes] = newOvertime.startTime.split(':').map(Number);
-      const [endHours, endMinutes] = newOvertime.endTime.split(':').map(Number);
-      
-      const startTotalMinutes = startHours * 60 + startMinutes;
-      const endTotalMinutes = endHours * 60 + endMinutes;
-      
-      const diffHours = (endTotalMinutes - startTotalMinutes) / 60;
-      
-      if (diffHours > 0) {
-        setNewOvertime(prev => ({
-          ...prev,
-          overtimeHours: diffHours.toFixed(2),
-          totalOvertimePay: (diffHours * overtimeHourlyRate).toFixed(2)
-        }));
-      } else {
-        setNewOvertime(prev => ({
-          ...prev,
-          overtimeHours: '',
-          totalOvertimePay: ''
-        }));
-      }
-    }
-  }, [newOvertime.startTime, newOvertime.endTime, overtimeHourlyRate]);
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-GH', {
+      style: 'currency',
+      currency: 'GHS',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount || 0);
+  };
 
-  // Close create menu when clicking outside
+  const getTodayDate = () => {
+    return new Date().toISOString().split('T')[0];
+  };
+
+  const getWeekStartDate = () => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const weekStart = new Date(today.setDate(diff));
+    return weekStart.toISOString().split('T')[0];
+  };
+
+  const getWeekEndDate = () => {
+    const weekStart = new Date(getWeekStartDate());
+    weekStart.setDate(weekStart.getDate() + 6);
+    return weekStart.toISOString().split('T')[0];
+  };
+
+  const getMonthStartDate = () => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+  };
+
+  const getMonthEndDate = () => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+  };
+
+  const calculateFilterDates = () => {
+    const { dateFilterType, singleDate, startDate, endDate } = searchFilters;
+    
+    switch(dateFilterType) {
+      case 'single':
+        return {
+          startDate: singleDate,
+          endDate: singleDate
+        };
+      case 'range':
+        return {
+          startDate: startDate || getTodayDate(),
+          endDate: endDate || getTodayDate()
+        };
+      case 'today':
+        const today = getTodayDate();
+        return {
+          startDate: today,
+          endDate: today
+        };
+      case 'thisWeek':
+        return {
+          startDate: getWeekStartDate(),
+          endDate: getWeekEndDate()
+        };
+      case 'thisMonth':
+        return {
+          startDate: getMonthStartDate(),
+          endDate: getMonthEndDate()
+        };
+      case 'customRange':
+        return {
+          startDate: startDate || getTodayDate(),
+          endDate: endDate || getTodayDate()
+        };
+      default:
+        return {
+          startDate: getTodayDate(),
+          endDate: getTodayDate()
+        };
+    }
+  };
+
+  useEffect(() => {
+    if (newOvertime.startTime && newOvertime.endTime && newOvertime.employee.id) {
+      calculateOvertime();
+    }
+  }, [newOvertime.startTime, newOvertime.endTime, newOvertime.date, newOvertime.employee.id, employees, settings]);
+
+  const calculateOvertime = () => {
+    const [startHours, startMinutes] = newOvertime.startTime.split(':').map(Number);
+    const [endHours, endMinutes] = newOvertime.endTime.split(':').map(Number);
+    
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = endHours * 60 + endMinutes;
+    
+    const diffHours = (endTotalMinutes - startTotalMinutes) / 60;
+    
+    if (diffHours > 0) {
+      const selectedEmployee = employees.find(emp => emp.id === newOvertime.employee.id);
+      const employeeRate = selectedEmployee?.minimumRate || settings.hourlyRate;
+      
+      const date = new Date(newOvertime.date);
+      const dayOfWeek = date.getDay();
+      
+      let multiplier = settings.defaultOvertimeMultiplier;
+      
+      if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
+        multiplier = settings.sundayOvertimeMultiplier;
+      }
+      
+      if (settings.enableTimeAndHalfAfter8Hours && diffHours > 8) {
+        multiplier = settings.timeAndHalfMultiplier;
+      }
+      
+      const newHourlyRate = employeeRate * multiplier;
+      const overtimePay = newHourlyRate * diffHours;
+      
+      setNewOvertime(prev => ({
+        ...prev,
+        overtimeHours: diffHours.toFixed(2),
+        totalOvertimePay: overtimePay.toFixed(2),
+        overtimeMultiplier: multiplier
+      }));
+    } else {
+      setNewOvertime(prev => ({
+        ...prev,
+        overtimeHours: '',
+        totalOvertimePay: ''
+      }));
+    }
+  };
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
@@ -78,34 +227,19 @@ function Overtime() {
     };
   }, []);
 
-  const toggleSettingsMenu = () => {
-    setIsSettingsMenuOpen(!isSettingsMenuOpen);
-  };
-
-  // Close settings menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (settingsMenuRef.current && !settingsMenuRef.current.contains(event.target)) {
-        setIsSettingsMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
   const handleInputChange = (e) => {
     const { name, value } = e.target;
 
     if (name === "employeeId") {
+      const employeeId = Number(value) || "";
+      const selectedEmployee = employees.find(emp => emp.id === employeeId);
+      
       setNewOvertime(prev => ({
         ...prev,
         employee: {
           ...prev.employee,
-          id: Number(value) || "",
-        },
+          id: employeeId,
+        }
       }));
     } else {
       setNewOvertime(prev => ({
@@ -115,19 +249,39 @@ function Overtime() {
     }
   };
 
-  // Fetch employees and filter out those who already have overtime on the selected date
+  const fetchSettings = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/system`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const systemSettings = await response.json();
+        setSettings(prev => ({
+          ...prev,
+          ...systemSettings
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
+
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      // Fetch both employees and overtimes in parallel
       const [employeesResponse, overtimeResponse] = await Promise.all([
-        fetch('http://localhost:8080/api/employee', {
+        fetch(`${API_BASE_URL}/api/employee`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           }
         }),
-        fetch('http://localhost:8080/api/overtime', {
+        fetch(`${API_BASE_URL}/api/overtime`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -137,68 +291,220 @@ function Overtime() {
 
       if (!employeesResponse.ok) throw new Error('Failed to fetch employees');
       const employeesData = await employeesResponse.json();
-  
+
       let overtimesData = [];
       if (overtimeResponse.ok) {
         overtimesData = await overtimeResponse.json();
       }
 
-      // Filter employees who don't have overtime on the selected date
+      const normalizedOvertimes = overtimesData.map(o => ({
+        id: o.id,
+        employeeId: o.employee?.id ?? o.employeeId,
+        date: o.date ? new Date(o.date).toISOString().split('T')[0] : null
+      }));
+
       const filteredEmployees = employeesData.filter(employee => {
         if (!newOvertime.date) return true;
-        
-        const hasOvertime = overtimesData.some(
-          o => o.employee.id === employee.id && o.date === newOvertime.date
-        );
-
+        const selectedDate = newOvertime.date;
+        const hasOvertime = normalizedOvertimes.some(ot => {
+          if (!ot || !ot.employeeId) return false;
+          return String(ot.employeeId) === String(employee.id) && ot.date === selectedDate;
+        });
         return !hasOvertime;
       });
 
       setEmployees(filteredEmployees);
     } catch (err) {
+      console.error('Error fetching employees:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch all overtime records
   const fetchOvertimes = async () => {
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/overtime', {
+      const response = await fetch(`${API_BASE_URL}/api/overtime`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         }
       });
+
       if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
       const data = await response.json();
-      setOvertimes(data);
+
+      const normalized = data.map((o) => {
+        const employee = normalizeEmployee(o);
+
+        const overtimeHours = o.overtimeHours != null && o.overtimeHours !== ''
+          ? Number(o.overtimeHours)
+          : calcHoursFromTimes(o.startTime, o.endTime);
+
+        const overtimeMultiplier = o.overtimeMultiplier ?? settings.defaultOvertimeMultiplier;
+
+        const rate = employee.minimumRate ?? settings.hourlyRate;
+
+        const calculatedOvertimePay = o.calculatedOvertimePay != null
+          ? Number(o.calculatedOvertimePay)
+          : Number((rate * overtimeMultiplier * overtimeHours).toFixed(2));
+
+        return {
+          ...o,
+          employee,
+          overtimeHours,
+          overtimeMultiplier,
+          calculatedOvertimePay,
+        };
+      });
+
+      const validOvertimes = normalized.filter(item => item && item.id != null);
+
+      setOvertimes(validOvertimes);
+      setFilteredOvertimes(validOvertimes);
     } catch (err) {
+      console.error('Error fetching overtimes:', err);
       setError(err.message);
+      setOvertimes([]);
+      setFilteredOvertimes([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial data fetch
   useEffect(() => {
+    const interval = setInterval(() => {
+      fetchOvertimes();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handleOvertimeUpdate = () => {
+      fetchOvertimes();
+    };
+
+    window.addEventListener("overtime-updated", handleOvertimeUpdate);
+    return () => window.removeEventListener("overtime-updated", handleOvertimeUpdate);
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
     fetchEmployees();
     fetchOvertimes();
   }, []);
 
-  // Refetch employees when date changes
   useEffect(() => {
     fetchEmployees();
   }, [newOvertime.date]);
+
+  const performSearch = () => {
+    if (!query.trim() && Object.values(searchFilters).every(val => !val) && searchFilters.dateFilterType === 'single') {
+      setFilteredOvertimes(overtimes);
+      return;
+    }
+
+    const searchTerm = query.toLowerCase().trim();
+    const dates = calculateFilterDates();
+    
+    const filtered = overtimes.filter(overtime => {
+      const employee = overtime.employee || {};
+      const employeeName = `${employee.firstName || ''} ${employee.lastName || ''}`.toLowerCase();
+      
+      const employeeId = employee.employeeId !== undefined && employee.employeeId !== null 
+        ? String(employee.employeeId).toLowerCase() 
+        : '';
+      
+      const status = (overtime.status || '').toLowerCase();
+      const date = overtime.date || '';
+      const hours = overtime.overtimeHours || 0;
+      const amount = overtime.calculatedOvertimePay || 0;
+
+      const isWithinDateRange = (!dates.startDate && !dates.endDate) || 
+        (date >= dates.startDate && date <= dates.endDate);
+
+      const matchesMainQuery = !searchTerm || 
+        employeeName.includes(searchTerm) ||
+        employeeId.includes(searchTerm) ||
+        status.includes(searchTerm);
+
+      const matchesEmployeeName = !searchFilters.employeeName || 
+        employeeName.includes(searchFilters.employeeName.toLowerCase());
+      
+      const matchesStatus = !searchFilters.status || 
+        status === searchFilters.status.toLowerCase();
+      
+      const matchesMinHours = !searchFilters.minHours || 
+        hours >= parseFloat(searchFilters.minHours);
+      
+      const matchesMaxHours = !searchFilters.maxHours || 
+        hours <= parseFloat(searchFilters.maxHours);
+      
+      const matchesMinAmount = !searchFilters.minAmount || 
+        amount >= parseFloat(searchFilters.minAmount);
+      
+      const matchesMaxAmount = !searchFilters.maxAmount || 
+        amount <= parseFloat(searchFilters.maxAmount);
+
+      return isWithinDateRange && 
+             matchesMainQuery && 
+             matchesEmployeeName && 
+             matchesStatus && 
+             matchesMinHours && 
+             matchesMaxHours && 
+             matchesMinAmount && 
+             matchesMaxAmount;
+    });
+
+    setFilteredOvertimes(filtered);
+  };
+
+  useEffect(() => {
+    performSearch();
+  }, [query, searchFilters, overtimes]);
+
+  const handleSearchInputChange = (e) => {
+    const { name, value, type } = e.target;
+    
+    if (name === 'query') {
+      setQuery(value);
+    } else if (name === 'dateFilterType') {
+      setSearchFilters(prev => ({
+        ...prev,
+        dateFilterType: value
+      }));
+    } else {
+      setSearchFilters(prev => ({
+        ...prev,
+        [name]: type === 'checkbox' ? e.target.checked : value
+      }));
+    }
+  };
+
+  const resetSearch = () => {
+    setQuery('');
+    setSearchFilters({
+      employeeName: '',
+      dateFilterType: 'single',
+      singleDate: new Date().toISOString().split('T')[0],
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: new Date().toISOString().split('T')[0],
+      status: '',
+      minHours: '',
+      maxHours: '',
+      minAmount: '',
+      maxAmount: ''
+    });
+  };
 
   const handleHeaderCheckboxChange = (e) => {
     const isChecked = e.target.checked;
     setIsAllSelected(isChecked);
     
-    overtimes.forEach(overtime => {
+    filteredOvertimes.forEach(overtime => {
       const checkbox = document.getElementById(`checkbox-${overtime.id}`);
       if (checkbox) {
         checkbox.checked = isChecked;
@@ -206,52 +512,100 @@ function Overtime() {
     });
   };
 
-  // Create overtime record(s)
-  const createOvertime = async () => {
+  const createOvertime = async () => { 
     if (selectAllEmployees) {
+      const formatTimeToHHMMSS = (time) => {
+        if (!time) return '00:00:00';
+        if (time.length === 5) return time + ':00';
+        if (time.length === 8) return time;
+        const parts = time.split(':');
+        if (parts.length === 2) return `${parts[0]}:${parts[1]}:00`;
+        return '00:00:00';
+      };
+
       for (const employee of employees) {
+        const employeeRate = employee.minimumRate || settings.hourlyRate;
+
+        const date = new Date(newOvertime.date);
+        const dayOfWeek = date.getDay();
+
+        let multiplier = settings.defaultOvertimeMultiplier;
+
+        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
+          multiplier = settings.sundayOvertimeMultiplier;
+        }
+
+        const [startHours, startMinutes] = newOvertime.startTime.split(':').map(Number);
+        const [endHours, endMinutes] = newOvertime.endTime.split(':').map(Number);
+
+        const startTotal = startHours * 60 + startMinutes;
+        const endTotal = endHours * 60 + endMinutes;
+
+        const diffHours = (endTotal - startTotal) / 60;
+
+        if (settings.enableTimeAndHalfAfter8Hours && diffHours > 8) {
+          multiplier = settings.timeAndHalfMultiplier;
+        }
+
+        const newHourlyRate = employeeRate * multiplier;
+        const overtimePay = (newHourlyRate * diffHours).toFixed(2);
+
         const overtimeData = {
-          employee: { id: employee.id },
+          employeeId: employee.id,
           date: newOvertime.date,
-          startTime: newOvertime.startTime,
-          endTime: newOvertime.endTime,
-          status: newOvertime.status,
+          startTime: formatTimeToHHMMSS(newOvertime.startTime),
+          endTime: formatTimeToHHMMSS(newOvertime.endTime),
+          status: newOvertime.status || 'Pending',
+          baseHourlyRate: employeeRate,
+          overtimeMultiplier: multiplier,
+          overtimeHours: Number(diffHours.toFixed(2)),
+          calculatedOvertimePay: Number(overtimePay)
         };
 
         try {
           const token = getToken();
-          const response = await fetch('http://localhost:8080/api/overtime', {
+          
+          const response = await fetch(`${API_BASE_URL}/api/overtime`, {
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
+              'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify(overtimeData),
+            body: JSON.stringify(overtimeData)
           });
 
-          if (!response.ok) throw new Error(`Server responded with status ${response.status}`);
-          
-          const data = await response.json();
-          console.log('Overtime created for employee:', employee.id, data);
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server error response:', errorText);
+            continue;
+          }
+
+          const responseData = await response.json();
+          console.log('Successfully created overtime:', responseData);
+
         } catch (err) {
           console.error('Error creating overtime for employee:', employee.id, err);
-          setError(`Error creating overtime for employee ${employee.id}: ${err.message}`);
+          continue;
         }
       }
-      
+
       setNewOvertime({
         employee: { id: '' },
         date: new Date().toISOString().split('T')[0],
         startTime: '',
         endTime: '',
-        status: 'Pending'
+        status: 'Pending',
+        overtimeHours: 0,
+        totalOvertimePay: 0,
+        overtimeMultiplier: settings.defaultOvertimeMultiplier
       });
+
       setSelectAllEmployees(false);
       setIsCreateMenuOpen(false);
-      
-      // Refresh the data
+
       fetchEmployees();
       fetchOvertimes();
+
     } else {
       if (!newOvertime.employee.id || !newOvertime.date || !newOvertime.startTime || !newOvertime.endTime) {
         setError('Please fill out all required fields.');
@@ -264,16 +618,31 @@ function Overtime() {
       }
 
       try {
+        const employeeRate = getEmployeeRate(newOvertime.employee.id);
+        const newHourlyRate = employeeRate * (newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier);
+        const calculatedPay = (newHourlyRate * parseFloat(newOvertime.overtimeHours || 0)).toFixed(2);
+        const formatTime = (t) => t.length === 5 ? t + ":00" : t;
+
         const overtimeData = {
-          employee: { id: newOvertime.employee.id },
+          employeeId: newOvertime.employee.id,
           date: newOvertime.date,
-          startTime: newOvertime.startTime,
-          endTime: newOvertime.endTime,
+          startTime: formatTime(newOvertime.startTime),
+          endTime: formatTime(newOvertime.endTime),
           status: newOvertime.status,
+          baseHourlyRate: employeeRate,
+          overtimeMultiplier: newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier,
+          overtimeHours: Number(newOvertime.overtimeHours),
+          calculatedOvertimePay: Number(calculatedPay)
         };
 
+        overtimeData.baseHourlyRate = Number(overtimeData.baseHourlyRate);
+        overtimeData.overtimeMultiplier = Number(overtimeData.overtimeMultiplier);
+        overtimeData.overtimeHours = Number(overtimeData.overtimeHours);
+        overtimeData.calculatedOvertimePay = Number(overtimeData.calculatedOvertimePay);
+
         const token = getToken();
-        const response = await fetch('http://localhost:8080/api/overtime', {
+
+        const response = await fetch(`${API_BASE_URL}/api/overtime`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -282,36 +651,75 @@ function Overtime() {
           body: JSON.stringify(overtimeData),
         });
 
-        if (!response.ok) throw new Error(`Server responded with status ${response.status}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Server error response:', errorText);
+          throw new Error(`Server error: ${response.status} - ${errorText}`);
+        }
 
         const data = await response.json();
+
         setOvertimes(prev => [...prev, data]);
-        
         setNewOvertime({
           employee: { id: '' },
           date: new Date().toISOString().split('T')[0],
           startTime: '',
           endTime: '',
-          status: 'Pending'
+          status: 'Pending',
+          overtimeHours: 0,
+          totalOvertimePay: 0,
+          overtimeMultiplier: settings.defaultOvertimeMultiplier
         });
         setError('');
         setIsCreateMenuOpen(false);
-        
-        // Refresh the employee list to exclude the employee who now has overtime
         fetchEmployees();
+
       } catch (err) {
-        console.error('Error:', err);
+        console.error('Error creating overtime:', err);
         setError(err.message);
       }
     }
   };
 
-  // Validate a single overtime record
+  const calcHoursFromTimes = (startTime, endTime) => {
+    if (!startTime || !endTime) return 0;
+    const toMinutes = (t) => {
+      const parts = t.split(':').map(Number);
+      if (parts.length >= 2) return parts[0] * 60 + parts[1];
+      return 0;
+    };
+    const start = toMinutes(startTime);
+    const end = toMinutes(endTime);
+    const diff = (end - start) / 60;
+    return diff > 0 ? Number(diff.toFixed(2)) : 0;
+  };
+
+  const normalizeEmployee = (item) => {
+    if (item.employee) return item.employee;
+    const name = item.employeeName || '';
+    const parts = name.trim().split(/\s+/);
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+    
+    let employeeId = item.employeeId || item.employee?.employeeId || null;
+    if (employeeId !== null && employeeId !== undefined) {
+      employeeId = String(employeeId);
+    }
+    
+    return {
+      id: item.employeeId ?? item.employee?.id ?? null,
+      firstName,
+      lastName,
+      employeeId: employeeId,
+      minimumRate: item.minimumRate ?? item.employee?.minimumRate ?? settings.hourlyRate
+    };
+  };
+
   const validateOvertime = async (overtimeId) => {
     setIsValidating(true);
     try {
       const token = getToken();
-      const response = await fetch("http://localhost:8080/api/overtime/validate", {
+      const response = await fetch(`${API_BASE_URL}/api/overtime/validate`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -336,11 +744,10 @@ function Overtime() {
     }
   };
 
-  // Validate multiple overtime records
   const validateSelectedOvertimes = async () => {
     const checkedOvertimeIds = isAllSelected 
-      ? overtimes.map(o => o.id)
-      : overtimes
+      ? filteredOvertimes.map(o => o.id)
+      : filteredOvertimes
           .filter(o => document.getElementById(`checkbox-${o.id}`)?.checked)
           .map(o => o.id);
 
@@ -353,7 +760,7 @@ function Overtime() {
     
     try {
       const token = getToken();
-      const response = await fetch("http://localhost:8080/api/overtime/validate", {
+      const response = await fetch(`${API_BASE_URL}/api/overtime/validate`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -376,32 +783,401 @@ function Overtime() {
     } finally {
       setIsValidating(false);
       setIsAllSelected(false);
-      overtimes.forEach(o => {
+      filteredOvertimes.forEach(o => {
         const checkbox = document.getElementById(`checkbox-${o.id}`);
         if (checkbox) checkbox.checked = false;
       });
     }
   };
 
+  const getEmployeeRate = (employeeId) => {
+    const employee = employees.find(emp => emp.id === employeeId);
+    return employee?.minimumRate || settings.hourlyRate;
+  };
+
+  const calculateOvertimeAmount = (employeeRate, overtimeMultiplier, overtimeHours) => {
+    const newHourlyRate = employeeRate * overtimeMultiplier;
+    return (newHourlyRate * overtimeHours).toFixed(2);
+  };
+
+  const searchStats = useMemo(() => {
+    return {
+      total: overtimes.length,
+      filtered: filteredOvertimes.length,
+      totalHours: filteredOvertimes.reduce((sum, o) => sum + (o.overtimeHours || 0), 0).toFixed(1),
+      totalAmount: filteredOvertimes.reduce((sum, o) => sum + (o.calculatedOvertimePay || 0), 0).toFixed(2)
+    };
+  }, [overtimes, filteredOvertimes]);
+
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sidebarOpen && window.innerWidth < 768) {
+        const sidebar = document.querySelector('.sidebar-container');
+        if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
+          setSidebarOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const res = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          },
+          credentials: "include"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUser({
+            name: data.username,
+            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            email: data.email
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch user", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("jwtToken");
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      navigate("/");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
+  const dateFilterTypes = [
+    { value: 'single', label: 'Single Date' },
+    { value: 'range', label: 'Date Range' },
+    { value: 'today', label: 'Today' },
+    { value: 'thisWeek', label: 'This Week' },
+    { value: 'thisMonth', label: 'This Month' },
+    { value: 'customRange', label: 'Custom Range' }
+  ];
+
+  const renderDateFilterSection = () => (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-4">
+      <h3 className="text-lg font-semibold text-gray-800 mb-4">Date Filter</h3>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Filter Type</label>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+            {dateFilterTypes.map(type => (
+              <button
+                key={type.value}
+                onClick={() => setSearchFilters(prev => ({ ...prev, dateFilterType: type.value }))}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  searchFilters.dateFilterType === type.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {type.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {(searchFilters.dateFilterType === 'single' || searchFilters.dateFilterType === 'range') && (
+            <>
+              {searchFilters.dateFilterType === 'single' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Date</label>
+                  <input
+                    type="date"
+                    name="singleDate"
+                    value={searchFilters.singleDate}
+                    onChange={handleSearchInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              )}
+              
+              {(searchFilters.dateFilterType === 'range' || searchFilters.dateFilterType === 'customRange') && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      name="startDate"
+                      value={searchFilters.startDate}
+                      onChange={handleSearchInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                    <input
+                      type="date"
+                      name="endDate"
+                      value={searchFilters.endDate}
+                      onChange={handleSearchInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {searchFilters.dateFilterType !== 'single' && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-sm text-blue-700">
+              <strong>Selected Date Range:</strong> {calculateFilterDates().startDate} to {calculateFilterDates().endDate}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderAdvancedSearchPanel = () => (
+    <div className="mt-4 mb-6">
+      <button
+        onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-2"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${showAdvancedSearch ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+        {showAdvancedSearch ? 'Hide Advanced Search' : 'Show Advanced Search'}
+      </button>
+      
+      {showAdvancedSearch && (
+        <div className="space-y-4">
+          {renderDateFilterSection()}
+          
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-4">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Additional Filters</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Employee Name</label>
+                <input
+                  type="text"
+                  name="employeeName"
+                  value={searchFilters.employeeName}
+                  onChange={handleSearchInputChange}
+                  placeholder="Enter employee name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  name="status"
+                  value={searchFilters.status}
+                  onChange={handleSearchInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Status</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Overtime Hours</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    name="minHours"
+                    value={searchFilters.minHours}
+                    onChange={handleSearchInputChange}
+                    placeholder="Min"
+                    step="0.5"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <input
+                    type="number"
+                    name="maxHours"
+                    value={searchFilters.maxHours}
+                    onChange={handleSearchInputChange}
+                    placeholder="Max"
+                    step="0.5"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Overtime Amount (GHS)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    name="minAmount"
+                    value={searchFilters.minAmount}
+                    onChange={handleSearchInputChange}
+                    placeholder="Min GHS"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <input
+                    type="number"
+                    name="maxAmount"
+                    value={searchFilters.maxAmount}
+                    onChange={handleSearchInputChange}
+                    placeholder="Max GHS"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-end justify-end gap-2 mt-4">
+              <button
+                onClick={resetSearch}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+              >
+                Reset All Filters
+              </button>
+              <button
+                onClick={performSearch}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderQuickFilters = () => (
+    <div className="flex flex-wrap gap-2 mb-4">
+      <button
+        onClick={() => setSearchFilters(prev => ({ ...prev, dateFilterType: 'today' }))}
+        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+          searchFilters.dateFilterType === 'today'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        }`}
+      >
+        Today
+      </button>
+      <button
+        onClick={() => setSearchFilters(prev => ({ ...prev, dateFilterType: 'thisWeek' }))}
+        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+          searchFilters.dateFilterType === 'thisWeek'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        }`}
+      >
+        This Week
+      </button>
+      <button
+        onClick={() => setSearchFilters(prev => ({ ...prev, dateFilterType: 'thisMonth' }))}
+        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+          searchFilters.dateFilterType === 'thisMonth'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        }`}
+      >
+        This Month
+      </button>
+      <button
+        onClick={() => setSearchFilters(prev => ({ ...prev, dateFilterType: 'range' }))}
+        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+          searchFilters.dateFilterType === 'range'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        }`}
+      >
+        Custom Range
+      </button>
+      <button
+        onClick={resetSearch}
+        className="px-3 py-1.5 text-sm bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors"
+      >
+        Clear Filters
+      </button>
+    </div>
+  );
+
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-md z-30">
-        <MainSidebar />
+      <div 
+        className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
+          sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
+        }`}
+      >
+        <MainSidebar isCollapsed={!sidebarOpen} />
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 ml-64">
-        {/* Overlay for create menu */}
+      {sidebarOpen && window.innerWidth < 768 && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div 
+        className={`flex-1 transition-all duration-300 ${
+          sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
+        }`}
+      >
         {isCreateMenuOpen && (
           <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsCreateMenuOpen(false)}></div>
         )}
 
         <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          {/* Top Bar */}
           <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            {/* Menu Icon */}
-            <button className="p-1 hover:bg-gray-100 rounded-md">
+            <button 
+              onClick={toggleSidebar}
+              className="p-1 hover:bg-gray-100 rounded-md transition-colors hamburger-button"
+            >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -413,10 +1189,8 @@ function Overtime() {
               </svg>
             </button>
 
-            {/* Right Icons */}
             <div className="flex items-center gap-5">
-              {/* Settings Icon */}
-              <div className="relative" ref={settingsMenuRef}>
+              <div className="relative">
                 <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -438,7 +1212,6 @@ function Overtime() {
 
               <div className="border-l border-gray-300 h-8"></div>
 
-              {/* Notifications Icon */}
               <button className="p-1 hover:bg-gray-200 rounded-full relative">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -459,24 +1232,72 @@ function Overtime() {
 
               <div className="border-l border-gray-300 h-8"></div>
 
-              {/* User Profile */}
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                  A
+              <div className="relative">
+                <div 
+                  className="flex items-center gap-2 cursor-pointer group"
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                >
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-600 to-indigo-400 flex items-center justify-center text-white">
+                    <span className="font-medium">{user?.name?.charAt(0) || 'U'}</span>
+                  </div>
+                  <span className="font-medium text-gray-700 group-hover:text-gray-900">
+                    {user?.name || 'User'}
+                  </span>
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    className={`h-4 w-4 text-gray-500 group-hover:text-gray-700 transition-transform ${userDropdownOpen ? 'rotate-180' : ''}`}
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
-                <span className="font-medium">Adams</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+
+                {userDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
+                    <div className="px-4 py-2 border-b border-gray-100">
+                      <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
+                      <p className="text-xs text-gray-500 truncate">{user?.email || ''}</p>
+                      <p className="text-xs text-indigo-600 capitalize mt-1">{user?.role || 'employee'}</p>
+                    </div>
+                    
+                    <button
+                      onClick={() => {
+                        navigate('/settings');
+                        setUserDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Settings
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        handleLogout();
+                        setUserDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors border-t border-gray-100"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Logout
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </header>
 
-          {/* Page Header */}
           <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-6 bg-white rounded-xl shadow-sm mt-6">
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">Overtime Management</h1>
-              <p className="text-gray-600">Track and manage employee overtime records</p>
+              <h1 className="text-2xl font-bold text-gray-800">Overtime Management (GHS)</h1>
+              <p className="text-gray-600">Track and manage employee overtime records in Ghana Cedis</p>
             </div>
             
             <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -488,9 +1309,10 @@ function Overtime() {
                 </div>
                 <input
                   type="text"
-                  placeholder="Search employees..."
+                  name="query"
+                  placeholder="Search employees, status, ID..."
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={handleSearchInputChange}
                   className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
@@ -507,7 +1329,34 @@ function Overtime() {
             </div>
           </section>
 
-          {/* Navigation Tabs */}
+          {filteredOvertimes.length !== overtimes.length && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-800">
+                    Showing {filteredOvertimes.length} of {overtimes.length} records
+                    {query && ` for "${query}"`}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Total hours: {searchStats.totalHours}h | Total amount: {formatCurrency(searchStats.totalAmount)}
+                  </p>
+                </div>
+                <button
+                  onClick={resetSearch}
+                  className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Clear search
+                </button>
+              </div>
+            </div>
+          )}
+
+          {renderQuickFilters()}
+          {renderAdvancedSearchPanel()}
+
           <div className="flex items-center justify-start mt-6 mb-4 rounded-lg shadow-sm overflow-hidden w-max border border-gray-200">
             <Link to="/attendance" className="w-[180px]">
               <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
@@ -534,7 +1383,6 @@ function Overtime() {
             </Link>
           </div>
 
-          {/* Date and Actions Panel */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-4 bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg">
@@ -568,7 +1416,6 @@ function Overtime() {
             </div>
           </div>
 
-          {/* Overtime Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
@@ -587,93 +1434,133 @@ function Overtime() {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Time</th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Time</th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hours</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount (GHS)</th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {overtimes.map((overtime) => (
-                    <tr key={overtime.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <input 
-                          type="checkbox" 
-                          id={`checkbox-${overtime.id}`}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                            <span className="text-gray-700 font-medium">
-                              {overtime?.employee?.firstName?.charAt(0)}{overtime?.employee?.lastName?.charAt(0)}
-                            </span>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {overtime?.employee 
-                                ? `${overtime.employee.firstName} ${overtime.employee.lastName}`
-                                : "Loading..."}
-                            </div>
-                            <div className="text-sm text-gray-500">{overtime?.employee?.employeeId || 'N/A'}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(overtime.date).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          weekday: 'short'
-                        })}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {overtime.startTime || '--:--'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {overtime.endTime || '--:--'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          {overtime.overtimeHours || 0} hrs
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        ${(overtime.overtimeHours * overtimeHourlyRate).toFixed(2) || '0.00'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          overtime.status === 'Approved' 
-                            ? 'bg-green-100 text-green-800'
-                            : overtime.status === 'Rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {overtime.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end items-center gap-2">
-                          <button
-                            onClick={() => validateOvertime(overtime.id)}
-                            disabled={isValidating}
-                            className={`px-3 py-1 rounded-md text-sm ${
-                              isValidating
-                                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
-                          >
-                            Validate
-                          </button>
-                          <button className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
-                            </svg>
-                          </button>
+                  {loading ? (
+                    <tr>
+                      <td colSpan="9" className="px-6 py-4 text-center text-sm text-gray-500">
+                        <div className="flex justify-center items-center">
+                          <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Loading overtime records...
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ) : filteredOvertimes.length > 0 ? (
+                    filteredOvertimes.map((overtime) => {
+                      const employee = overtime.employee || {};
+                      const employeeFirstName = employee.firstName || 'Unknown';
+                      const employeeLastName = employee.lastName || 'Employee';
+                      const employeeId = employee.employeeId || 'N/A';
+                      
+                      const employeeRate = getEmployeeRate(employee.id);
+                      
+                      const newHourlyRate = employeeRate * overtime.overtimeMultiplier;
+                      
+                      const calculatedPay = overtime.calculatedOvertimePay;
+                      
+                      return (
+                        <tr key={overtime.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <input 
+                              type="checkbox" 
+                              id={`checkbox-${overtime.id}`}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                <span className="text-gray-700 font-medium">
+                                  {employeeFirstName.charAt(0)}{employeeLastName.charAt(0)}
+                                </span>
+                              </div>
+                              <div className="ml-4">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {employeeFirstName} {employeeLastName}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {employeeId}
+                                  <span className="ml-2 text-xs text-blue-600">
+                                    ({formatCurrency(employeeRate)}/hr × {overtime.overtimeMultiplier}x = {formatCurrency(newHourlyRate)}/hr)
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {overtime.date ? new Date(overtime.date).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            }) : 'No Date'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {overtime.startTime ? overtime.startTime.substring(0, 5) : '--:--'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {overtime.endTime ? overtime.endTime.substring(0, 5) : '--:--'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              {overtime.overtimeHours ? parseFloat(overtime.overtimeHours).toFixed(1) : '0.0'} hrs
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
+                            {formatCurrency(calculatedPay)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              overtime.status === 'Approved' 
+                                ? 'bg-green-100 text-green-800'
+                                : overtime.status === 'Rejected'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {overtime.status || 'Pending'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <div className="flex justify-end items-center gap-2">
+                              <button
+                                onClick={() => validateOvertime(overtime.id)}
+                                disabled={isValidating}
+                                className={`px-3 py-1 rounded-md text-sm ${
+                                  isValidating
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                }`}
+                              >
+                                Validate
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="9" className="px-6 py-8 text-center">
+                        <div className="flex flex-col items-center justify-center text-gray-500">
+                          <svg className="w-12 h-12 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                          </svg>
+                          <p className="text-lg font-medium mb-1">No overtime records found</p>
+                          {query || Object.values(searchFilters).some(val => val) ? (
+                            <p className="text-sm">No records match your search criteria. Try adjusting your filters.</p>
+                          ) : (
+                            <p className="text-sm">Create your first overtime record using the "Add Overtime" button</p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -685,7 +1572,7 @@ function Overtime() {
               className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 z-50 w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-800">Add Overtime</h1>
+                <h1 className="text-2xl font-bold text-gray-800">Add Overtime (GHS)</h1>
                 <button 
                   onClick={() => setIsCreateMenuOpen(false)}
                   className="text-gray-500 hover:text-gray-700"
@@ -697,7 +1584,6 @@ function Overtime() {
               </div>
 
               <div className="space-y-6">
-                {/* Date and Employee Selection */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -721,14 +1607,21 @@ function Overtime() {
                       <option value="">Select Employee</option>
                       {employees.map((employee) => (
                         <option key={employee.id} value={employee.id}>
-                          {employee.firstName} {employee.lastName}
+                          {employee.firstName} {employee.lastName} ({formatCurrency(employee.minimumRate || settings.hourlyRate)}/hr)
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                {/* Select All Employees */}
+                {newOvertime.employee.id && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="text-sm text-blue-700">
+                      <strong>Overtime Rate:</strong> {formatCurrency(getEmployeeRate(newOvertime.employee.id))}/hr × {newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier}x = {formatCurrency(getEmployeeRate(newOvertime.employee.id) * (newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier))}/hr
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -739,7 +1632,6 @@ function Overtime() {
                   <label className="text-sm font-medium text-gray-700">Select All Available Employees</label>
                 </div>
 
-                {/* Time Inputs */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
@@ -764,8 +1656,7 @@ function Overtime() {
                   </div>
                 </div>
 
-                {/* Calculated Fields */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Overtime Hours</label>
                     <input
@@ -777,17 +1668,34 @@ function Overtime() {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Total Overtime Pay</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Overtime Multiplier</label>
                     <input
                       type="text"
-                      value={newOvertime.totalOvertimePay ? `$${newOvertime.totalOvertimePay}` : ''}
+                      value={newOvertime.overtimeMultiplier ? `${newOvertime.overtimeMultiplier}x` : `${settings.defaultOvertimeMultiplier || 1.5}x`}
+                      readOnly
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-gray-100"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Total Overtime Pay (GHS)</label>
+                    <input
+                      type="text"
+                      value={newOvertime.totalOvertimePay ? `${formatCurrency(newOvertime.totalOvertimePay)}` : ''}
                       readOnly
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-gray-100"
                     />
                   </div>
                 </div>
 
-                {/* Status */}
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-green-800 mb-2">Overtime Calculation (GHS)</h4>
+                  <div className="text-sm text-green-700 space-y-1">
+                    <p><strong>Formula:</strong> (Employee Rate × Overtime Multiplier) = New Rate × Hours</p>
+                    <p><strong>Calculation:</strong> ({formatCurrency(getEmployeeRate(newOvertime.employee.id) || settings.hourlyRate)} × {newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier || 1.5}) = {formatCurrency((getEmployeeRate(newOvertime.employee.id) || settings.hourlyRate) * (newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier || 1.5))} × {newOvertime.overtimeHours || '0'} = {formatCurrency(newOvertime.totalOvertimePay || '0.00')}</p>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                   <select
@@ -802,7 +1710,6 @@ function Overtime() {
                   </select>
                 </div>
 
-                {/* Form Actions */}
                 <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
                   <button
                     onClick={() => {
@@ -811,7 +1718,10 @@ function Overtime() {
                         date: new Date().toISOString().split('T')[0],
                         startTime: '',
                         endTime: '',
-                        status: 'Pending'
+                        status: 'Pending',
+                        overtimeHours: 0,
+                        totalOvertimePay: 0,
+                        overtimeMultiplier: 1.5
                       });
                       setSelectAllEmployees(false);
                     }}

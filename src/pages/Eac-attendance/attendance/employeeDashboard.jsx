@@ -10,6 +10,9 @@ import {
   CheckCircle,
   XCircle,
   ListChecks,
+  UserCog,
+  BarChart3,
+  Settings,
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
@@ -31,14 +34,45 @@ const EmployeeDashboard = () => {
     fetchCurrentUser();
     fetchLeaveRequests();
   }, []);
+  
+  const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
 
+  console.log("🖥️ Current hostname:", hostname);
+  console.log("🔌 Current port:", port);
+
+  // If frontend is opened via localhost → use localhost backend
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    console.log("🏠 Using LOCALHOST API URL");
+    return "http://localhost:8080";
+  }
+
+  // LAN access
+  if (hostname.startsWith("192.168.")) {
+    console.log("🏠 Using LAN API URL");
+    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  }
+
+  // Public / Tailscale / Cloudflare IP
+  if (hostname === "100.114.178.13") {
+    console.log("🌐 Using PUBLIC API URL");
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  }
+
+  // Default fallback
+  console.log("🌍 Using PUBLIC API URL (fallback)");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+
+  const API_BASE_URL = getApiBaseUrl();
   // Fetch logged-in user info
   const fetchCurrentUser = async () => {
     try {
       const token = localStorage.getItem("jwtToken");
       if (!token) return;
 
-      const response = await fetch("http://localhost:8080/auth/me", {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -56,16 +90,33 @@ const EmployeeDashboard = () => {
   const fetchLeaveRequests = async () => {
     try {
       const token = localStorage.getItem("jwtToken");
-      const response = await fetch("http://localhost:8080/api/leave/my-requests", {
+      if (!token) {
+        console.error("No authentication token found");
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/leave/my-requests`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
       });
 
-      if (!response.ok) throw new Error("Failed to fetch leave requests");
+      console.log("Response status:", response.status);
+
+      if (response.status === 401) {
+        localStorage.removeItem("jwtToken");
+        localStorage.removeItem("userRole");
+        window.location.href = "/login";
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
+      console.log("Fetched leave requests:", data);
       setLeaveRequests(data);
       setFilteredRequests(data);
     } catch (error) {
@@ -94,58 +145,167 @@ const EmployeeDashboard = () => {
     rejected: leaveRequests.filter((r) => r.status === "Rejected").length,
   };
 
-  // --- Dashboard Cards ---
+  // --- Consolidated Dashboard Cards ---
   const cards = [
+    // Employee Cards (Visible to all)
     {
       to: "/leaveRequestForm",
       icon: <CalendarCheck className="w-10 h-10 text-blue-600" />,
       title: "Leave Request",
       description: "Apply for a new leave request",
+      roles: ["ROLE_EMPLOYEE", "ROLE_SUPERVISOR", "ROLE_PLANNER", "ROLE_HR", "ROLE_ADMIN", "ROLE_INVENTORY", "ROLE_TRANSPORT"],
       alwaysVisible: true,
     },
     {
       to: "/attendance",
-      icon: <Users className="w-10 h-10 text-green-600" />,
+      icon: <Clock className="w-10 h-10 text-green-600" />,
       title: "Attendance",
       description: "Manage and track attendance",
-      role: "ROLE_HR",
+      roles: ["ROLE_EMPLOYEE", "ROLE_SUPERVISOR", "ROLE_PLANNER", "ROLE_HR", "ROLE_ADMIN"],
     },
+
+    // 🆕 NEW CARD: Inventory Request (for everyone)
+  {
+    to: "/inventoryRequest",
+    icon: <Package className="w-10 h-10 text-orange-500" />,
+    title: "Inventory Request",
+    description: "Request items or materials from stores",
+    roles: [
+      "ROLE_EMPLOYEE",
+      "ROLE_SUPERVISOR",
+      "ROLE_PLANNER",
+      "ROLE_HR",
+      "ROLE_ADMIN",
+      "ROLE_INVENTORY",
+      "ROLE_TRANSPORT"
+    ],
+    alwaysVisible: true, // visible to everyone
+  },
+
+
+    // Supervisor Card
+    {
+      to: "/supervisorDashboard",
+      icon: <UserCog className="w-10 h-10 text-orange-600" />,
+      title: "Supervisor Dashboard",
+      description: "Review and approve team leave requests",
+      roles: ["ROLE_SUPERVISOR", "ROLE_ADMIN"],
+    },
+
+    // Planner Card
+    {
+      to: "/plannerDashboard",
+      icon: <ListChecks className="w-10 h-10 text-indigo-600" />,
+      title: "Planner Dashboard",
+      description: "Validate resource coverage and project timelines",
+      roles: ["ROLE_PLANNER", "ROLE_ADMIN"],
+    },
+
+      {
+      to: "/plannerProductsReview",
+      icon: <ListChecks className="w-10 h-10 text-indigo-600" />,
+      title: "Products Review",
+      description: "Validate resource coverage and project timelines",
+      roles: ["ROLE_PLANNER", "ROLE_ADMIN"],
+    },
+
+    
+      {
+      to: "/procurementManagerReview",
+      icon: <ListChecks className="w-10 h-10 text-indigo-600" />,
+      title: "Products Review",
+      description: "Validate resource coverage and project timelines",
+      roles: ["ROLE_PROCUREMENT_OFFICER", "ROLE_ADMIN"],
+    },
+
+      {
+      to: "/adminDashboard",
+      icon: <ListChecks className="w-10 h-10 text-indigo-600" />,
+      title: "Transport",
+      description: "Validate resource coverage and project timelines",
+      roles: ["ROLE_TRANSPORT", "ROLE_ADMIN"],
+    },
+
+    // HR Cards
     {
       to: "/HRDashboard",
-      icon: <FileText className="w-10 h-10 text-purple-600" />,
+      icon: <Users className="w-10 h-10 text-purple-600" />,
       title: "HR Dashboard",
       description: "Review and manage HR requests",
-      role: "ROLE_HR",
+      roles: ["ROLE_HR", "ROLE_ADMIN"],
     },
     {
       to: "/payroll",
       icon: <DollarSign className="w-10 h-10 text-yellow-600" />,
       title: "Payroll",
       description: "Manage payroll and salary records",
-      role: "ROLE_ADMIN",
+      roles: ["ROLE_HR", "ROLE_ADMIN"],
     },
+
+    // Inventory Card
     {
       to: "/inventoryDashboard",
       icon: <Package className="w-10 h-10 text-red-600" />,
       title: "Inventory",
       description: "Track and manage inventory",
-      role: "ROLE_INVENTORY",
+      roles: ["ROLE_INVENTORY", "ROLE_ADMIN"],
+    },
+
+    // Admin Cards
+    {
+      to: "/admin",
+      icon: <Settings className="w-10 h-10 text-gray-600" />,
+      title: "Admin Panel",
+      description: "System administration and settings",
+      roles: ["ROLE_ADMIN"],
     },
     {
-      to: "/supervisorDashboard",
-      icon: <Users className="w-10 h-10 text-red-600" />,
-      title: "Supervisor",
-      description: "Track and manage leave requests",
-      role: "ROLE_SUPERVISOR",
-    },
-    {
-      to: "/plannerDashboard",
-      icon: <ListChecks className="w-10 h-10 text-indigo-600" />,
-      title: "Planner",
-      description: "Validate resource coverage and project timelines",
-      role: "ROLE_PLANNER",
+      to: "/analytics",
+      icon: <BarChart3 className="w-10 h-10 text-teal-600" />,
+      title: "Analytics",
+      description: "View system analytics and reports",
+      roles: ["ROLE_ADMIN", "ROLE_HR"],
     },
   ];
+
+  // Filter cards based on user role
+  const filteredCards = cards.filter((card) => {
+    if (card.alwaysVisible) return true;
+    if (!role) return false;
+    return card.roles.includes(role);
+  });
+
+  // Group cards by category for better organization
+  const getCardCategory = (card) => {
+    if (card.roles.includes("ROLE_ADMIN") && !card.roles.some(r => r !== "ROLE_ADMIN")) {
+      return "Administration";
+    }
+    if (card.roles.includes("ROLE_HR") && card.title.includes("HR")) {
+      return "Human Resources";
+    }
+    if (card.roles.includes("ROLE_SUPERVISOR")) {
+      return "Supervisor Tools";
+    }
+    if (card.roles.includes("ROLE_PLANNER")) {
+      return "Planning";
+    }
+    if (card.roles.includes("ROLE_INVENTORY")) {
+      return "Inventory Management";
+    }
+     if (card.roles.includes("ROLE_PROCUREMENT_OFFICER")) {
+      return "Procurement";
+    }
+    return "General";
+  };
+
+  const categorizedCards = filteredCards.reduce((acc, card) => {
+    const category = getCardCategory(card);
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(card);
+    return acc;
+  }, {});
 
   return (
     <div className="p-6 dark:bg-gray-900 min-h-screen">
@@ -157,6 +317,11 @@ const EmployeeDashboard = () => {
         {username && (
           <p className="mt-2 md:mt-0 text-lg text-gray-600 dark:text-gray-300">
             👋 Welcome, <span className="font-semibold">{username}</span>
+            {role && (
+              <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
+                {role.replace('ROLE_', '')}
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -193,26 +358,31 @@ const EmployeeDashboard = () => {
         </div>
       </div>
 
-      {/* --- Cards Section --- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
-        {cards
-          .filter((card) => card.alwaysVisible || card.role === role)
-          .map((card, idx) => (
-            <Link
-              key={idx}
-              to={card.to}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-lg rounded-2xl p-6 flex flex-col items-center text-center transform hover:scale-105 transition duration-200"
-            >
-              {card.icon}
-              <h3 className="mt-4 text-lg font-semibold text-gray-800 dark:text-gray-100">
-                {card.title}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {card.description}
-              </p>
-            </Link>
-          ))}
-      </div>
+      {/* --- Cards Section (Categorized) --- */}
+      {Object.entries(categorizedCards).map(([category, categoryCards]) => (
+        <div key={category} className="mb-10">
+          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
+            {category}
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {categoryCards.map((card, idx) => (
+              <Link
+                key={idx}
+                to={card.to}
+                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-lg rounded-2xl p-6 flex flex-col items-center text-center transform hover:scale-105 transition duration-200"
+              >
+                {card.icon}
+                <h3 className="mt-4 text-lg font-semibold text-gray-800 dark:text-gray-100">
+                  {card.title}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {card.description}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ))}
 
       {/* --- Leave Requests Section --- */}
       <div className="bg-white dark:bg-gray-800 shadow rounded-2xl p-6">

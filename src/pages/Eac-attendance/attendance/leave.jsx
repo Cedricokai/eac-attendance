@@ -1,12 +1,21 @@
 import { useState, useEffect, useContext } from "react";
-import { SettingsContext } from '../context/SettingsContext';
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
 import Search from "../../../compnents/search";
+import { 
+  DocumentIcon, 
+  EyeIcon, 
+  ArrowDownTrayIcon,
+  PaperClipIcon,
+  XMarkIcon,
+  PhotoIcon
+} from '@heroicons/react/24/outline';
+
+// Import the LeaveDetailsModal component
+import LeaveDetailsModal from "./leaveDetailsModal";
 
 function Leave() {
   const [query, setQuery] = useState('');
-  const { settings } = useContext(SettingsContext);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
@@ -16,8 +25,9 @@ function Leave() {
   const navigate = useNavigate();
   const [searchResults, setSearchResults] = useState([]);
   const [isReasonModalOpen, setIsReasonModalOpen] = useState(false);
-const [selectedReason, setSelectedReason] = useState('');
-
+  const [selectedReason, setSelectedReason] = useState('');
+  const [selectedLeave, setSelectedLeave] = useState(null);
+  const [file, setFile] = useState(null);
 
   // New leave form state
   const [newLeave, setNewLeave] = useState({
@@ -29,9 +39,162 @@ const [selectedReason, setSelectedReason] = useState('');
     status: 'Pending'
   });
 
+ const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
+
+  console.log("🖥️ Current hostname:", hostname);
+  console.log("🔌 Current port:", port);
+
+  // If frontend is opened via localhost → use localhost backend
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    console.log("🏠 Using LOCALHOST API URL");
+    return "http://localhost:8080";
+  }
+
+  // LAN access
+  if (hostname.startsWith("192.168.")) {
+    console.log("🏠 Using LAN API URL");
+    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  }
+
+  // Public / Tailscale / Cloudflare IP
+  if (hostname === "100.114.178.13") {
+    console.log("🌐 Using PUBLIC API URL");
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  }
+
+  // Default fallback
+  console.log("🌍 Using PUBLIC API URL (fallback)");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+
+  const API_BASE_URL = getApiBaseUrl();
+
   // Helper function to get JWT token
   const getToken = () => {
     return localStorage.getItem('jwtToken');
+  };
+
+  const isLeaveDeductible = (leaveType) => {
+    return !leaveSettings.nonDeductibleLeaveTypes.includes(leaveType);
+};
+  
+
+  // Function to check if a date is a weekend
+  const isWeekend = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    return day === 0 || day === 6; // 0 = Sunday, 6 = Saturday
+  };
+
+  const [leaveSettings, setLeaveSettings] = useState({
+    maternityLeaveMonths: 3,
+    paternityLeaveMonths: 1,
+    nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study']
+});
+
+// Fetch leave settings
+const fetchLeaveSettings = async () => {
+    try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            }
+        });
+        if (response.ok) {
+            const data = await response.json();
+            setLeaveSettings(data);
+        }
+    } catch (err) {
+        console.error('Failed to fetch leave settings:', err);
+    }
+};
+
+// Add to useEffect
+useEffect(() => {
+    fetchLeaves();
+    fetchEmployees();
+    fetchLeaveSettings(); // Add this
+}, []);
+
+  // Function to get the next weekday from a given date
+  const getNextWeekday = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    
+    if (day === 0) { // Sunday
+      date.setDate(date.getDate() + 1); // Move to Monday
+    } else if (day === 6) { // Saturday
+      date.setDate(date.getDate() + 2); // Move to Monday
+    }
+    
+    return date.toISOString().split('T')[0];
+  };
+
+  // Function to disable weekend dates in date picker
+  const disableWeekends = (date) => {
+    return isWeekend(date);
+  };
+
+  // Function to handle date changes with weekend validation
+  const handleDateChange = (e) => {
+    const { name, value } = e.target;
+    
+    if (value && isWeekend(value)) {
+      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+      return;
+    }
+
+    setNewLeave({
+      ...newLeave,
+      [name]: value
+    });
+  };
+
+  // Function to handle start date change with end date adjustment
+  const handleStartDateChange = (e) => {
+    const { value } = e.target;
+    
+    if (value && isWeekend(value)) {
+      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+      return;
+    }
+
+    const updatedLeave = {
+      ...newLeave,
+      startDate: value
+    };
+
+    // If end date is before new start date, clear end date
+    if (updatedLeave.endDate && value && new Date(updatedLeave.endDate) < new Date(value)) {
+      updatedLeave.endDate = '';
+    }
+
+    setNewLeave(updatedLeave);
+  };
+
+  // Function to handle end date change with validation
+  const handleEndDateChange = (e) => {
+    const { value } = e.target;
+    
+    if (value && isWeekend(value)) {
+      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+      return;
+    }
+
+    // Validate that end date is not before start date
+    if (value && newLeave.startDate && new Date(value) < new Date(newLeave.startDate)) {
+      alert('End date cannot be before start date.');
+      return;
+    }
+
+    setNewLeave({
+      ...newLeave,
+      endDate: value
+    });
   };
 
   useEffect(() => {
@@ -42,7 +205,7 @@ const [selectedReason, setSelectedReason] = useState('');
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/employee', {
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -60,7 +223,7 @@ const [selectedReason, setSelectedReason] = useState('');
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch('http://localhost:8080/api/leave', {
+      const response = await fetch(`${API_BASE_URL}/api/leave`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -92,38 +255,114 @@ const [selectedReason, setSelectedReason] = useState('');
     }
   };
 
-  const createLeave = async () => {
+  // File upload function
+  const uploadAttachment = async (leaveId, file, token) => {
     try {
-      const token = getToken();
-      const response = await fetch('http://localhost:8080/api/leave', {
-        method: 'POST',
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}/attachment`, {
+        method: "POST",
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(newLeave)
+        body: formData,
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create leave');
+        throw new Error("Failed to upload attachment");
       }
-
-      const savedLeave = await response.json();
-      setLeaves([...leaves, savedLeave]);
-      setIsCreateMenuOpen(false);
-      setNewLeave({
-        employee: { id: '' },
-        leaveType: '',
-        startDate: '',
-        endDate: '',
-        reason: '',
-        status: 'Pending'
-      });
-    } catch (err) {
-      setError(err.message);
+      
+      console.log("Attachment uploaded successfully");
+      return await response.json();
+    } catch (error) {
+      console.error("Attachment upload failed:", error);
+      throw error;
     }
   };
+
+ const createLeave = async () => {
+    try {
+        // Validate dates are weekdays (for non-maternity/paternity leaves)
+        if (!['Maternity', 'Paternity'].includes(newLeave.leaveType)) {
+            if (newLeave.startDate && isWeekend(newLeave.startDate)) {
+                alert('Start date must be a weekday (Monday to Friday).');
+                return;
+            }
+            
+            if (newLeave.endDate && isWeekend(newLeave.endDate)) {
+                alert('End date must be a weekday (Monday to Friday).');
+                return;
+            }
+        }
+
+        // Validate required fields
+        if (!newLeave.employee.id || !newLeave.leaveType || !newLeave.startDate || !newLeave.reason) {
+            alert('Please fill in all required fields.');
+            return;
+        }
+
+        // Auto-calculate end date for maternity/paternity leave
+        let finalEndDate = newLeave.endDate;
+        if (newLeave.leaveType === 'Maternity' && !newLeave.endDate) {
+            const startDate = new Date(newLeave.startDate);
+            startDate.setMonth(startDate.getMonth() + leaveSettings.maternityLeaveMonths);
+            finalEndDate = startDate.toISOString().split('T')[0];
+        } else if (newLeave.leaveType === 'Paternity' && !newLeave.endDate) {
+            const startDate = new Date(newLeave.startDate);
+            startDate.setMonth(startDate.getMonth() + leaveSettings.paternityLeaveMonths);
+            finalEndDate = startDate.toISOString().split('T')[0];
+        }
+
+        const token = getToken();
+        
+        // First create the leave request
+        const response = await fetch(`${API_BASE_URL}/api/leave`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                ...newLeave,
+                endDate: finalEndDate
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to create leave');
+        }
+
+        const savedLeave = await response.json();
+
+        // If it's sick leave and file exists, upload attachment
+        if (newLeave.leaveType === 'Sick' && file) {
+            try {
+                await uploadAttachment(savedLeave.id, file, token);
+                // Refresh leaves to get updated attachment info
+                fetchLeaves();
+            } catch (uploadError) {
+                console.error('Attachment upload failed:', uploadError);
+                // Don't throw error here - the main leave request was successful
+            }
+        }
+
+        setLeaves([...leaves, savedLeave]);
+        setIsCreateMenuOpen(false);
+        setNewLeave({
+            employee: { id: '' },
+            leaveType: '',
+            startDate: '',
+            endDate: '',
+            reason: '',
+            status: 'Pending'
+        });
+        setFile(null);
+    } catch (err) {
+        setError(err.message);
+    }
+};
 
   const validateLeave = async (leaveId) => {
     if (!window.confirm('Are you sure you want to approve this leave request?')) {
@@ -132,11 +371,13 @@ const [selectedReason, setSelectedReason] = useState('');
 
     try {
       const token = getToken();
-      const response = await fetch(`http://localhost:8080/api/leave/validate/${leaveId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/leave/supervisor/approve/${leaveId}`, {
         method: 'POST',
         headers: { 
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
-        }
+        },
+        body: JSON.stringify({ feedback: "Approved by supervisor" })
       });
 
       if (!response.ok) {
@@ -170,13 +411,83 @@ const [selectedReason, setSelectedReason] = useState('');
     }
   };
 
-  const calculateLeaveDays = (startDate, endDate) => {
+const calculateLeaveDays = (startDate, endDate, leaveType) => {
     if (!startDate || !endDate) return 0;
+    
+    // For non-deductible leaves, return 0 business days (not counted against balance)
+    if (!isLeaveDeductible(leaveType)) {
+        return 0;
+    }
     
     const start = new Date(startDate);
     const end = new Date(endDate);
-    const timeDiff = end.getTime() - start.getTime();
-    return Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1; // +1 to include both start and end dates
+    
+    // Calculate business days (weekdays only)
+    let businessDays = 0;
+    const currentDate = new Date(start);
+    
+    while (currentDate <= end) {
+        const dayOfWeek = currentDate.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
+            businessDays++;
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return businessDays;
+};
+
+  // Add download function
+  const downloadAttachment = async (leaveId) => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}/attachment`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `medical-certificate-${leaveId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        throw new Error('Failed to download attachment');
+      }
+    } catch (error) {
+      console.error('Error downloading attachment:', error);
+      alert('Error downloading attachment: ' + error.message);
+    }
+  };
+
+  // Handle file input change
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile) {
+      // Validate file type
+      const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+      if (!validTypes.includes(selectedFile.type)) {
+        alert('Please select a PDF, JPG, or PNG file');
+        return;
+      }
+      
+      // Validate file size (5MB max)
+      if (selectedFile.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB');
+        return;
+      }
+      
+      setFile(selectedFile);
+    }
+  };
+
+  // Check if leave has attachment (helper function)
+  const hasAttachment = (leave) => {
+    return leave.attachmentFileName && leave.attachmentFileContent;
   };
 
   return (
@@ -291,8 +602,6 @@ const [selectedReason, setSelectedReason] = useState('');
                   Request Leave
                 </button>
               </div>
-
-              
             </section>
 
             {/* Search Results Section */}
@@ -345,27 +654,25 @@ const [selectedReason, setSelectedReason] = useState('');
           {/* Leave Table */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className=" ">
-               <thead className="bg-gray-50">
-  <tr>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Leave Type</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
-    
-    {/* New role-specific statuses */}
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supervisor</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planner</th>
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">HR</th>
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Leave Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supervisor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planner</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">HR</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Attachment</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overall Status</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
 
-    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overall Status</th>
-    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-  </tr>
-</thead>
-
-                <tbody className="bg-white divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-200">
                   {leaves.map((leave) => (
                     <tr key={leave.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -402,68 +709,94 @@ const [selectedReason, setSelectedReason] = useState('');
                           day: 'numeric',
                         })}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {calculateLeaveDays(leave.startDate, leave.endDate)} days
-                      </td>
+<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+    {calculateLeaveDays(leave.startDate, leave.endDate, leave.leaveType)} days
+    {!isLeaveDeductible(leave.leaveType) && (
+        <span className="text-xs text-green-600 ml-1">(Non-deductible)</span>
+    )}
+</td>
                       <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
                         {leave.reason}
                       </td>
-                     <td className="px-6 py-4 whitespace-nowrap">
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
-          {leave.supervisorStatus || "Pending"}
-        </span>
-      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
+                          {leave.supervisorStatus || "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
+                          {leave.plannerStatus || "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
+                          {leave.hrStatus || "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {leave.leaveType === 'Sick' && (
+                          <div className="flex items-center space-x-1">
+                            {hasAttachment(leave) ? (
+                              <>
+                                <PaperClipIcon className="h-4 w-4 text-green-600" />
+                                <span className="text-xs text-green-600">Available</span>
+                              </>
+                            ) : (
+                              <>
+                                <PaperClipIcon className="h-4 w-4 text-gray-400" />
+                                <span className="text-xs text-gray-500">None</span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
+                          {leave.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex gap-2 justify-end">
+                          {leave.status === "Pending" && (
+                            <button
+                              onClick={() => validateLeave(leave.id)}
+                              className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm"
+                            >
+                              Approve
+                            </button>
+                          )}
 
-      {/* Planner Status */}
-      <td className="px-6 py-4 whitespace-nowrap">
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
-          {leave.plannerStatus || "Pending"}
-        </span>
-      </td>
+                          {leave.status === "Rejected" && (
+                            <button
+                              onClick={() => {
+                                const feedback = leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
+                                setSelectedReason(feedback || "No feedback provided.");
+                                setIsReasonModalOpen(true);
+                              }}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm"
+                            >
+                              View Reason
+                            </button>
+                          )}
 
-      {/* HR Status */}
-      <td className="px-6 py-4 whitespace-nowrap">
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
-          {leave.hrStatus || "Pending"}
-        </span>
-      </td>
+                          {leave.leaveType === 'Sick' && hasAttachment(leave) && (
+                            <button
+                              onClick={() => downloadAttachment(leave.id)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm"
+                            >
+                              Download
+                            </button>
+                          )}
 
-      {/* Overall status */}
-      <td className="px-6 py-4 whitespace-nowrap">
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
-          {leave.status}
-        </span>
-      </td>
-
-      {/* Actions (Approve etc.) */}
-     {/* Actions (Approve etc.) */}
-{/* Actions (Approve etc.) */}
-<td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex gap-2 justify-end">
-  {leave.status === "Pending" && (
-    <button
-      onClick={() => validateLeave(leave.id)}
-      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm"
-    >
-      Approve
-    </button>
-  )}
-
-  {leave.status === "Rejected" && (
-    <button
-      onClick={() => {
-        const feedback =
-          leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
-        setSelectedReason(feedback || "No feedback provided.");
-        setIsReasonModalOpen(true);
-      }}
-      className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm"
-    >
-      View Reason
-    </button>
-  )}
-</td>
-
-    </tr>
+                          <button
+                            onClick={() => setSelectedLeave(leave)}
+                            className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded-md text-sm"
+                          >
+                            View Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -516,7 +849,7 @@ const [selectedReason, setSelectedReason] = useState('');
               <div className="space-y-6">
                 {/* Employee Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee *</label>
                   <select
                     name="employeeId"
                     value={newLeave.employee.id}
@@ -536,7 +869,7 @@ const [selectedReason, setSelectedReason] = useState('');
                 {/* Leave Type and Dates */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Leave Type</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Leave Type *</label>
                     <select
                       name="leaveType"
                       value={newLeave.leaveType}
@@ -558,7 +891,7 @@ const [selectedReason, setSelectedReason] = useState('');
                     <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
                     <div className="text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
                       {newLeave.startDate && newLeave.endDate 
-                        ? `${calculateLeaveDays(newLeave.startDate, newLeave.endDate)} days`
+                        ? `${calculateLeaveDays(newLeave.startDate, newLeave.endDate)} business days`
                         : 'Select dates to calculate duration'}
                     </div>
                   </div>
@@ -566,33 +899,78 @@ const [selectedReason, setSelectedReason] = useState('');
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
                     <input
                       type="date"
                       name="startDate"
                       value={newLeave.startDate}
-                      onChange={handleInputChange}
+                      onChange={handleStartDateChange}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       required
+                      min={new Date().toISOString().split('T')[0]}
                     />
+                    <p className="text-xs text-gray-500 mt-1">Only weekdays (Monday-Friday) allowed</p>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                    <input
-                      type="date"
-                      name="endDate"
-                      value={newLeave.endDate}
-                      onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      required
-                    />
-                  </div>
+                // In the create leave modal form, update the end date field:
+{!['Maternity', 'Paternity'].includes(newLeave.leaveType) ? (
+    <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+        <input
+            type="date"
+            name="endDate"
+            value={newLeave.endDate}
+            onChange={handleEndDateChange}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+            min={newLeave.startDate || new Date().toISOString().split('T')[0]}
+        />
+        <p className="text-xs text-gray-500 mt-1">Only weekdays (Monday-Friday) allowed</p>
+    </div>
+) : (
+    <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+            End Date (Auto-calculated)
+        </label>
+        <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500">
+            {newLeave.leaveType === 'Maternity' 
+                ? `Auto: ${leaveSettings.maternityLeaveMonths} months from start date`
+                : `Auto: ${leaveSettings.paternityLeaveMonths} month from start date`
+            }
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+            {newLeave.leaveType} leave duration is automatically calculated
+        </p>
+    </div>
+)}
                 </div>
+
+                {/* File Upload for Sick Leave */}
+                {newLeave.leaveType === 'Sick' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Medical Certificate
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      onChange={handleFileChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      PDF, JPG, or PNG files up to 5MB
+                    </p>
+                    {file && (
+                      <p className="text-sm text-green-600 mt-1">
+                        Selected: {file.name}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Reason */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
                   <textarea
                     name="reason"
                     value={newLeave.reason}
@@ -616,6 +994,7 @@ const [selectedReason, setSelectedReason] = useState('');
                         reason: '',
                         status: 'Pending'
                       });
+                      setFile(null);
                     }}
                     className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
                   >
@@ -631,44 +1010,51 @@ const [selectedReason, setSelectedReason] = useState('');
               </div>
             </div>
           )}
+
           {/* Rejection Reason Modal */}
-{isReasonModalOpen && (
-  <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
-    <div className="bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold text-gray-800">Rejection Reason</h2>
-        <button
-          onClick={() => setIsReasonModalOpen(false)}
-          className="text-gray-500 hover:text-gray-700"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+          {isReasonModalOpen && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
+              <div className="bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-gray-800">Rejection Reason</h2>
+                  <button
+                    onClick={() => setIsReasonModalOpen(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
 
-      <p className="text-gray-700 whitespace-pre-line">{selectedReason}</p>
+                <p className="text-gray-700 whitespace-pre-line">{selectedReason}</p>
 
-      <div className="mt-6 flex justify-end">
-        <button
-          onClick={() => setIsReasonModalOpen(false)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsReasonModalOpen(false)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
+          {/* Leave Details Modal */}
+          {selectedLeave && (
+            <LeaveDetailsModal 
+              leave={selectedLeave} 
+              onClose={() => setSelectedLeave(null)} 
+            />
+          )}
         </main>
-
       </div>
     </div>
   );

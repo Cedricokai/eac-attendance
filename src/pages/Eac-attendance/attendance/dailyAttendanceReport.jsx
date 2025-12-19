@@ -18,6 +18,7 @@ function DailyAttendanceReport() {
     showEarlyDeparturesOnly: false
   });
 
+
   // Stats for the dashboard
   const [stats, setStats] = useState({
     totalEmployees: 0,
@@ -29,12 +30,14 @@ function DailyAttendanceReport() {
 
   const getToken = () => localStorage.getItem('jwtToken');
 
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.97:8080';
+
   // Fetch attendance data
   const fetchAttendanceData = async () => {
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch(`http://localhost:8080/api/attendance?date=${filters.date}`, {
+      const response = await fetch(`http://${API_BASE_URL}/api/attendance?date=${filters.date}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -317,21 +320,6 @@ function DailyAttendanceReport() {
                 </div>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                <select
-                  value={filters.department}
-                  onChange={(e) => handleFilterChange('department', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">All Departments</option>
-                  <option value="Projects">Projects</option>
-                  <option value="Site Services">Site Services</option>
-                  <option value="Ahafo North">Ahafo North</option>
-                  <option value="HR">HR</option>
-                  <option value="Finance">Finance</option>
-                </select>
-              </div>
               
               <div className="flex items-end">
                 <label className="flex items-center gap-2 mt-2">

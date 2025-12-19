@@ -14,10 +14,11 @@ import {
   DollarSign,
   Briefcase,
   Clock,
-  Plus
+  Plus,
+  Menu
 } from "lucide-react";
 
-function MainSidebar() {
+function MainSidebar({ isCollapsed = false }) {
   const location = useLocation();
   const [openDropdowns, setOpenDropdowns] = useState({
     employees: false,
@@ -47,6 +48,86 @@ function MainSidebar() {
   const isActive = (path) => location.pathname === path;
   const isActiveParent = (paths) => paths.some(path => location.pathname.startsWith(path));
 
+  // If sidebar is collapsed, show only icons
+  if (isCollapsed) {
+    return (
+      <aside className="fixed h-full w-16 bg-gray-800 text-gray-100 p-2 flex flex-col z-10">
+        {/* Logo/Header */}
+        <div className="mb-6 mt-4 flex justify-center">
+          <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center">
+            <span className="text-white font-bold text-sm">E</span>
+          </div>
+        </div>
+
+        <div className="border-t border-gray-700 mb-4"></div>
+
+        {/* Main Navigation - Icons Only */}
+        <nav className="flex-1 space-y-2">
+          {/* Dashboard */}
+          <Link 
+            to="/attendanceDashboard"
+            className={`flex items-center justify-center p-3 rounded-lg transition-colors ${isActive("/attendanceDashboard") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+            title="Dashboard"
+          >
+            <Home size={20} />
+          </Link>
+
+          {/* Employees */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown("employees")}
+              className={`flex items-center justify-center w-full p-3 rounded-lg transition-colors ${isActiveParent(["/employees", "/employee"]) ? "bg-gray-700" : "hover:bg-gray-700"}`}
+              title="Employees"
+            >
+              <Users size={20} />
+            </button>
+          </div>
+
+          {/* Attendance */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown("attendance")}
+              className={`flex items-center justify-center w-full p-3 rounded-lg transition-colors ${isActiveParent(["/attendance"]) ? "bg-gray-700" : "hover:bg-gray-700"}`}
+              title="Attendance"
+            >
+              <CalendarCheck size={20} />
+            </button>
+          </div>
+
+          {/* Payroll */}
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown("payroll")}
+              className={`flex items-center justify-center w-full p-3 rounded-lg transition-colors ${isActiveParent(["/payroll"]) ? "bg-gray-700" : "hover:bg-gray-700"}`}
+              title="Payroll"
+            >
+              <DollarSign size={20} />
+            </button>
+          </div>
+
+          {/* Settings */}
+          <Link 
+            to="/settingspage"
+            className={`flex items-center justify-center p-3 rounded-lg transition-colors ${isActive("/settingspage") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+            title="Settings"
+          >
+            <Settings size={20} />
+          </Link>
+        </nav>
+
+        {/* Footer/User Info */}
+        <div className="border-t border-gray-700 pt-4">
+          <div className="flex justify-center">
+            <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center" title="Admin User">
+              <User size={16} />
+            </div>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  // Full sidebar view
   return (
     <aside className="fixed h-full w-64 bg-gray-800 text-gray-100 p-4 flex flex-col z-10">
       {/* Logo/Header */}
@@ -90,7 +171,13 @@ function MainSidebar() {
                 <User size={16} />
                 Employee List
               </Link>
-             
+              <Link 
+                to="/employees/add"
+                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/employees/add") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+              >
+                <Plus size={16} />
+                Add Employee
+              </Link>
             </div>
           )}
         </div>
@@ -131,6 +218,13 @@ function MainSidebar() {
                 <Clock size={16} />
                 Timesheets
               </Link>
+              <Link 
+                to="/overtime"
+                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/overtime") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+              >
+                <Clock size={16} />
+                Overtime
+              </Link>
             </div>
           )}
         </div>
@@ -156,6 +250,13 @@ function MainSidebar() {
               >
                 <FileText size={16} />
                 Payroll Processing
+              </Link>
+              <Link 
+                to="/payslip"
+                className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive("/payslip") ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+              >
+                <FileText size={16} />
+                Payslip Generator
               </Link>
               <Link 
                 to="/reports"

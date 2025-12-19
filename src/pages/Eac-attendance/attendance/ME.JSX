@@ -107,7 +107,7 @@ const BiometricAttendanceFeed = () => {
     try {
       const dataToSend = prepareApiData();
       
-      const response = await fetch('http://localhost:8080/api/attendance/batch', {
+      const response = await fetch('http://http://192.168.1.98:8080/api/attendance/batch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
