@@ -21,12 +21,15 @@ import {
   DollarSign,
   CreditCard,
   Banknote,
-  FileText
+  FileText,
+  Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import MainSidebar from "./mainSidebar";
+import Header from "../../components/Header";
 
+// Helper component
 function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loading, color, trend, trendValue }) {
   const colorVariants = {
     blue: { bg: 'bg-blue-50', text: 'text-blue-600', hover: 'hover:bg-blue-100', border: 'border-blue-100' },
@@ -45,7 +48,7 @@ function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loadi
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={`bg-white rounded-xl shadow-xs border ${colorVariants[color].border} p-6 hover:shadow-sm transition-all duration-200 ${colorVariants[color].hover}`}
+      className={`bg-white rounded-xl shadow-sm border ${colorVariants[color].border} p-6 hover:shadow-md transition-all duration-200 ${colorVariants[color].hover}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex-1">
@@ -78,7 +81,7 @@ function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loadi
             to={linkTo} 
             className={`text-sm font-medium ${colorVariants[color].text} hover:opacity-80 flex items-center gap-1`}
           >
-            {linkText} <ChevronDown size={16} className="rotate-270" />
+            {linkText} <ChevronRight size={16} />
           </Link>
         </div>
       )}
@@ -86,13 +89,13 @@ function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loadi
   );
 }
 
+// Helper component
 function ActivityItem({ activity }) {
   const iconMap = {
     error: <XCircle size={18} className="text-red-500" />,
     success: <CheckCircle size={18} className="text-green-500" />,
     warning: <AlertCircle size={18} className="text-amber-500" />,
     info: <AlertCircle size={18} className="text-blue-500" />,
-    payroll: <DollarSign size={18} className="text-indigo-500" />,
   };
 
   return (
@@ -117,24 +120,25 @@ function ActivityItem({ activity }) {
   );
 }
 
+// Helper component
 function TimeRangeSelector({ timeRange, setTimeRange }) {
   return (
     <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg">
       <button 
         onClick={() => setTimeRange('week')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'week' ? 'bg-white shadow-xs text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'week' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Week
       </button>
       <button 
         onClick={() => setTimeRange('month')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'month' ? 'bg-white shadow-xs text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'month' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Month
       </button>
       <button 
         onClick={() => setTimeRange('quarter')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'quarter' ? 'bg-white shadow-xs text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'quarter' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Quarter
       </button>
@@ -142,7 +146,9 @@ function TimeRangeSelector({ timeRange, setTimeRange }) {
   );
 }
 
+// MAIN COMPONENT
 function AttendanceDashboard() {
+  // ========== STATE DECLARATIONS ==========
   const [stats, setStats] = useState({
     totalEmployees: 0,
     activeEmployees: 0,
@@ -153,39 +159,16 @@ function AttendanceDashboard() {
     totalLate: 0
   });
   
-  const [payrollStats, setPayrollStats] = useState({
-    totalNetAmount: 0,
-    totalTax: 0,
-    totalSsnit: 0,
-    employeeCount: 0,
-    totalLeaveDays: 0,
-    employeesOnLeave: 0,
-    latestPeriod: null,
-    processedPeriods: 0,
-    pendingPayrolls: 0
-  });
-  
   const [attendanceData, setAttendanceData] = useState([]);
-  const [payrollHistory, setPayrollHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [payrollLoading, setPayrollLoading] = useState(true);
   const [recentActivities, setRecentActivities] = useState([]);
   const [timeRange, setTimeRange] = useState('week');
-  const [mainSidebarOpen, setMainSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chartData, setChartData] = useState([]);
-  const [payrollChartData, setPayrollChartData] = useState([]);
   const [attendanceRate, setAttendanceRate] = useState(0);
   const [user, setUser] = useState(null);
   
   const navigate = useNavigate();
-
-  const sidebarOffsets = useMemo(() => {
-    const mainWidth = mainSidebarOpen ? 64 : 20;
-    return {
-      mainWidth,
-      contentMarginLeft: mainWidth
-    };
-  }, [mainSidebarOpen]);
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
@@ -208,99 +191,34 @@ function AttendanceDashboard() {
 
   const API_BASE_URL = getApiBaseUrl();
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const token = localStorage.getItem("jwtToken");
-        if (!token) return;
+  // ========== HELPER FUNCTIONS ==========
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
 
-        const response = await fetch(`${API_BASE_URL}/auth/me`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setUser({
-            name: data.name || data.username,
-            role: data.role ? data.role.replace("ROLE_", "").toLowerCase() : 'employee',
-            email: data.email,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to fetch user:", error);
-      }
-    };
-
-    fetchUser();
-  }, []);
-
-  const fetchPayrollSummary = async () => {
+  const handleLogout = async () => {
     try {
-      setPayrollLoading(true);
-      const token = localStorage.getItem('jwtToken');
-      if (!token) return;
-
-      const response = await fetch(`${API_BASE_URL}/api/payroll/summary`, {
+      const token = localStorage.getItem("jwtToken");
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setPayrollStats({
-          totalNetAmount: data.totalNetAmount || 0,
-          totalTax: data.totalTax || 0,
-          totalSsnit: data.totalSsnit || 0,
-          employeeCount: data.employeeCount || 0,
-          totalLeaveDays: data.totalLeaveDays || 0,
-          employeesOnLeave: data.employeesOnLeave || 0,
-          latestPeriod: data.latestPeriod || null,
-          processedPeriods: data.processedPeriods || 0,
-          pendingPayrolls: data.pendingPayrolls || 0
-        });
-      }
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      window.location.href = "/";
     } catch (error) {
-      console.error("Failed to fetch payroll summary:", error);
-    } finally {
-      setPayrollLoading(false);
+      console.error("Logout failed:", error);
     }
   };
 
-  const fetchPayrollHistory = async () => {
-    try {
-      const token = localStorage.getItem('jwtToken');
-      if (!token) return;
+  const formatCurrency = (amount) => new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(amount || 0);
 
-      const response = await fetch(`${API_BASE_URL}/api/payroll/history?limit=6`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setPayrollHistory(data);
-        
-        const chartData = data.slice(0, 6).map(item => ({
-          name: item.periodName,
-          netSalary: item.totalNetAmount || 0,
-          tax: item.totalTax || 0,
-          ssnit: item.totalSsnit || 0
-        }));
-        setPayrollChartData(chartData);
-      }
-    } catch (error) {
-      console.error("Failed to fetch payroll history:", error);
-    }
-  };
-
+  // ========== DATA FETCHING FUNCTIONS ==========
   const fetchAttendanceStats = async () => {
     try {
       const token = localStorage.getItem('jwtToken');
@@ -419,75 +337,6 @@ function AttendanceDashboard() {
     }
   };
 
-  const handleBarChartClick = (data) => {
-    if (data && data.activePayload && data.activePayload[0]) {
-      const payload = data.activePayload[0].payload;
-      const clickedDataKey = data.activePayload[0].dataKey;
-      
-      let statusFilter = '';
-      if (clickedDataKey === 'present') statusFilter = 'Present';
-      else if (clickedDataKey === 'late') statusFilter = 'Late';
-      else if (clickedDataKey === 'absent') statusFilter = 'Absent';
-      
-      if (timeRange === 'week') {
-        navigate(`/reports?startDate=${payload.date}&endDate=${payload.date}&status=${statusFilter}&groupBy=employee`);
-      } else if (timeRange === 'month') {
-        navigate(`/reports?startDate=${payload.startDate}&endDate=${payload.endDate}&status=${statusFilter}&groupBy=employee`);
-      } else {
-        navigate(`/reports?startDate=${payload.startDate}&endDate=${payload.endDate}&status=${statusFilter}&groupBy=employee`);
-      }
-    }
-  };
-
-  const handlePieChartClick = (data) => {
-    if (data && data.activePayload && data.activePayload[0]) {
-      const payload = data.activePayload[0].payload;
-      const today = new Date().toISOString().split('T')[0];
-      
-      let statusFilter = '';
-      if (payload.name === 'Present') statusFilter = 'Present';
-      else if (payload.name === 'Late') statusFilter = 'Late';
-      else if (payload.name === 'Absent') statusFilter = 'Absent';
-      else if (payload.name === 'On Leave') statusFilter = 'On Leave';
-      
-      navigate(`/reports?startDate=${today}&endDate=${today}&status=${statusFilter}&groupBy=employee`);
-    }
-  };
-
-  const handleLineChartClick = (data) => {
-    if (data && data.activePayload && data.activePayload[0]) {
-      const payload = data.activePayload[0].payload;
-      const clickedDataKey = data.activePayload[0].dataKey;
-      
-      const payrollPeriod = payrollHistory.find(p => p.periodName === payload.name);
-      
-      if (payrollPeriod) {
-        let categoryFilter = '';
-        if (clickedDataKey === 'netSalary') categoryFilter = 'net';
-        else if (clickedDataKey === 'tax') categoryFilter = 'tax';
-        else if (clickedDataKey === 'ssnit') categoryFilter = 'ssnit';
-        
-        navigate(`/reports?period=${payrollPeriod.id}&view=payroll&groupBy=employee&category=${categoryFilter}`);
-      }
-    }
-  };
-
-  const handleLegendClick = (event) => {
-    const status = event.dataKey;
-    let statusFilter = '';
-    
-    if (status === 'present') statusFilter = 'Present';
-    else if (status === 'late') statusFilter = 'Late';
-    else if (status === 'absent') statusFilter = 'Absent';
-    
-    const today = new Date().toISOString().split('T')[0];
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const startDate = sevenDaysAgo.toISOString().split('T')[0];
-    
-    navigate(`/reports?startDate=${startDate}&endDate=${today}&status=${statusFilter}&groupBy=employee`);
-  };
-
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
@@ -516,8 +365,6 @@ function AttendanceDashboard() {
       if (leavesRes.ok) leaves = await leavesRes.json();
 
       await fetchAttendanceStats();
-      await fetchPayrollSummary();
-      await fetchPayrollHistory();
 
       const onLeaveToday = employees.filter(employee => 
         leaves.some(leave => 
@@ -588,24 +435,6 @@ function AttendanceDashboard() {
           });
         }
 
-        if (payrollStats.latestPeriod) {
-          activities.push({
-            id: 5,
-            type: 'payroll',
-            message: `Latest payroll: ${payrollStats.latestPeriod} - ${new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(payrollStats.totalNetAmount || 0)}`,
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        if (payrollStats.pendingPayrolls > 0) {
-          activities.push({
-            id: 6,
-            type: 'warning',
-            message: `${payrollStats.pendingPayrolls} payroll period(s) pending processing`,
-            timestamp: new Date().toISOString()
-          });
-        }
-
         return activities;
       };
 
@@ -636,13 +465,43 @@ function AttendanceDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-    
-    const interval = setInterval(fetchDashboardData, 300000);
-    return () => clearInterval(interval);
-  }, [timeRange]);
+  // ========== CHART HANDLERS ==========
+  const handleBarChartClick = (data) => {
+    if (data && data.activePayload && data.activePayload[0]) {
+      const payload = data.activePayload[0].payload;
+      const clickedDataKey = data.activePayload[0].dataKey;
+      
+      let statusFilter = '';
+      if (clickedDataKey === 'present') statusFilter = 'Present';
+      else if (clickedDataKey === 'late') statusFilter = 'Late';
+      else if (clickedDataKey === 'absent') statusFilter = 'Absent';
+      
+      if (timeRange === 'week') {
+        navigate(`/reports?startDate=${payload.date}&endDate=${payload.date}&status=${statusFilter}&groupBy=employee`);
+      } else if (timeRange === 'month') {
+        navigate(`/reports?startDate=${payload.startDate}&endDate=${payload.endDate}&status=${statusFilter}&groupBy=employee`);
+      } else {
+        navigate(`/reports?startDate=${payload.startDate}&endDate=${payload.endDate}&status=${statusFilter}&groupBy=employee`);
+      }
+    }
+  };
 
+  const handlePieChartClick = (data) => {
+    if (data && data.activePayload && data.activePayload[0]) {
+      const payload = data.activePayload[0].payload;
+      const today = new Date().toISOString().split('T')[0];
+      
+      let statusFilter = '';
+      if (payload.name === 'Present') statusFilter = 'Present';
+      else if (payload.name === 'Late') statusFilter = 'Late';
+      else if (payload.name === 'Absent') statusFilter = 'Absent';
+      else if (payload.name === 'On Leave') statusFilter = 'On Leave';
+      
+      navigate(`/reports?startDate=${today}&endDate=${today}&status=${statusFilter}&groupBy=employee`);
+    }
+  };
+
+  // ========== MEMOIZED VALUES ==========
   const pieChartData = useMemo(() => {
     if (attendanceData.length === 0) return [];
     
@@ -673,127 +532,149 @@ function AttendanceDashboard() {
     return expectedEmployees > 0 ? (presentCount / expectedEmployees) * 100 : 0;
   }, [attendanceData, stats.totalEmployees, stats.onLeave]);
 
-  const COLORS = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
-
   const calculateTrends = () => {
     const attendanceTrend = calculatedAttendanceRate > 85 ? 2.5 : calculatedAttendanceRate > 75 ? 0.5 : -1.2;
     const employeesTrend = stats.totalEmployees > 20 ? 1.5 : stats.totalEmployees > 15 ? 0.8 : -0.3;
-    const payrollTrend = payrollStats.totalNetAmount > 100000 ? 3.2 : payrollStats.totalNetAmount > 50000 ? 1.8 : 0.5;
     
     return {
       attendanceTrend,
       employeesTrend,
       leaveTrend: stats.onLeave > 3 ? -1.0 : 0.5,
-      payrollTrend
     };
   };
 
   const trends = calculateTrends();
+  const COLORS = ['#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-  const formatCurrency = (amount) => new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(amount || 0);
+  // ========== EFFECTS ==========
+  // User fetch effect
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const res = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          },
+          credentials: "include"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUser({
+            name: data.username,
+            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            email: data.email
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch user", err);
+      }
+    };
+    fetchUser();
+  }, []);
 
+  // Responsive sidebar effect
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Click outside effect for mobile sidebar
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sidebarOpen && window.innerWidth < 768) {
+        const sidebar = document.querySelector('.sidebar-container');
+        if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
+          setSidebarOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sidebarOpen]);
+
+  // Main data fetching effect
+  useEffect(() => {
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 300000);
+    return () => clearInterval(interval);
+  }, [timeRange]);
+
+  // ========== RENDER ==========
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <motion.div
-        initial={{ width: 64 }}
-        animate={{ width: mainSidebarOpen ? 64 : 20 }}
-        transition={{ duration: 0.3 }}
-        className={`fixed inset-y-0 z-20 bg-white shadow-sm border-r border-gray-100 overflow-hidden`}
-      >
-        <MainSidebar 
-          sidebarOpen={mainSidebarOpen}
-          setSidebarOpen={setMainSidebarOpen}
-        />
-      </motion.div>
-
+    <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
+      {/* Sidebar with dynamic classes */}
       <div 
-        className="flex-1 overflow-auto transition-all duration-300"
-        style={{ marginLeft: `${sidebarOffsets.contentMarginLeft}px` }}
+        className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
+          sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
+        }`}
       >
-        <main className="max-w-7xl mx-auto px-4 md:px-6 py-6">
-          <header className="flex justify-between items-center bg-white h-16 w-full rounded-xl px-6 shadow-xs mb-6 border border-gray-100">
-            <button 
-              onClick={() => setMainSidebarOpen(!mainSidebarOpen)}
-              className="p-1 hover:bg-gray-100 rounded-md transition-colors"
-            >
-              <Menu size={24} className="text-gray-600" />
-            </button>
+        <MainSidebar isCollapsed={!sidebarOpen} />
+      </div>
 
-            <div className="flex items-center gap-5">
-              <div className="relative">
-                <Link 
-                  to="/settingspage" 
-                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  aria-label="Settings"
-                >
-                  <Settings size={20} className="text-gray-600" />
-                </Link>
-              </div>
+      {/* Mobile overlay */}
+      {sidebarOpen && window.innerWidth < 768 && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-              <div className="border-l border-gray-200 h-8"></div>
+      {/* Main content with dynamic margin */}
+      <div 
+        className={`flex-1 transition-all duration-300 ${
+          sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
+        }`}
+      >
+        <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+          {/* Header Component */}
+          <Header
+            toggleSidebar={toggleSidebar}
+            user={user}
+            onLogout={handleLogout}
+          />
 
-              <button 
-                className="p-1 hover:bg-gray-100 rounded-full relative transition-colors"
-                aria-label="Notifications"
-              >
-                <Bell size={20} className="text-gray-600" />
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                  {recentActivities.filter(a => a.type === 'warning' || a.type === 'error').length}
-                </span>
-              </button>
-
-              <div className="border-l border-gray-200 h-8"></div>
-
-              <div className="flex items-center gap-2 cursor-pointer group">
-                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-medium">
-                  {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-                </div>
-                <span className="font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
-                  {user?.name || 'User'}
-                </span>
-                <ChevronDown 
-                  size={16} 
-                  className="text-gray-500 group-hover:text-gray-700 transition-colors" 
-                />
-              </div>
-            </div>
-          </header>
-
-          <motion.section 
+          {/* Welcome Banner */}
+          <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-6 bg-white rounded-xl shadow-xs mb-6 border border-gray-100"
+            className="mt-6 mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white"
           >
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">Attendance & Payroll Dashboard</h1>
-              <p className="text-gray-500 mt-1">Comprehensive overview of employee attendance and payroll metrics</p>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
-                <CalendarCheck size={18} className="text-blue-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  {new Date().toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </span>
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-2xl font-bold">Welcome back, {user?.name || 'Admin'}!</h1>
+                <p className="text-blue-100 mt-1">Here's what's happening with your attendance today.</p>
               </div>
-              {payrollStats.latestPeriod && (
-                <div className="flex items-center gap-2 bg-indigo-50 px-3 py-2 rounded-lg border border-indigo-100">
-                  <FileText size={18} className="text-indigo-600" />
-                  <span className="text-sm font-medium text-gray-700">
-                    Latest Payroll: {payrollStats.latestPeriod}
-                  </span>
+              <div className="hidden md:block">
+                <div className="bg-white/20 rounded-lg px-4 py-2 text-center">
+                  <p className="text-sm text-blue-100">Today's Date</p>
+                  <p className="text-lg font-semibold">
+                    {new Date().toLocaleDateString('en-US', { 
+                      month: 'short', 
+                      day: 'numeric', 
+                      year: 'numeric' 
+                    })}
+                  </p>
                 </div>
-              )}
+              </div>
             </div>
-          </motion.section>
+          </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          {/* Stats Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
             <StatsCard 
               icon={<Users size={20} />}
               title="Total Employees"
@@ -821,19 +702,6 @@ function AttendanceDashboard() {
             />
 
             <StatsCard 
-              icon={<DollarSign size={20} />}
-              title="Total Net Pay"
-              value={formatCurrency(payrollStats.totalNetAmount)}
-              secondaryValue={`${payrollStats.employeeCount} employees`}
-              linkText="View payroll"
-              linkTo="/payroll"
-              loading={payrollLoading}
-              color="indigo"
-              trend={trends.payrollTrend > 0 ? 1 : -1}
-              trendValue={Math.abs(trends.payrollTrend)}
-            />
-
-            <StatsCard 
               icon={<AlertCircle size={20} />}
               title="Absent Today"
               value={stats.absentCount}
@@ -847,20 +715,65 @@ function AttendanceDashboard() {
             />
           </div>
 
+          {/* Quick Actions Bar */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Zap size={20} className="text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-800">Quick Actions</h3>
+                  <p className="text-xs text-gray-500">Frequently used operations</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Link 
+                  to="/attendance"
+                  className="flex items-center gap-2 px-4 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-all group border border-green-200"
+                >
+                  <CalendarCheck size={18} />
+                  <span className="text-sm font-medium">Mark Attendance</span>
+                </Link>
+
+                <Link 
+                  to="/reports"
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg transition-all group border border-purple-200"
+                >
+                  <BarChart3 size={18} />
+                  <span className="text-sm font-medium">Generate Report</span>
+                </Link>
+
+                <Link 
+                  to="/employee"
+                  className="flex items-center gap-2 px-4 py-2 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg transition-all group border border-cyan-200"
+                >
+                  <Users size={18} />
+                  <span className="text-sm font-medium">Add Employee</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content Grid - 2 columns for charts */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            <div className="lg:col-span-2 bg-white rounded-xl shadow-xs p-6 border border-gray-100">
+            {/* Attendance Trend - Takes 2/3 of the space */}
+            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Attendance Trend</h2>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Attendance Trend</h2>
+                  <p className="text-sm text-gray-500 mt-1">Daily attendance overview</p>
+                </div>
                 <TimeRangeSelector timeRange={timeRange} setTimeRange={setTimeRange} />
               </div>
               
               {loading ? (
-                <div className="h-64 flex items-center justify-center">
+                <div className="h-80 flex items-center justify-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
                 </div>
               ) : chartData.length > 0 ? (
                 <>
-                  <div className="h-64">
+                  <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart 
                         data={chartData}
@@ -933,12 +846,12 @@ function AttendanceDashboard() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="text-xs text-gray-500 text-center mt-2">
-                    Click on any bar to view detailed employee records for that period
+                  <div className="text-xs text-gray-500 text-center mt-4 pt-2 border-t border-gray-100">
+                    💡 Click on any bar to view detailed employee records for that period
                   </div>
                 </>
               ) : (
-                <div className="h-64 flex flex-col items-center justify-center text-gray-500">
+                <div className="h-80 flex flex-col items-center justify-center text-gray-500">
                   <Calendar size={48} className="mb-4 text-gray-300" />
                   <p className="text-lg font-medium">No attendance data available</p>
                   <p className="text-sm mt-1">Attendance records will appear here once added</p>
@@ -946,9 +859,13 @@ function AttendanceDashboard() {
               )}
             </div>
 
-            <div className="bg-white rounded-xl shadow-xs p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Today's Status</h2>
+            {/* Today's Status Card */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Today's Status</h2>
+                  <p className="text-sm text-gray-500 mt-1">Real-time attendance snapshot</p>
+                </div>
                 <Filter size={18} className="text-gray-400" />
               </div>
               
@@ -987,7 +904,7 @@ function AttendanceDashboard() {
                     </ResponsiveContainer>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-2 mt-4">
+                  <div className="grid grid-cols-2 gap-3 mt-4">
                     {pieChartData.map((entry, index) => (
                       <div 
                         key={entry.name} 
@@ -999,18 +916,18 @@ function AttendanceDashboard() {
                             className="w-3 h-3 rounded-full mr-2" 
                             style={{ backgroundColor: COLORS[index] }}
                           ></div>
-                          <span className="text-xs text-gray-600">{entry.name}</span>
+                          <span className="text-sm text-gray-600">{entry.name}</span>
                         </div>
-                        <span className="text-xs font-medium text-gray-900">{entry.value}</span>
+                        <span className="text-sm font-semibold text-gray-900">{entry.value}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="text-xs text-gray-500 text-center mt-2">
-                    Click on any segment to view detailed employee records
+                  <div className="text-xs text-gray-500 text-center mt-3 pt-2 border-t border-gray-100">
+                    💡 Click on any segment to view detailed records
                   </div>
                 </>
               ) : (
-                <div className="h-48 flex flex-col items-center justify-center text-gray-500">
+                <div className="h-64 flex flex-col items-center justify-center text-gray-500">
                   <Users size={48} className="mb-4 text-gray-300" />
                   <p className="text-lg font-medium">No attendance today</p>
                   <p className="text-sm mt-1">No attendance records for today yet</p>
@@ -1019,337 +936,40 @@ function AttendanceDashboard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <div className="bg-white rounded-xl shadow-xs p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Payroll Overview</h2>
-                <Link 
-                  to="/payroll" 
-                  className="text-sm font-medium text-indigo-600 hover:text-indigo-500 flex items-center gap-1"
-                >
-                  View all <ChevronDown size={16} className="rotate-270" />
-                </Link>
-              </div>
-              
-              {payrollLoading ? (
-                <div className="flex justify-center items-center h-48">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
-                </div>
-              ) : payrollChartData.length > 0 ? (
-                <>
-                  <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart 
-                        data={payrollChartData}
-                        onClick={handleLineChartClick}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                        <XAxis 
-                          dataKey="name" 
-                          axisLine={false} 
-                          tickLine={false}
-                          tick={{ fill: '#6b7280', fontSize: 12 }}
-                        />
-                        <YAxis 
-                          axisLine={false} 
-                          tickLine={false}
-                          tickFormatter={(value) => `GHS ${(value/1000).toFixed(0)}K`}
-                          tick={{ fill: '#6b7280', fontSize: 12 }}
-                        />
-                        <Tooltip 
-                          formatter={(value) => [formatCurrency(value), 'Amount']}
-                          labelFormatter={(label) => `Payroll Period: ${label}`}
-                          cursor={{ stroke: '#8B5CF6', strokeWidth: 1, strokeDasharray: '3 3' }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="netSalary" 
-                          stroke="#8B5CF6" 
-                          strokeWidth={2}
-                          dot={{ r: 4, cursor: 'pointer' }}
-                          activeDot={{ r: 6, cursor: 'pointer' }}
-                          name="Net Salary"
-                          onClick={handleLineChartClick}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="tax" 
-                          stroke="#EF4444" 
-                          strokeWidth={2}
-                          dot={{ r: 4, cursor: 'pointer' }}
-                          activeDot={{ r: 6, cursor: 'pointer' }}
-                          name="Tax"
-                          onClick={handleLineChartClick}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="ssnit" 
-                          stroke="#3B82F6" 
-                          strokeWidth={2}
-                          dot={{ r: 4, cursor: 'pointer' }}
-                          activeDot={{ r: 6, cursor: 'pointer' }}
-                          name="SSNIT"
-                          onClick={handleLineChartClick}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-4 mt-6">
-                    <div 
-                      className="text-center p-3 hover:bg-indigo-50 rounded-lg cursor-pointer transition-colors"
-                      onClick={() => navigate('/reports?view=payroll&groupBy=employee')}
-                    >
-                      <div className="text-sm text-gray-500">Total Net</div>
-                      <div className="text-xl font-bold text-indigo-600 hover:text-indigo-700">
-                        {formatCurrency(payrollStats.totalNetAmount)}
-                      </div>
-                    </div>
-                    <div 
-                      className="text-center p-3 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
-                      onClick={() => navigate('/reports?view=payroll&groupBy=employee&category=tax')}
-                    >
-                      <div className="text-sm text-gray-500">Total Tax</div>
-                      <div className="text-xl font-bold text-red-600 hover:text-red-700">
-                        {formatCurrency(payrollStats.totalTax)}
-                      </div>
-                    </div>
-                    <div 
-                      className="text-center p-3 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"
-                      onClick={() => navigate('/reports?view=payroll&groupBy=employee&category=ssnit')}
-                    >
-                      <div className="text-sm text-gray-500">Total SSNIT</div>
-                      <div className="text-xl font-bold text-blue-600 hover:text-blue-700">
-                        {formatCurrency(payrollStats.totalSsnit)}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="text-xs text-gray-500 text-center mt-2">
-                    Click on any data point to view payroll employee records
-                  </div>
-                  
-                  {payrollStats.pendingPayrolls > 0 && (
-                    <div 
-                      className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg hover:bg-yellow-100 cursor-pointer transition-colors"
-                      onClick={() => navigate('/payroll')}
-                    >
-                      <div className="flex items-center">
-                        <AlertCircle size={16} className="text-yellow-600 mr-2" />
-                        <span className="text-sm text-yellow-700">
-                          {payrollStats.pendingPayrolls} payroll period(s) pending processing
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="h-48 flex flex-col items-center justify-center text-gray-500">
-                  <CreditCard size={48} className="mb-4 text-gray-300" />
-                  <p className="text-lg font-medium">No payroll data available</p>
-                  <p className="text-sm mt-1">Generate payroll to see analytics</p>
-                  <Link 
-                    to="/payroll"
-                    className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
-                  >
-                    Go to Payroll
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl shadow-xs p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
+          {/* Recent Activities */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
                 <h2 className="text-lg font-semibold text-gray-900">Recent Activities</h2>
-                <Link 
-                  to="/activities" 
-                  className="text-sm font-medium text-blue-600 hover:text-blue-500 flex items-center gap-1"
-                >
-                  View all <ChevronDown size={16} className="rotate-270" />
-                </Link>
+                <p className="text-sm text-gray-500 mt-1">Latest system updates</p>
               </div>
-              
-              {loading ? (
-                <div className="flex justify-center items-center h-48">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-                </div>
-              ) : recentActivities.length > 0 ? (
-                <div className="space-y-1">
-                  <AnimatePresence>
-                    {recentActivities.slice(0, 5).map((activity) => (
-                      <ActivityItem key={activity.id} activity={activity} />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  No recent activities found
-                </div>
-              )}
+              <Link 
+                to="/activities" 
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              >
+                View all <ChevronRight size={16} />
+              </Link>
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            <div className="lg:col-span-2 bg-white rounded-xl shadow-xs p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Payroll Status Summary</h2>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">{payrollStats.processedPeriods || 0} processed periods</span>
-                </div>
+            
+            {loading ? (
+              <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div 
-                  className="p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg border border-indigo-200 hover:from-indigo-100 hover:to-indigo-200 cursor-pointer transition-all"
-                  onClick={() => navigate('/reports?view=payroll&groupBy=employee')}
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-indigo-100 rounded-lg mr-3">
-                      <Banknote size={20} className="text-indigo-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Total Disbursed</p>
-                      <p className="text-xl font-bold text-indigo-700">{formatCurrency(payrollStats.totalNetAmount)}</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div 
-                  className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg border border-green-200 hover:from-green-100 hover:to-green-200 cursor-pointer transition-all"
-                  onClick={() => navigate('/employee')}
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-green-100 rounded-lg mr-3">
-                      <Users size={20} className="text-green-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Employees Covered</p>
-                      <p className="text-xl font-bold text-green-700">{payrollStats.employeeCount || 0}</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div 
-                  className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200 hover:from-blue-100 hover:to-blue-200 cursor-pointer transition-all"
-                  onClick={() => navigate('/reports?category=leave&groupBy=employee')}
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-blue-100 rounded-lg mr-3">
-                      <CalendarCheck size={20} className="text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Leave Impact</p>
-                      <p className="text-xl font-bold text-blue-700">{payrollStats.totalLeaveDays || 0} days</p>
-                    </div>
-                  </div>
-                </div>
+            ) : recentActivities.length > 0 ? (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                <AnimatePresence>
+                  {recentActivities.map((activity) => (
+                    <ActivityItem key={activity.id} activity={activity} />
+                  ))}
+                </AnimatePresence>
               </div>
-              
-              {payrollHistory.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Recent Payroll Periods</h3>
-                  <div className="space-y-2">
-                    {payrollHistory.slice(0, 3).map((period, index) => (
-                      <div 
-                        key={index} 
-                        className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                        onClick={() => navigate(`/reports?period=${period.id}&view=payroll&groupBy=employee`)}
-                      >
-                        <div>
-                          <p className="font-medium text-gray-900">{period.periodName}</p>
-                          <p className="text-xs text-gray-500">{period.startDate} to {period.endDate}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium text-green-600">{formatCurrency(period.totalNetAmount)}</p>
-                          <p className="text-xs text-gray-500">{period.employeeCount} employees</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl shadow-xs p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
-                <Clock size={18} className="text-gray-400" />
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <Bell size={48} className="mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">No recent activities</p>
+                <p className="text-sm mt-1">Activities will appear here</p>
               </div>
-              
-              <div className="space-y-3">
-                <Link 
-                  to="/attendance"
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 rounded-lg border border-green-200 transition-all group"
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-green-100 rounded-lg mr-3 group-hover:bg-green-200 transition-colors">
-                      <CalendarCheck size={20} className="text-green-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">Manage Attendance</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {calculatedAttendanceRate.toFixed(1)}% attendance rate today
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600" />
-                </Link>
-
-                <Link 
-                  to="/payroll"
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-indigo-100 hover:from-indigo-100 hover:to-indigo-200 rounded-lg border border-indigo-200 transition-all group"
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-indigo-100 rounded-lg mr-3 group-hover:bg-indigo-200 transition-colors">
-                      <DollarSign size={20} className="text-indigo-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">Manage Payroll</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {formatCurrency(payrollStats.totalNetAmount)} total net pay
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600" />
-                </Link>
-
-                <Link 
-                  to="/reports"
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 rounded-lg border border-purple-200 transition-all group"
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-purple-100 rounded-lg mr-3 group-hover:bg-purple-200 transition-colors">
-                      <BarChart3 size={20} className="text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">Generate Reports</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        View detailed analytics and insights
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600" />
-                </Link>
-
-                <Link 
-                  to="/payslip"
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-pink-50 to-pink-100 hover:from-pink-100 hover:to-pink-200 rounded-lg border border-pink-200 transition-all group"
-                >
-                  <div className="flex items-center">
-                    <div className="p-2 bg-pink-100 rounded-lg mr-3 group-hover:bg-pink-200 transition-colors">
-                      <FileText size={20} className="text-pink-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900">Payslip Generator</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Create and distribute payslips
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600" />
-                </Link>
-              </div>
-            </div>
+            )}
           </div>
         </main>
       </div>

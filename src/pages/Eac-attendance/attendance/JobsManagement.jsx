@@ -12,19 +12,24 @@ function JobsManagement() {
   const [editingJob, setEditingJob] = useState(null);
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
-  const [jobForm, setJobForm] = useState({
-    name: '',
-    description: '',
-    client: '',
-    startDate: '',
-    endDate: '',
-    billingCycle: 'MONTHLY',
-    budget: '',
-    hourlyRate: '',
-    standardWorkHours: 8,
-    status: 'ACTIVE',
-    supervisorId: ''
-  });
+ const [jobForm, setJobForm] = useState({
+  name: '',
+  description: '',
+  client: '',
+  startDate: '',
+  endDate: '',
+  billingCycle: 'MONTHLY',
+  billOn15NextMonth: false,
+  billingReminderEnabled: false,
+  billingReminderEmails: '',
+  nextBillingDate: '',
+  budget: '',
+  hourlyRate: '',
+  standardWorkHours: 8,
+  status: 'ACTIVE',
+  supervisorId: ''
+});
+
   const [showEmployeeAssignment, setShowEmployeeAssignment] = useState(false);
   const [selectedJobForAssignment, setSelectedJobForAssignment] = useState(null);
   const [availableEmployees, setAvailableEmployees] = useState([]);
@@ -363,13 +368,17 @@ const handleJobSubmit = async (e) => {
   try {
     setLoading(true);
 
-    const submitData = {
-      ...jobForm,
-      budget: jobForm.budget ? parseFloat(jobForm.budget) : null,
-      hourlyRate: jobForm.hourlyRate ? parseFloat(jobForm.hourlyRate) : null,
-      standardWorkHours: jobForm.standardWorkHours ? parseInt(jobForm.standardWorkHours) : 8,
-      supervisorId: jobForm.supervisorId || null
-    };
+   const submitData = {
+  ...jobForm,
+  billOn15NextMonth: Boolean(jobForm.billOn15NextMonth),
+  billingReminderEnabled: Boolean(jobForm.billingReminderEnabled),
+  billingReminderEmails: jobForm.billingReminderEmails ? jobForm.billingReminderEmails.trim() : '',
+  budget: jobForm.budget ? parseFloat(jobForm.budget) : null,
+  hourlyRate: jobForm.hourlyRate ? parseFloat(jobForm.hourlyRate) : null,
+  standardWorkHours: jobForm.standardWorkHours ? parseInt(jobForm.standardWorkHours) : 8,
+  supervisorId: jobForm.supervisorId || null
+};
+
 
     let savedJob;
     
@@ -714,19 +723,24 @@ const handleEditJob = async (job) => {
   }
   
   setEditingJob(job);
-  setJobForm({
-    name: job.name || '',
-    description: job.description || '',
-    client: job.client || '',
-    startDate: job.startDate || '',
-    endDate: job.endDate || '',
-    billingCycle: job.billingCycle || 'MONTHLY',
-    budget: job.budget || '',
-    hourlyRate: job.hourlyRate || '',
-    standardWorkHours: job.standardWorkHours || 8,
-    status: job.status || 'ACTIVE',
-    supervisorId: job.supervisor?.id || ''
-  });
+ setJobForm({
+  name: job.name || '',
+  description: job.description || '',
+  client: job.client || '',
+  startDate: job.startDate || '',
+  endDate: job.endDate || '',
+  billingCycle: job.billingCycle || 'MONTHLY',
+  billOn15NextMonth: Boolean(job.billOn15NextMonth),
+  billingReminderEnabled: Boolean(job.billingReminderEnabled),
+  billingReminderEmails: job.billingReminderEmails || '',
+  nextBillingDate: job.nextBillingDate || '',
+  budget: job.budget || '',
+  hourlyRate: job.hourlyRate || '',
+  standardWorkHours: job.standardWorkHours || 8,
+  status: job.status || 'ACTIVE',
+  supervisorId: job.supervisor?.id || ''
+});
+
   
   try {
     const jobProducts = await fetchJobProducts(job.id);
@@ -853,19 +867,24 @@ const handleEditJob = async (job) => {
   };
 
   const resetJobForm = () => {
-    setJobForm({
-      name: '',
-      description: '',
-      client: '',
-      startDate: '',
-      endDate: '',
-      billingCycle: 'MONTHLY',
-      budget: '',
-      hourlyRate: '',
-      standardWorkHours: 8,
-      status: 'ACTIVE',
-      supervisorId: ''
-    });
+   setJobForm({
+  name: '',
+  description: '',
+  client: '',
+  startDate: '',
+  endDate: '',
+  billingCycle: 'MONTHLY',
+  billOn15NextMonth: false,
+  billingReminderEnabled: false,
+  billingReminderEmails: '',
+  nextBillingDate: '',
+  budget: '',
+  hourlyRate: '',
+  standardWorkHours: 8,
+  status: 'ACTIVE',
+  supervisorId: ''
+});
+
     setEditingJob(null);
     setShowJobForm(false);
     setSelectedProducts([]);
@@ -1874,6 +1893,64 @@ const handleEditJob = async (job) => {
                         </select>
                       </div>
                     </div>
+
+                    <div className="space-y-4">
+  <div className="flex items-center gap-3">
+    <input
+      type="checkbox"
+      checked={Boolean(jobForm.billOn15NextMonth)}
+      onChange={(e) => setJobForm({ ...jobForm, billOn15NextMonth: e.target.checked })}
+      disabled={loading}
+      className="h-4 w-4"
+    />
+    <label className="text-sm font-medium text-gray-700">
+      Bill on 15th of the next month (from Start Date)
+    </label>
+  </div>
+
+  <div className="flex items-center gap-3">
+    <input
+      type="checkbox"
+      checked={Boolean(jobForm.billingReminderEnabled)}
+      onChange={(e) => setJobForm({ ...jobForm, billingReminderEnabled: e.target.checked })}
+      disabled={loading}
+      className="h-4 w-4"
+    />
+    <label className="text-sm font-medium text-gray-700">
+      Enable Billing Reminder Emails
+    </label>
+  </div>
+
+  {jobForm.billingReminderEnabled && (
+    <div>
+      <label className="block text-sm font-medium text-gray-700">
+        Billing Reminder Emails (comma-separated)
+      </label>
+      <textarea
+        value={jobForm.billingReminderEmails}
+        onChange={(e) => setJobForm({ ...jobForm, billingReminderEmails: e.target.value })}
+        className="w-full p-2 border border-gray-300 rounded-lg"
+        rows="2"
+        disabled={loading}
+        placeholder="a@company.com, b@company.com"
+      />
+    </div>
+  )}
+
+  <div>
+    <label className="block text-sm font-medium text-gray-700">
+      Next Billing Date
+    </label>
+    <input
+      type="date"
+      value={jobForm.nextBillingDate || ''}
+      onChange={(e) => setJobForm({ ...jobForm, nextBillingDate: e.target.value })}
+      className="w-full p-2 border border-gray-300 rounded-lg"
+      disabled={loading}
+    />
+  </div>
+</div>
+
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -2356,7 +2433,7 @@ const handleEditJob = async (job) => {
                         <div className="flex items-center gap-2">
                           <DollarSign size={16} />
                           <span className="font-medium">Budget:</span>
-                          <span>${budget.toLocaleString()}</span>
+                          <span>GHS{budget.toLocaleString()}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <Clock size={16} />
@@ -2372,30 +2449,6 @@ const handleEditJob = async (job) => {
                           <Users size={16} />
                           <span className="font-medium">Employees:</span>
                           <span>{assignedCount} assigned</span>
-                        </div>
-                        
-                        <div className="mt-2 pt-2 border-t border-gray-200">
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="font-medium">Cost Center:</span>
-                            <span className={`font-bold ${
-                              utilizationPercentage > 90 ? 'text-red-600' :
-                              utilizationPercentage > 75 ? 'text-yellow-600' : 'text-green-600'
-                            }`}>
-                              ${spentAmount.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-1.5">
-                            <div 
-                              className={`h-1.5 rounded-full ${
-                                utilizationPercentage > 90 ? 'bg-red-500' :
-                                utilizationPercentage > 75 ? 'bg-yellow-500' : 'bg-green-500'
-                              }`}
-                              style={{ width: `${Math.min(utilizationPercentage, 100)}%` }}
-                            ></div>
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            {utilizationPercentage.toFixed(1)}% of budget utilized
-                          </div>
                         </div>
                         
                         {assignedEmployeesForJob.length > 0 && (

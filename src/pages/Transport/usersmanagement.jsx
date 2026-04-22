@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import Sidebar from './Sidebar'; // Import Sidebar component
+import Sidebar from './Sidebar';
 
 const UsersManagement = () => {
   const [users, setUsers] = useState([]);
@@ -32,38 +31,60 @@ const UsersManagement = () => {
     return localStorage.getItem("jwtToken") || localStorage.getItem("authToken");
   };
 
- const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
 
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
+    console.log("🖥️ Current hostname:", hostname);
+    console.log("🔌 Current port:", port);
 
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      console.log("🏠 Using LOCALHOST API URL");
+      return "http://localhost:8080";
+    }
 
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
+    if (hostname.startsWith("192.168.")) {
+      console.log("🏠 Using LAN API URL");
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
 
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
+    if (hostname === "100.114.178.13") {
+      console.log("🌐 Using PUBLIC API URL");
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    console.log("🌍 Using PUBLIC API URL (fallback)");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
+  };
 
   const API_BASE_URL = getApiBaseUrl();
 
+  // Fetch configuration helper
+  const getFetchConfig = (method = 'GET', body = null) => {
+    const config = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      credentials: 'include'
+    };
+
+    if (body) {
+      config.body = JSON.stringify(body);
+    }
+
+    return config;
+  };
+
+  // Handle authentication error
+  const handleAuthError = () => {
+    localStorage.removeItem("jwtToken");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("userData");
+    window.location.href = "/login";
+  };
 
   // Fetch users with token
   useEffect(() => {
@@ -80,13 +101,19 @@ const UsersManagement = () => {
         return;
       }
 
-      const response = await api.get(`${API_BASE_URL}/api/users`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const response = await fetch(`${API_BASE_URL}/api/users`, getFetchConfig());
       
-      const cleanUsers = response.data.map(u => ({
+      if (response.status === 401) {
+        handleAuthError();
+        return;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch users: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const cleanUsers = data.map(u => ({
         id: u.id,
         fullName: u.fullName || "",
         userName: u.userName || "",
@@ -101,8 +128,10 @@ const UsersManagement = () => {
       calculateStats(cleanUsers);
     } catch (error) {
       console.error("Failed to fetch users:", error);
-      if (error.response?.status === 401) {
+      if (error.message.includes("401")) {
         setAuthError("Session expired. Please login again.");
+      } else {
+        setAuthError("Failed to load users. Please try again.");
       }
     } finally {
       setLoading(false);
@@ -138,32 +167,44 @@ const UsersManagement = () => {
     try {
       if (editingId && editingId !== "new") {
         // Update user
-        const response = await api.put(`${API_BASE_URL}/api/users/${editingId}`, form, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        setUsers(users.map(u => (u.id === editingId ? response.data : u)));
+        const response = await fetch(`${API_BASE_URL}/api/users/${editingId}`, getFetchConfig('PUT', form));
+        
+        if (response.status === 401 || response.status === 403) {
+          setAuthError("You don't have permission to perform this action.");
+          return;
+        }
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Failed to update user");
+        }
+        
+        const data = await response.json();
+        setUsers(users.map(u => (u.id === editingId ? data : u)));
         resetForm();
         fetchUsers();
       } else {
         // Create user
-        const response = await api.post(`${API_BASE_URL}/api/users`, form, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        setUsers([...users, response.data]);
+        const response = await fetch(`${API_BASE_URL}/api/users`, getFetchConfig('POST', form));
+        
+        if (response.status === 401 || response.status === 403) {
+          setAuthError("You don't have permission to perform this action.");
+          return;
+        }
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Failed to create user");
+        }
+        
+        const data = await response.json();
+        setUsers([...users, data]);
         resetForm();
         fetchUsers();
       }
     } catch (error) {
       console.error("Error saving user:", error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        setAuthError("You don't have permission to perform this action.");
-      } else {
-        setAuthError(error.response?.data?.message || "Failed to save user");
-      }
+      setAuthError(error.message || "Failed to save user");
     }
   };
 
@@ -193,19 +234,24 @@ const UsersManagement = () => {
     }
 
     try {
-      await api.delete(`${API_BASE_URL}/api/users/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
+      const response = await fetch(`${API_BASE_URL}/api/users/${id}`, getFetchConfig('DELETE'));
+      
+      if (response.status === 401 || response.status === 403) {
+        setAuthError("You don't have permission to delete users.");
+        return;
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to delete user");
+      }
+      
       setUsers(users.filter(u => u.id !== id));
       setDeleteConfirm(null);
       fetchUsers();
     } catch (error) {
       console.error("Error deleting user:", error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        setAuthError("You don't have permission to delete users.");
-      }
+      setAuthError(error.message || "Failed to delete user");
     }
   };
 
@@ -287,11 +333,7 @@ const UsersManagement = () => {
 
   // Add logout function
   const handleLogout = () => {
-    localStorage.removeItem("jwtToken");
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userRole");
-    localStorage.removeItem("userData");
-    window.location.href = "/login";
+    handleAuthError();
   };
 
   if (loading) {

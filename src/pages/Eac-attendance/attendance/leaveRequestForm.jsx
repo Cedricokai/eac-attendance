@@ -31,11 +31,13 @@ const LeaveRequestForm = () => {
   const [isError, setIsError] = useState(false);
   const [userRole, setUserRole] = useState("");
   const [dateWarnings, setDateWarnings] = useState([]);
-  const [leaveSettings, setLeaveSettings] = useState({
-    maternityLeaveMonths: 3,
-    paternityLeaveMonths: 1,
-    nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study']
-  });
+  const [availableBalance, setAvailableBalance] = useState(0);
+const [leaveSettings, setLeaveSettings] = useState({
+  maternityLeaveMonths: 3,
+  paternityLeaveMonths: 1,
+  nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study'],
+  annualLeaveBalance: 20 // Default value
+});
 
   const leaveTypes = [
     "Annual Leave",
@@ -89,22 +91,46 @@ const LeaveRequestForm = () => {
 
   // Fetch leave settings
   const fetchLeaveSettings = async () => {
-    try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setLeaveSettings(data);
+  try {
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
       }
-    } catch (err) {
-      console.error('Failed to fetch leave settings:', err);
+    });
+    if (response.ok) {
+      const data = await response.json();
+      setLeaveSettings(data);
+      // Calculate available balance for current user
+      await calculateAvailableBalance(data.annualLeaveBalance);
     }
-  };
+  } catch (err) {
+    console.error('Failed to fetch leave settings:', err);
+  }
+};
+
+const calculateAvailableBalance = async (totalAnnualBalance) => {
+  try {
+    if (!currentEmployee?.id) return;
+    
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/api/leave/employee/${currentEmployee.id}/used-days`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (response.ok) {
+      const usedDays = await response.json();
+      const available = totalAnnualBalance - usedDays;
+      setAvailableBalance(available > 0 ? available : 0);
+    }
+  } catch (err) {
+    console.error('Error calculating balance:', err);
+  }
+};
 
   // Function to check if a date is a weekend
   const isWeekend = (dateString) => {

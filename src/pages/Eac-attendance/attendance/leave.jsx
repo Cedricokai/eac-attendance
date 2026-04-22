@@ -1,20 +1,36 @@
-import { useState, useEffect, useContext } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useMemo } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
-import Search from "../../../compnents/search";
+import Header from "../../../components/Header";
 import { 
   DocumentIcon, 
   EyeIcon, 
   ArrowDownTrayIcon,
   PaperClipIcon,
   XMarkIcon,
-  PhotoIcon
+  PhotoIcon,
+  MagnifyingGlassIcon,
+  FunnelIcon,
+  ArrowPathIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+  CalendarDaysIcon,
+  UserGroupIcon,
+  CheckBadgeIcon,
+  XCircleIcon,
+  ClockIcon,
+  InformationCircleIcon
 } from '@heroicons/react/24/outline';
+import { TrashIcon, CheckCircleIcon, XCircleIcon as XCircleSolid } from '@heroicons/react/24/solid';
 
-// Import the LeaveDetailsModal component
 import LeaveDetailsModal from "./leaveDetailsModal";
+import AdminLeaveBalanceView from "./AdminLeaveBalanceView";
 
 function Leave() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [highlightedLeaveId, setHighlightedLeaveId] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  
   const [query, setQuery] = useState('');
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
@@ -28,8 +44,33 @@ function Leave() {
   const [selectedReason, setSelectedReason] = useState('');
   const [selectedLeave, setSelectedLeave] = useState(null);
   const [file, setFile] = useState(null);
+  const [viewMode, setViewMode] = useState('requests');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [user, setUser] = useState(null);
+  const [selectedLeaves, setSelectedLeaves] = useState(new Set());
+  const [isBulkActionModalOpen, setIsBulkActionModalOpen] = useState(false);
+  const [bulkActionType, setBulkActionType] = useState(null);
+  const [bulkFeedback, setBulkFeedback] = useState('');
+  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+  
+  // Category filter state
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  
+  const [filters, setFilters] = useState({
+    status: 'All',
+    leaveType: 'All',
+    dateRange: 'All',
+    startDate: '',
+    endDate: '',
+    employeeName: ''
+  });
+  
+  const [showFilters, setShowFilters] = useState(false);
+  const [sortConfig, setSortConfig] = useState({
+    key: 'submittedDate',
+    direction: 'desc'
+  });
 
-  // New leave form state
   const [newLeave, setNewLeave] = useState({
     employee: { id: '' },
     leaveType: '',
@@ -39,122 +80,399 @@ function Leave() {
     status: 'Pending'
   });
 
- const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
-
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
-
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
-
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
-
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
-
-  const API_BASE_URL = getApiBaseUrl();
-
-  // Helper function to get JWT token
-  const getToken = () => {
-    return localStorage.getItem('jwtToken');
-  };
-
-  const isLeaveDeductible = (leaveType) => {
-    return !leaveSettings.nonDeductibleLeaveTypes.includes(leaveType);
-};
-  
-
-  // Function to check if a date is a weekend
-  const isWeekend = (dateString) => {
-    const date = new Date(dateString);
-    const day = date.getDay();
-    return day === 0 || day === 6; // 0 = Sunday, 6 = Saturday
-  };
-
   const [leaveSettings, setLeaveSettings] = useState({
     maternityLeaveMonths: 3,
     paternityLeaveMonths: 1,
     nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study']
-});
+  });
 
-// Fetch leave settings
-const fetchLeaveSettings = async () => {
-    try {
-        const token = getToken();
-        const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            }
-        });
-        if (response.ok) {
-            const data = await response.json();
-            setLeaveSettings(data);
+  const [categories, setCategories] = useState([]);
+
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8080";
+    }
+
+    if (hostname.startsWith("192.168.")) {
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
+
+    if (hostname === "100.114.178.13") {
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  };
+
+  const API_BASE_URL = getApiBaseUrl();
+
+  const getToken = () => {
+    return localStorage.getItem('jwtToken');
+  };
+
+  // Get unique categories from leaves data
+  const getUniqueCategoriesFromLeaves = () => {
+    const categoriesSet = new Set();
+    leaves.forEach(leave => {
+      if (leave.employee?.category?.name) {
+        categoriesSet.add(leave.employee.category.name);
+      }
+    });
+    return Array.from(categoriesSet).sort();
+  };
+
+  // Check if leave type is deductible
+  const isLeaveDeductible = (leaveType) => {
+    return !leaveSettings.nonDeductibleLeaveTypes?.includes(leaveType);
+  };
+
+  // Calculate leave days based on employee category
+  const calculateLeaveDays = (startDate, endDate, leaveType, employeeCategory) => {
+    if (!startDate || !endDate) return 0;
+    
+    if (!isLeaveDeductible(leaveType)) {
+      return 0;
+    }
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    let excludeWeekends = true;
+    if (employeeCategory && employeeCategory.excludeWeekendsFromLeave !== undefined) {
+      excludeWeekends = employeeCategory.excludeWeekendsFromLeave;
+    }
+    
+    let days = 0;
+    const currentDate = new Date(start);
+    
+    while (currentDate <= end) {
+      const dayOfWeek = currentDate.getDay();
+      const isWeekendDay = (dayOfWeek === 0 || dayOfWeek === 6);
+      
+      if (excludeWeekends) {
+        if (!isWeekendDay) {
+          days++;
         }
+      } else {
+        days++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return days;
+  };
+
+  // Get employee's remaining leave balance
+  const getEmployeeRemainingLeave = (employee) => {
+    if (!employee) return 0;
+    
+    const annualLeaveDays = employee.category?.annualLeaveDays || 20;
+    
+    const usedLeaveDays = leaves
+      .filter(leave => 
+        leave.employee?.id === employee.id && 
+        leave.status === 'Approved' &&
+        isLeaveDeductible(leave.leaveType)
+      )
+      .reduce((total, leave) => {
+        return total + calculateLeaveDays(
+          leave.startDate, 
+          leave.endDate, 
+          leave.leaveType, 
+          employee.category
+        );
+      }, 0);
+    
+    return Math.max(0, annualLeaveDays - usedLeaveDays);
+  };
+
+  // Check if employee has sufficient leave balance
+  const hasSufficientLeaveBalance = (employee, leaveType, startDate, endDate) => {
+    if (!isLeaveDeductible(leaveType)) {
+      return true;
+    }
+    
+    const requestedDays = calculateLeaveDays(startDate, endDate, leaveType, employee?.category);
+    const remainingBalance = getEmployeeRemainingLeave(employee);
+    
+    return requestedDays <= remainingBalance;
+  };
+
+  const fetchUser = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser({
+          name: data.username,
+          role: data.role.replace("ROLE_", "").toLowerCase(),
+          email: data.email
+        });
+      }
     } catch (err) {
-        console.error('Failed to fetch leave settings:', err);
+      console.error("Failed to fetch user", err);
     }
-};
-
-// Add to useEffect
-useEffect(() => {
-    fetchLeaves();
-    fetchEmployees();
-    fetchLeaveSettings(); // Add this
-}, []);
-
-  // Function to get the next weekday from a given date
-  const getNextWeekday = (dateString) => {
-    const date = new Date(dateString);
-    const day = date.getDay();
-    
-    if (day === 0) { // Sunday
-      date.setDate(date.getDate() + 1); // Move to Monday
-    } else if (day === 6) { // Saturday
-      date.setDate(date.getDate() + 2); // Move to Monday
-    }
-    
-    return date.toISOString().split('T')[0];
   };
 
-  // Function to disable weekend dates in date picker
-  const disableWeekends = (date) => {
-    return isWeekend(date);
+  const handleLogout = async () => {
+    try {
+      const token = getToken();
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      navigate("/");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
-  // Function to handle date changes with weekend validation
-  const handleDateChange = (e) => {
-    const { name, value } = e.target;
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  const handleSelectLeave = (leaveId) => {
+    const newSelected = new Set(selectedLeaves);
+    if (newSelected.has(leaveId)) {
+      newSelected.delete(leaveId);
+    } else {
+      newSelected.add(leaveId);
+    }
+    setSelectedLeaves(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedLeaves.size === filteredLeaves.length) {
+      setSelectedLeaves(new Set());
+    } else {
+      const allIds = filteredLeaves.map(leave => leave.id);
+      setSelectedLeaves(new Set(allIds));
+    }
+  };
+
+  const handleBulkApprove = () => {
+    if (selectedLeaves.size === 0) {
+      alert('Please select at least one leave request to approve');
+      return;
+    }
+    setBulkActionType('approve');
+    setIsBulkActionModalOpen(true);
+  };
+
+  const handleBulkReject = () => {
+    if (selectedLeaves.size === 0) {
+      alert('Please select at least one leave request to reject');
+      return;
+    }
+    setBulkActionType('reject');
+    setIsBulkActionModalOpen(true);
+  };
+
+  const executeBulkAction = async () => {
+    setIsProcessingBulk(true);
+    const leaveIds = Array.from(selectedLeaves);
     
-    if (value && isWeekend(value)) {
-      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+    try {
+      const token = getToken();
+      const endpoint = bulkActionType === 'approve' 
+        ? `${API_BASE_URL}/api/leave/bulk/approve`
+        : `${API_BASE_URL}/api/leave/bulk/reject`;
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          leaveIds: leaveIds,
+          feedback: bulkFeedback || (bulkActionType === 'approve' ? 'Bulk approved' : 'Bulk rejected')
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Bulk action failed');
+      }
+
+      const result = await response.json();
+      alert(`Successfully ${bulkActionType === 'approve' ? 'approved' : 'rejected'} ${result.processedCount} leave requests`);
+      
+      setSelectedLeaves(new Set());
+      setIsBulkActionModalOpen(false);
+      setBulkFeedback('');
+      fetchLeaves();
+      
+    } catch (err) {
+      alert('Error processing bulk action: ' + err.message);
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  };
+
+  const deleteLeave = async (leaveId) => {
+    if (!window.confirm('Are you sure you want to delete this leave request? This action cannot be undone.')) {
       return;
     }
 
-    setNewLeave({
-      ...newLeave,
-      [name]: value
-    });
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete leave request');
+      }
+
+      alert('Leave request deleted successfully');
+      fetchLeaves();
+      
+      if (selectedLeaves.has(leaveId)) {
+        const newSelected = new Set(selectedLeaves);
+        newSelected.delete(leaveId);
+        setSelectedLeaves(newSelected);
+      }
+    } catch (err) {
+      alert('Error deleting leave request: ' + err.message);
+    }
   };
 
-  // Function to handle start date change with end date adjustment
+  const handleBulkDelete = async () => {
+    if (selectedLeaves.size === 0) {
+        alert('Please select at least one leave request to delete');
+        return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete ${selectedLeaves.size} leave request(s)? This action cannot be undone.`)) {
+        return;
+    }
+
+    setIsProcessingBulk(true);
+    const leaveIds = Array.from(selectedLeaves);
+
+    try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/api/leave/bulk/delete`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ leaveIds: leaveIds })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Bulk delete failed');
+        }
+
+        const result = await response.json();
+        
+        if (result.errors && result.errors.length > 0) {
+            alert(`Deleted ${result.deletedCount} leave requests.\n\nErrors:\n${result.errors.join('\n')}`);
+        } else {
+            alert(`Successfully deleted ${result.deletedCount} leave requests`);
+        }
+        
+        setSelectedLeaves(new Set());
+        fetchLeaves();
+        
+    } catch (err) {
+        alert('Error deleting leave requests: ' + err.message);
+    } finally {
+        setIsProcessingBulk(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sidebarOpen && window.innerWidth < 768) {
+        const sidebar = document.querySelector('.sidebar-container');
+        if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
+          setSidebarOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sidebarOpen]);
+
+  const fetchLeaveSettings = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLeaveSettings(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch leave settings:', err);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/categories`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCategories(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch categories:', err);
+    }
+  };
+
+  const leaveTypes = useMemo(() => {
+    const types = new Set(leaves.map(l => l.leaveType).filter(Boolean));
+    return ['All', ...Array.from(types)];
+  }, [leaves]);
+
   const handleStartDateChange = (e) => {
     const { value } = e.target;
     
@@ -168,7 +486,6 @@ useEffect(() => {
       startDate: value
     };
 
-    // If end date is before new start date, clear end date
     if (updatedLeave.endDate && value && new Date(updatedLeave.endDate) < new Date(value)) {
       updatedLeave.endDate = '';
     }
@@ -176,7 +493,6 @@ useEffect(() => {
     setNewLeave(updatedLeave);
   };
 
-  // Function to handle end date change with validation
   const handleEndDateChange = (e) => {
     const { value } = e.target;
     
@@ -185,7 +501,6 @@ useEffect(() => {
       return;
     }
 
-    // Validate that end date is not before start date
     if (value && newLeave.startDate && new Date(value) < new Date(newLeave.startDate)) {
       alert('End date cannot be before start date.');
       return;
@@ -197,11 +512,21 @@ useEffect(() => {
     });
   };
 
+  const isWeekend = (dateString) => {
+    const date = new Date(dateString);
+    const day = date.getDay();
+    return day === 0 || day === 6;
+  };
+
   useEffect(() => {
     fetchLeaves();
     fetchEmployees();
+    fetchLeaveSettings();
+    fetchCategories();
+    fetchUser();
   }, []);
 
+  // FIXED: fetchEmployees with full category object
   const fetchEmployees = async () => {
     try {
       const token = getToken();
@@ -213,7 +538,20 @@ useEffect(() => {
       });
       if (!response.ok) throw new Error('Failed to fetch employees');
       const data = await response.json();
-      setEmployees(data);
+      
+      const processedEmployees = data.map(emp => ({
+        ...emp,
+        category: emp.category ? { 
+          id: emp.category.id, 
+          name: emp.category.name,
+          annualLeaveDays: emp.category.annualLeaveDays || 20,
+          excludeWeekendsFromLeave: emp.category.excludeWeekendsFromLeave !== undefined ? emp.category.excludeWeekendsFromLeave : true,
+          workStartTime: emp.category.workStartTime || '08:00',
+          standardRateHours: emp.category.standardRateHours || 8
+        } : null
+      }));
+      
+      setEmployees(processedEmployees);
     } catch (err) {
       setError(err.message);
     }
@@ -223,12 +561,35 @@ useEffect(() => {
     setLoading(true);
     try {
       const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/leave`, {
+      
+      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (!userResponse.ok) throw new Error('Failed to fetch user info');
+      const userData = await userResponse.json();
+      
+      let url = `${API_BASE_URL}/api/leave`;
+      const isAdmin = userData.roles?.includes('ROLE_ADMIN') || userData.role === 'ROLE_ADMIN';
+      
+      if (!isAdmin) {
+        const empResponse = await fetch(`${API_BASE_URL}/api/employee/email/${userData.email}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (empResponse.ok) {
+          const empData = await empResponse.json();
+          url = `${API_BASE_URL}/api/leave/employee/${empData.id}`;
+        }
+      }
+      
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         }
       });
+      
       if (!response.ok) throw new Error('Failed to fetch leaves');
       const data = await response.json();
       setLeaves(data);
@@ -239,23 +600,84 @@ useEffect(() => {
     }
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  // Handle URL parameters for auto-opening leave request
+  useEffect(() => {
+    const leaveId = searchParams.get('leaveId');
+    const employeeId = searchParams.get('employeeId');
+    const action = searchParams.get('action');
     
-    if (name === "employeeId") {
-      setNewLeave({
-        ...newLeave,
-        employee: { id: value }
-      });
-    } else {
-      setNewLeave({
-        ...newLeave,
-        [name]: value
-      });
+    if (leaveId && employeeId && employees.length > 0) {
+      const employee = employees.find(emp => emp.id === parseInt(employeeId));
+      if (employee) {
+        setFilters(prev => ({
+          ...prev,
+          employeeName: `${employee.firstName} ${employee.lastName}`
+        }));
+      }
+      
+      setHighlightedLeaveId(parseInt(leaveId));
+      
+      if (action === 'approve' || action === 'reject') {
+        setPendingAction(action);
+      }
+      
+      const targetLeave = leaves.find(l => l.id === parseInt(leaveId));
+      if (targetLeave) {
+        setSelectedLeave(targetLeave);
+      }
     }
+  }, [searchParams, employees, leaves]);
+
+  const handleModalClose = () => {
+    setSelectedLeave(null);
+    setSearchParams({});
+    setHighlightedLeaveId(null);
+    setPendingAction(null);
   };
 
-  // File upload function
+const handleInputChange = (e) => {
+  const { name, value } = e.target;
+  
+  if (name === "employeeId") {
+    const selectedEmployee = employees.find(emp => emp.id === parseInt(value));
+    if (selectedEmployee) {
+      // Debug logging to see what data is available
+      console.log("Selected employee category:", selectedEmployee.category);
+      console.log("Stored category:", {
+        id: selectedEmployee.category?.id,
+        name: selectedEmployee.category?.name,
+        annualLeaveDays: selectedEmployee.category?.annualLeaveDays,
+        excludeWeekendsFromLeave: selectedEmployee.category?.excludeWeekendsFromLeave
+      });
+      
+      setNewLeave({
+        ...newLeave,
+        employee: {
+          id: selectedEmployee.id,
+          firstName: selectedEmployee.firstName,
+          lastName: selectedEmployee.lastName,
+          employeeId: selectedEmployee.employeeId,
+          category: selectedEmployee.category ? { 
+            id: selectedEmployee.category.id,
+            name: selectedEmployee.category.name,
+            annualLeaveDays: selectedEmployee.category.annualLeaveDays || 20,
+            excludeWeekendsFromLeave: selectedEmployee.category.excludeWeekendsFromLeave !== undefined 
+              ? selectedEmployee.category.excludeWeekendsFromLeave 
+              : true,
+            workStartTime: selectedEmployee.category.workStartTime || '08:00',
+            standardRateHours: selectedEmployee.category.standardRateHours || 8
+          } : null
+        }
+      });
+    }
+  } else {
+    setNewLeave({
+      ...newLeave,
+      [name]: value
+    });
+  }
+};
+
   const uploadAttachment = async (leaveId, file, token) => {
     try {
       const formData = new FormData();
@@ -273,7 +695,6 @@ useEffect(() => {
         throw new Error("Failed to upload attachment");
       }
       
-      console.log("Attachment uploaded successfully");
       return await response.json();
     } catch (error) {
       console.error("Attachment upload failed:", error);
@@ -281,94 +702,112 @@ useEffect(() => {
     }
   };
 
- const createLeave = async () => {
+  const createLeave = async () => {
     try {
-        // Validate dates are weekdays (for non-maternity/paternity leaves)
-        if (!['Maternity', 'Paternity'].includes(newLeave.leaveType)) {
-            if (newLeave.startDate && isWeekend(newLeave.startDate)) {
-                alert('Start date must be a weekday (Monday to Friday).');
-                return;
-            }
-            
-            if (newLeave.endDate && isWeekend(newLeave.endDate)) {
-                alert('End date must be a weekday (Monday to Friday).');
-                return;
-            }
+      if (!['Maternity', 'Paternity'].includes(newLeave.leaveType)) {
+        if (newLeave.startDate && isWeekend(newLeave.startDate)) {
+          alert('Start date must be a weekday (Monday to Friday).');
+          return;
         }
-
-        // Validate required fields
-        if (!newLeave.employee.id || !newLeave.leaveType || !newLeave.startDate || !newLeave.reason) {
-            alert('Please fill in all required fields.');
-            return;
-        }
-
-        // Auto-calculate end date for maternity/paternity leave
-        let finalEndDate = newLeave.endDate;
-        if (newLeave.leaveType === 'Maternity' && !newLeave.endDate) {
-            const startDate = new Date(newLeave.startDate);
-            startDate.setMonth(startDate.getMonth() + leaveSettings.maternityLeaveMonths);
-            finalEndDate = startDate.toISOString().split('T')[0];
-        } else if (newLeave.leaveType === 'Paternity' && !newLeave.endDate) {
-            const startDate = new Date(newLeave.startDate);
-            startDate.setMonth(startDate.getMonth() + leaveSettings.paternityLeaveMonths);
-            finalEndDate = startDate.toISOString().split('T')[0];
-        }
-
-        const token = getToken();
         
-        // First create the leave request
-        const response = await fetch(`${API_BASE_URL}/api/leave`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-                ...newLeave,
-                endDate: finalEndDate
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'Failed to create leave');
+        if (newLeave.endDate && isWeekend(newLeave.endDate)) {
+          alert('End date must be a weekday (Monday to Friday).');
+          return;
         }
+      }
 
-        const savedLeave = await response.json();
+      if (!newLeave.employee.id || !newLeave.leaveType || !newLeave.startDate || !newLeave.reason) {
+        alert('Please fill in all required fields.');
+        return;
+      }
 
-        // If it's sick leave and file exists, upload attachment
-        if (newLeave.leaveType === 'Sick' && file) {
-            try {
-                await uploadAttachment(savedLeave.id, file, token);
-                // Refresh leaves to get updated attachment info
-                fetchLeaves();
-            } catch (uploadError) {
-                console.error('Attachment upload failed:', uploadError);
-                // Don't throw error here - the main leave request was successful
-            }
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+      
+      if (!hasSufficientLeaveBalance(selectedEmployee, newLeave.leaveType, newLeave.startDate, newLeave.endDate)) {
+        const remainingBalance = getEmployeeRemainingLeave(selectedEmployee);
+        alert(`Insufficient leave balance. You have ${remainingBalance} days remaining.`);
+        return;
+      }
+
+      let finalEndDate = newLeave.endDate;
+      if (newLeave.leaveType === 'Maternity' && !newLeave.endDate) {
+        const startDate = new Date(newLeave.startDate);
+        startDate.setMonth(startDate.getMonth() + leaveSettings.maternityLeaveMonths);
+        finalEndDate = startDate.toISOString().split('T')[0];
+      } else if (newLeave.leaveType === 'Paternity' && !newLeave.endDate) {
+        const startDate = new Date(newLeave.startDate);
+        startDate.setMonth(startDate.getMonth() + leaveSettings.paternityLeaveMonths);
+        finalEndDate = startDate.toISOString().split('T')[0];
+      }
+
+      const token = getToken();
+      
+      const leavePayload = {
+        employee: {
+          id: parseInt(newLeave.employee.id),
+          category: newLeave.employee.category ? { id: newLeave.employee.category.id } : null
+        },
+        leaveType: newLeave.leaveType,
+        startDate: newLeave.startDate,
+        endDate: finalEndDate,
+        reason: newLeave.reason,
+        status: 'Pending'
+      };
+      
+      const response = await fetch(`${API_BASE_URL}/api/leave`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(leavePayload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create leave');
+      }
+
+      const savedLeave = await response.json();
+
+      if (newLeave.leaveType === 'Sick' && file) {
+        try {
+          await uploadAttachment(savedLeave.id, file, token);
+        } catch (uploadError) {
+          console.error('Attachment upload failed:', uploadError);
         }
+      }
 
-        setLeaves([...leaves, savedLeave]);
-        setIsCreateMenuOpen(false);
-        setNewLeave({
-            employee: { id: '' },
-            leaveType: '',
-            startDate: '',
-            endDate: '',
-            reason: '',
-            status: 'Pending'
-        });
-        setFile(null);
+      fetchLeaves();
+      setIsCreateMenuOpen(false);
+      setNewLeave({
+        employee: { id: '' },
+        leaveType: '',
+        startDate: '',
+        endDate: '',
+        reason: '',
+        status: 'Pending'
+      });
+      setFile(null);
+      
+      alert('Leave request submitted successfully!');
+      
     } catch (err) {
-        setError(err.message);
+      setError(err.message);
+      alert(err.message);
     }
-};
+  };
 
-  const validateLeave = async (leaveId) => {
-    if (!window.confirm('Are you sure you want to approve this leave request?')) {
-      return;
+  const approveLeave = async (leaveId) => {
+    const action = searchParams.get('action');
+    const isAutoAction = action === 'approve';
+    
+    if (!isAutoAction) {
+      if (!window.confirm('Are you sure you want to approve this leave request?')) {
+        return;
+      }
     }
-
+    
     try {
       const token = getToken();
       const response = await fetch(`${API_BASE_URL}/api/leave/supervisor/approve/${leaveId}`, {
@@ -382,62 +821,102 @@ useEffect(() => {
 
       if (!response.ok) {
         const errorData = await response.text();
-        throw new Error(errorData || 'Failed to validate leave');
+        throw new Error(errorData || 'Failed to approve leave');
       }
 
-      const validatedLeave = await response.json();
+      const approvedLeave = await response.json();
       
-      // Update the leave in the state
       setLeaves(leaves.map(leave => 
-        leave.id === validatedLeave.id ? validatedLeave : leave
+        leave.id === approvedLeave.id ? approvedLeave : leave
       ));
       
       alert('Leave approved successfully');
+      
+      setSearchParams({});
+      setHighlightedLeaveId(null);
+      setSelectedLeave(null);
+      setPendingAction(null);
+      
     } catch (err) {
       setError(err.message);
+      alert(err.message);
+    }
+  };
+
+  const rejectLeave = async (leaveId, feedback) => {
+    const action = searchParams.get('action');
+    const isAutoAction = action === 'reject';
+    
+    if (!isAutoAction) {
+      if (!window.confirm('Are you sure you want to reject this leave request?')) {
+        return;
+      }
+    }
+    
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/leave/reject/${leaveId}`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ 
+          role: 'supervisor',
+          feedback: feedback || "Rejected by supervisor"
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(errorData || 'Failed to reject leave');
+      }
+
+      const rejectedLeave = await response.json();
+      
+      setLeaves(leaves.map(leave => 
+        leave.id === rejectedLeave.id ? rejectedLeave : leave
+      ));
+      
+      alert('Leave rejected successfully');
+      
+      setSearchParams({});
+      setHighlightedLeaveId(null);
+      setSelectedLeave(null);
+      setPendingAction(null);
+      
+    } catch (err) {
+      setError(err.message);
+      alert(err.message);
     }
   };
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case 'Approved':
-        return 'bg-green-100 text-green-800';
+        return 'bg-green-100 text-green-800 border border-green-200';
       case 'Rejected':
-        return 'bg-red-100 text-red-800';
+        return 'bg-red-100 text-red-800 border border-red-200';
       case 'Pending':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-yellow-100 text-yellow-800 border border-yellow-200';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-gray-100 text-gray-800 border border-gray-200';
     }
   };
 
-const calculateLeaveDays = (startDate, endDate, leaveType) => {
-    if (!startDate || !endDate) return 0;
-    
-    // For non-deductible leaves, return 0 business days (not counted against balance)
-    if (!isLeaveDeductible(leaveType)) {
-        return 0;
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'Approved':
+        return <CheckBadgeIcon className="w-4 h-4 text-green-600" />;
+      case 'Rejected':
+        return <XCircleIcon className="w-4 h-4 text-red-600" />;
+      case 'Pending':
+        return <ClockIcon className="w-4 h-4 text-yellow-600" />;
+      default:
+        return null;
     }
-    
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    // Calculate business days (weekdays only)
-    let businessDays = 0;
-    const currentDate = new Date(start);
-    
-    while (currentDate <= end) {
-        const dayOfWeek = currentDate.getDay();
-        if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
-            businessDays++;
-        }
-        currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    return businessDays;
-};
+  };
 
-  // Add download function
   const downloadAttachment = async (leaveId) => {
     try {
       const token = getToken();
@@ -464,18 +943,15 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
     }
   };
 
-  // Handle file input change
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
-      // Validate file type
       const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
       if (!validTypes.includes(selectedFile.type)) {
         alert('Please select a PDF, JPG, or PNG file');
         return;
       }
       
-      // Validate file size (5MB max)
       if (selectedFile.size > 5 * 1024 * 1024) {
         alert('File size must be less than 5MB');
         return;
@@ -485,149 +961,337 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
     }
   };
 
-  // Check if leave has attachment (helper function)
   const hasAttachment = (leave) => {
-    return leave.attachmentFileName && leave.attachmentFileContent;
+    return !!leave?.attachmentFileName;
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      weekday: 'short'
+    });
+  };
+
+  const formatDateTime = (dateTimeString) => {
+    if (!dateTimeString) return 'N/A';
+    return new Date(dateTimeString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const filteredLeaves = useMemo(() => {
+    let filtered = [...leaves];
+
+    if (query) {
+      const searchTerm = query.toLowerCase();
+      filtered = filtered.filter(leave => 
+        leave.employee?.firstName?.toLowerCase().includes(searchTerm) ||
+        leave.employee?.lastName?.toLowerCase().includes(searchTerm) ||
+        leave.employee?.employeeId?.toLowerCase().includes(searchTerm) ||
+        leave.leaveType?.toLowerCase().includes(searchTerm) ||
+        leave.reason?.toLowerCase().includes(searchTerm) ||
+        leave.status?.toLowerCase().includes(searchTerm)
+      );
+    }
+
+    if (filters.status !== 'All') {
+      filtered = filtered.filter(leave => leave.status === filters.status);
+    }
+
+    if (filters.leaveType !== 'All') {
+      filtered = filtered.filter(leave => leave.leaveType === filters.leaveType);
+    }
+
+    if (filters.employeeName) {
+      filtered = filtered.filter(leave => {
+        const fullName = `${leave.employee?.firstName} ${leave.employee?.lastName}`.toLowerCase();
+        return fullName.includes(filters.employeeName.toLowerCase());
+      });
+    }
+
+    // Apply category filter
+    if (selectedCategoryFilter) {
+      filtered = filtered.filter(leave => 
+        leave.employee?.category?.name === selectedCategoryFilter
+      );
+    }
+
+    // Date range filtering - based on submittedDate (when request was created)
+    if (filters.dateRange === 'Today') {
+      const today = new Date().toISOString().split('T')[0];
+      filtered = filtered.filter(leave => {
+        if (!leave.submittedDate) return false;
+        const submittedDate = new Date(leave.submittedDate).toISOString().split('T')[0];
+        return submittedDate === today;
+      });
+    } else if (filters.dateRange === 'This Week') {
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+      
+      filtered = filtered.filter(leave => {
+        if (!leave.submittedDate) return false;
+        const submittedDate = new Date(leave.submittedDate);
+        return submittedDate >= startOfWeek && submittedDate <= endOfWeek;
+      });
+    } else if (filters.dateRange === 'This Month') {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      
+      filtered = filtered.filter(leave => {
+        if (!leave.submittedDate) return false;
+        const submittedDate = new Date(leave.submittedDate);
+        return submittedDate >= startOfMonth && submittedDate <= endOfMonth;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      let aVal = a[sortConfig.key];
+      let bVal = b[sortConfig.key];
+
+      if (sortConfig.key === 'startDate' || sortConfig.key === 'endDate' || sortConfig.key === 'submittedDate') {
+        aVal = new Date(aVal);
+        bVal = new Date(bVal);
+      }
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    setSearchResults(filtered);
+    return filtered;
+  }, [leaves, query, filters, selectedCategoryFilter, sortConfig]);
+
+  const requestSort = (key) => {
+    setSortConfig({
+      key,
+      direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc'
+    });
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUpIcon className="w-4 h-4 opacity-30" />;
+    }
+    return sortConfig.direction === 'asc' 
+      ? <ChevronUpIcon className="w-4 h-4" />
+      : <ChevronDownIcon className="w-4 h-4" />;
+  };
+
+  const resetFilters = () => {
+    setFilters({
+      status: 'All',
+      leaveType: 'All',
+      dateRange: 'All',
+      startDate: '',
+      endDate: '',
+      employeeName: ''
+    });
+    setQuery('');
+    setSelectedCategoryFilter('');
+  };
+
+  const getSelectedEmployeeCategory = () => {
+  const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+  return selectedEmployee?.category;
+};
+
+  const getSelectedEmployeeBalance = () => {
+    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+    if (!selectedEmployee) return null;
+    return getEmployeeRemainingLeave(selectedEmployee);
+  };
+
+ const getSelectedEmployeeAnnualDays = () => {
+  const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+  return selectedEmployee?.category?.annualLeaveDays || 20;
+};
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-md z-30">
-        <MainSidebar />
+      <div 
+        className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
+          sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
+        }`}
+      >
+        <MainSidebar isCollapsed={!sidebarOpen} />
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 ml-64">
-        {/* Overlay for create menu */}
+      {sidebarOpen && window.innerWidth < 768 && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div 
+        className={`flex-1 transition-all duration-300 ${
+          sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
+        }`}
+      >
         {isCreateMenuOpen && (
           <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsCreateMenuOpen(false)}></div>
         )}
 
-        {/* Main Content */}
-        <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          {/* Top Bar */}
-          <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            {/* Menu Icon */}
-            <button className="p-1 hover:bg-gray-100 rounded-md">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                strokeWidth="1.5"
-                stroke="currentColor"
-                className="size-6"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              </svg>
-            </button>
+        <Header toggleSidebar={toggleSidebar} user={user} onLogout={handleLogout} />
 
-            {/* Right Icons */}
-            <div className="flex items-center gap-5">
-              {/* Settings Icon */}
-              <div className="relative">
-                <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="size-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.350.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-                    />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                  </svg>
-                </Link>
-              </div>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              {/* Notifications Icon */}
-              <button className="p-1 hover:bg-gray-200 rounded-full relative">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="size-6"
-                  >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0M3.124 7.5A8.969 8.969 0 0 1 5.292 3m13.416 0a8.969 8.969 0 0 1 2.168 4.5"
-                  />
-                </svg>
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">3</span>
-              </button>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              {/* User Profile */}
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                  A
+        <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+          <div className="mb-6">
+            <section className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Leave Management</h1>
+                  <p className="text-gray-500 mt-1">Track and manage employee leave requests</p>
                 </div>
-                <span className="font-medium">Adams</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-          </header>
 
-          {/* Page Header */}
-          <div className="p-0">
-            {/* Header */}
-            <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white rounded-xl shadow-sm p-6">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">Leave Management</h1>
-                <p className="text-gray-600">Track and manage employee leave requests</p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <Search leaves={leaves} onResults={setSearchResults} />
-
-                <button
-                  onClick={() => setIsCreateMenuOpen(true)}
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Request Leave
-                </button>
-              </div>
-            </section>
-
-            {/* Search Results Section */}
-            {searchResults.length > 0 && (
-              <section className="mt-4 bg-white rounded-xl shadow-sm p-4">
-                <h2 className="text-lg font-semibold mb-2">Search Results</h2>
-                <ul className="divide-y divide-gray-200">
-                  {searchResults.map((leave) => (
-                    <li key={leave.id} className="py-2 flex justify-between items-center">
-                      <span>{leave.employee?.firstName} {leave.employee?.lastName} — {leave.leaveType}</span>
-                      <span 
-                        className={`px-2 py-1 rounded-full text-sm font-medium ${getStatusBadgeClass(leave.status)}`}
-                      >
-                        {leave.status}
+                <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                  <button
+                    onClick={() => setShowFilters(!showFilters)}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <FunnelIcon className="w-5 h-5" />
+                    Filters
+                    {(Object.values(filters).some(v => v !== 'All' && v !== '') || selectedCategoryFilter) && (
+                      <span className="ml-1 px-2 py-0.5 bg-blue-100 text-blue-600 rounded-full text-xs">
+                        Active
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setIsCreateMenuOpen(true)}
+                    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg transition-colors shadow-sm"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Request Leave
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 relative">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by employee name, ID, leave type, or reason..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                />
+              </div>
+
+              {showFilters && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <select
+                        value={filters.status}
+                        onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="All">All Statuses</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Leave Type</label>
+                      <select
+                        value={filters.leaveType}
+                        onChange={(e) => setFilters({ ...filters, leaveType: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        {leaveTypes.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
+                      <select
+                        value={filters.dateRange}
+                        onChange={(e) => setFilters({ ...filters, dateRange: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="All">All Time</option>
+                        <option value="Today">Created Today</option>
+                        <option value="This Week">Created This Week</option>
+                        <option value="This Month">Created This Month</option>
+                      </select>
+                      <p className="text-xs text-gray-400 mt-1">Based on submission date</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                      <select
+                        value={selectedCategoryFilter}
+                        onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">All Categories</option>
+                        {getUniqueCategoriesFromLeaves().map(category => (
+                          <option key={category} value={category}>{category}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                      <input
+                        type="date"
+                        value={filters.startDate}
+                        onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="From"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                      <input
+                        type="date"
+                        value={filters.endDate}
+                        onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="To"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end mt-4">
+                    <button
+                      onClick={resetFilters}
+                      className="flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <ArrowPathIcon className="w-4 h-4" />
+                      Reset All Filters
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex items-center justify-start mt-6 mb-4 rounded-lg shadow-sm overflow-hidden w-max border border-gray-200">
+          <div className="flex items-center justify-start mb-6 rounded-xl overflow-hidden w-max border border-gray-200 bg-white shadow-sm">
             <Link to="/attendance" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
+              <div className={`h-12 flex items-center justify-center transition-all duration-200 ${
                 location.pathname === "/attendance" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
               }`}>
                 <span className="font-medium">Attendance</span>
@@ -635,7 +1299,7 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
             </Link>
 
             <Link to="/overtime" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
+              <div className={`h-12 flex items-center justify-center transition-all duration-200 ${
                 location.pathname === "/overtime" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
               }`}>
                 <span className="font-medium">Overtime</span>
@@ -643,7 +1307,7 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
             </Link>
 
             <Link to="/leave" className="w-[180px]">
-              <div className={`h-12 flex items-center justify-center transition-colors duration-200 ${
+              <div className={`h-12 flex items-center justify-center transition-all duration-200 ${
                 location.pathname === "/leave" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-50 text-gray-700"
               }`}>
                 <span className="font-medium">Leave</span>
@@ -651,395 +1315,632 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
             </Link>
           </div>
 
-          {/* Leave Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Leave Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supervisor</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planner</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">HR</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Attachment</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Overall Status</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {leaves.map((leave) => (
-                    <tr key={leave.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                            <span className="text-gray-700 font-medium">
-                              {leave?.employee?.firstName?.charAt(0)}{leave?.employee?.lastName?.charAt(0)}
-                            </span>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {leave?.employee 
-                                ? `${leave.employee.firstName} ${leave.employee.lastName}`
-                                : "Loading..."}
-                            </div>
-                            <div className="text-sm text-gray-500">{leave?.employee?.employeeId || 'N/A'}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {leave.leaveType}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(leave.startDate).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(leave.endDate).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      </td>
-<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-    {calculateLeaveDays(leave.startDate, leave.endDate, leave.leaveType)} days
-    {!isLeaveDeductible(leave.leaveType) && (
-        <span className="text-xs text-green-600 ml-1">(Non-deductible)</span>
-    )}
-</td>
-                      <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
-                        {leave.reason}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
-                          {leave.supervisorStatus || "Pending"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
-                          {leave.plannerStatus || "Pending"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
-                          {leave.hrStatus || "Pending"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {leave.leaveType === 'Sick' && (
-                          <div className="flex items-center space-x-1">
-                            {hasAttachment(leave) ? (
-                              <>
-                                <PaperClipIcon className="h-4 w-4 text-green-600" />
-                                <span className="text-xs text-green-600">Available</span>
-                              </>
-                            ) : (
-                              <>
-                                <PaperClipIcon className="h-4 w-4 text-gray-400" />
-                                <span className="text-xs text-gray-500">None</span>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
-                          {leave.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex gap-2 justify-end">
-                          {leave.status === "Pending" && (
-                            <button
-                              onClick={() => validateLeave(leave.id)}
-                              className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm"
-                            >
-                              Approve
-                            </button>
-                          )}
-
-                          {leave.status === "Rejected" && (
-                            <button
-                              onClick={() => {
-                                const feedback = leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
-                                setSelectedReason(feedback || "No feedback provided.");
-                                setIsReasonModalOpen(true);
-                              }}
-                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm"
-                            >
-                              View Reason
-                            </button>
-                          )}
-
-                          {leave.leaveType === 'Sick' && hasAttachment(leave) && (
-                            <button
-                              onClick={() => downloadAttachment(leave.id)}
-                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm"
-                            >
-                              Download
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => setSelectedLeave(leave)}
-                            className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded-md text-sm"
-                          >
-                            View Details
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {leaves.length === 0 && !loading && (
-              <div className="text-center py-12">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No leave requests</h3>
-                <p className="mt-1 text-sm text-gray-500">Get started by creating a new leave request.</p>
-                <div className="mt-6">
-                  <button
-                    onClick={() => setIsCreateMenuOpen(true)}
-                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    New Leave Request
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {loading && (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-4 text-sm text-gray-500">Loading leave requests...</p>
-              </div>
-            )}
+          <div className="flex items-center justify-start mb-6 rounded-xl overflow-hidden w-max border border-gray-200 bg-white shadow-sm">
+            <button
+              onClick={() => setViewMode('requests')}
+              className={`w-[180px] h-12 flex items-center justify-center transition-all duration-200 ${
+                viewMode === 'requests' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700'
+              }`}
+            >
+              <CalendarDaysIcon className="w-5 h-5 mr-2" />
+              <span className="font-medium">Leave Requests</span>
+            </button>
+            <button
+              onClick={() => setViewMode('balances')}
+              className={`w-[180px] h-12 flex items-center justify-center transition-all duration-200 ${
+                viewMode === 'balances' ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700'
+              }`}
+            >
+              <UserGroupIcon className="w-5 h-5 mr-2" />
+              <span className="font-medium">Employee Balances</span>
+            </button>
           </div>
 
-          {/* Create Leave Modal */}
-          {isCreateMenuOpen && (
-            <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 z-50 w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-800">Request Leave</h1>
-                <button 
-                  onClick={() => setIsCreateMenuOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+          {viewMode === 'requests' ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              {filteredLeaves.length > 0 && (
+                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                  <p className="text-sm text-gray-600">
+                    Showing <span className="font-medium text-gray-900">{filteredLeaves.length}</span> of <span className="font-medium text-gray-900">{leaves.length}</span> leave requests
+                  </p>
+                  {selectedLeaves.size > 0 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleBulkApprove}
+                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors"
+                      >
+                        Approve ({selectedLeaves.size})
+                      </button>
+                      <button
+                        onClick={handleBulkReject}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors"
+                      >
+                        Reject ({selectedLeaves.size})
+                      </button>
+                      <button
+                        onClick={handleBulkDelete}
+                        className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm transition-colors"
+                      >
+                        Delete ({selectedLeaves.size})
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeaves.size === filteredLeaves.length && filteredLeaves.length > 0}
+                          onChange={handleSelectAll}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <button onClick={() => requestSort('employee')} className="flex items-center gap-1 hover:text-gray-900">
+                          Employee <SortIcon columnKey="employee" />
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <button onClick={() => requestSort('leaveType')} className="flex items-center gap-1 hover:text-gray-900">
+                          Leave Type <SortIcon columnKey="leaveType" />
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <button onClick={() => requestSort('startDate')} className="flex items-center gap-1 hover:text-gray-900">
+                          Start Date <SortIcon columnKey="startDate" />
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <button onClick={() => requestSort('endDate')} className="flex items-center gap-1 hover:text-gray-900">
+                          End Date <SortIcon columnKey="endDate" />
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <button onClick={() => requestSort('submittedDate')} className="flex items-center gap-1 hover:text-gray-900">
+                          Submitted <SortIcon columnKey="submittedDate" />
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Duration</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Reason</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Category</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Annual Leave</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Remaining</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Weekend Policy</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Supervisor</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Planner</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">HR</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Attachment</th>
+                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredLeaves.length > 0 ? (
+                      filteredLeaves.map((leave) => {
+                        const remainingBalance = getEmployeeRemainingLeave(leave.employee);
+                        const annualDays = leave.employee?.category?.annualLeaveDays || 20;
+                        return (
+                          <tr 
+                            key={leave.id} 
+                            className={`hover:bg-gray-50 transition-colors ${
+                              highlightedLeaveId === leave.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                            }`}
+                          >
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <input
+                                type="checkbox"
+                                checked={selectedLeaves.has(leave.id)}
+                                onChange={() => handleSelectLeave(leave.id)}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center shadow-sm">
+                                  <span className="text-blue-700 font-medium">
+                                    {leave?.employee?.firstName?.charAt(0)}{leave?.employee?.lastName?.charAt(0)}
+                                  </span>
+                                </div>
+                                <div className="ml-3">
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {leave?.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : "N/A"}
+                                  </div>
+                                  <div className="text-xs text-gray-500">{leave?.employee?.employeeId || 'N/A'}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="text-sm font-medium text-gray-900">{leave.leaveType}</span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              {formatDate(leave.startDate)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              {formatDate(leave.endDate)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              {formatDateTime(leave.submittedDate)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900">
+                                {calculateLeaveDays(leave.startDate, leave.endDate, leave.leaveType, leave.employee?.category)} days
+                              </div>
+                              {!isLeaveDeductible(leave.leaveType) && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                  Non-deductible
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="text-sm text-gray-600 max-w-xs truncate" title={leave.reason}>
+                                {leave.reason}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="text-sm text-gray-600">
+                                {leave.employee?.category?.name || 'General'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="text-sm font-medium text-gray-900">{annualDays} days</span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`text-sm font-medium ${remainingBalance < 5 ? 'text-red-600' : 'text-green-600'}`}>
+                                {remainingBalance} days
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {leave.employee?.category?.excludeWeekendsFromLeave !== false ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                  Weekends Excluded
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  Weekends Included
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
+                                {getStatusIcon(leave.supervisorStatus)}
+                                {leave.supervisorStatus || "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
+                                {getStatusIcon(leave.plannerStatus)}
+                                {leave.plannerStatus || "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
+                                {getStatusIcon(leave.hrStatus)}
+                                {leave.hrStatus || "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              {leave.leaveType === 'Sick' && (
+                                <div className="flex items-center justify-center">
+                                  {hasAttachment(leave) ? (
+                                    <div className="flex items-center gap-1">
+                                      <PaperClipIcon className="h-4 w-4 text-green-600" />
+                                      <span className="text-xs text-green-600 font-medium">Available</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">None</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                              <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
+                                {getStatusIcon(leave.status)}
+                                {leave.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                              <div className="flex gap-2 justify-end">
+                                {leave.status === "Pending" && (
+                                  <>
+                                    <button
+                                      onClick={() => approveLeave(leave.id)}
+                                      className="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                    >
+                                      <CheckBadgeIcon className="w-4 h-4 mr-1" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => deleteLeave(leave.id)}
+                                      className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                    >
+                                      <TrashIcon className="w-4 h-4 mr-1" />
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
+
+                                {leave.status === "Rejected" && (
+                                  <button
+                                    onClick={() => {
+                                      const feedback = leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
+                                      setSelectedReason(feedback || "No feedback provided.");
+                                      setIsReasonModalOpen(true);
+                                    }}
+                                    className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                  >
+                                    <EyeIcon className="w-4 h-4 mr-1" />
+                                    Reason
+                                  </button>
+                                )}
+
+                                {leave.leaveType === 'Sick' && hasAttachment(leave) && (
+                                  <button
+                                    onClick={() => downloadAttachment(leave.id)}
+                                    className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                  >
+                                    <ArrowDownTrayIcon className="w-4 h-4 mr-1" />
+                                    Download
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => setSelectedLeave(leave)}
+                                  className="inline-flex items-center px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                >
+                                  <DocumentIcon className="w-4 h-4 mr-1" />
+                                  Details
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan="18" className="px-6 py-12 text-center">
+                          <div className="flex flex-col items-center justify-center">
+                            <CalendarDaysIcon className="w-12 h-12 text-gray-300 mb-3" />
+                            <h3 className="text-lg font-medium text-gray-900 mb-1">No leave requests found</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                              {query || Object.values(filters).some(v => v !== 'All' && v !== '') || selectedCategoryFilter
+                                ? 'Try adjusting your search or filters' 
+                                : 'Get started by creating a new leave request'}
+                            </p>
+                            {!query && Object.values(filters).every(v => v === 'All' || v === '') && !selectedCategoryFilter && (
+                              <button
+                                onClick={() => setIsCreateMenuOpen(true)}
+                                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                New Leave Request
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
 
-              <div className="space-y-6">
-                {/* Employee Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Employee *</label>
-                  <select
-                    name="employeeId"
-                    value={newLeave.employee.id}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  >
-                    <option value="">Select Employee</option>
-                    {employees.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'})
-                      </option>
-                    ))}
-                  </select>
+              {loading && (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto"></div>
+                  <p className="mt-4 text-sm text-gray-500">Loading leave requests...</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <AdminLeaveBalanceView
+              apiBaseUrl={API_BASE_URL} 
+              getToken={getToken} 
+            />
+          )}
+
+          {isCreateMenuOpen && (
+            <div className="fixed inset-0 flex items-center justify-center z-50">
+              <div className="absolute inset-0 bg-black/60" onClick={() => setIsCreateMenuOpen(false)}></div>
+              <div className="relative bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900">Request Leave</h2>
+                  <button onClick={() => setIsCreateMenuOpen(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                    <XMarkIcon className="w-6 h-6 text-gray-500" />
+                  </button>
                 </div>
 
-                {/* Leave Type and Dates */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Leave Type *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Employee *</label>
                     <select
-                      name="leaveType"
-                      value={newLeave.leaveType}
+                      name="employeeId"
+                      value={newLeave.employee.id}
                       onChange={handleInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
                       required
                     >
-                      <option value="">Select Leave Type</option>
-                      <option value="Annual">Annual</option>
-                      <option value="Sick">Sick</option>
-                      <option value="Maternity">Maternity</option>
-                      <option value="Paternity">Paternity</option>
-                      <option value="Bereavement">Bereavement</option>
-                      <option value="Other">Other</option>
+                      <option value="">Select Employee</option>
+                      {employees.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'}) - {employee.category?.name || 'No Category'} - {getEmployeeRemainingLeave(employee)} days remaining
+                        </option>
+                      ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
-                    <div className="text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
-                      {newLeave.startDate && newLeave.endDate 
-                        ? `${calculateLeaveDays(newLeave.startDate, newLeave.endDate)} business days`
-                        : 'Select dates to calculate duration'}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Leave Type *</label>
+                      <select
+                        name="leaveType"
+                        value={newLeave.leaveType}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                        required
+                      >
+                        <option value="">Select Leave Type</option>
+                        <option value="Annual">Annual Leave</option>
+                        <option value="Sick">Sick Leave</option>
+                        <option value="Maternity">Maternity Leave</option>
+                        <option value="Paternity">Paternity Leave</option>
+                        <option value="Bereavement">Bereavement Leave</option>
+                        <option value="Study">Study Leave</option>
+                        <option value="Other">Other Leave</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Leave Balance Info</label>
+                      <div className="px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg">
+                        {newLeave.employee.id ? (
+                          <div className="text-sm text-gray-600">
+                            <div>Category: <span className="font-medium">{getSelectedEmployeeCategory()?.name || 'Not selected'}</span></div>
+                            <div>Annual Days: <span className="font-medium">{getSelectedEmployeeAnnualDays()} days</span></div>
+                            <div>Remaining: <span className={`font-medium ${getSelectedEmployeeBalance() < 5 ? 'text-red-600' : 'text-green-600'}`}>{getSelectedEmployeeBalance() || 0} days</span></div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-400 text-center py-2">
+                            Select an employee to view balance info
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
-                    <input
-                      type="date"
-                      name="startDate"
-                      value={newLeave.startDate}
-                      onChange={handleStartDateChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      required
-                      min={new Date().toISOString().split('T')[0]}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Only weekdays (Monday-Friday) allowed</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Start Date *</label>
+                      <input
+                        type="date"
+                        name="startDate"
+                        value={newLeave.startDate}
+                        onChange={handleStartDateChange}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Only weekdays (Mon-Fri) allowed</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Duration Preview</label>
+                      <div className="px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-600">
+                        {newLeave.employee.id && newLeave.startDate && newLeave.endDate ? (
+                          (() => {
+                            const employeeCategory = getSelectedEmployeeCategory();
+                            const days = calculateLeaveDays(newLeave.startDate, newLeave.endDate, newLeave.leaveType, employeeCategory);
+                            const isExcluding = employeeCategory?.excludeWeekendsFromLeave !== false;
+                            return `${days} ${isExcluding ? 'business' : 'total'} days`;
+                          })()
+                        ) : (
+                          <span className="text-gray-400">Select employee and dates to calculate duration</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                // In the create leave modal form, update the end date field:
-{!['Maternity', 'Paternity'].includes(newLeave.leaveType) ? (
-    <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
-        <input
-            type="date"
-            name="endDate"
-            value={newLeave.endDate}
-            onChange={handleEndDateChange}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            required
-            min={newLeave.startDate || new Date().toISOString().split('T')[0]}
-        />
-        <p className="text-xs text-gray-500 mt-1">Only weekdays (Monday-Friday) allowed</p>
-    </div>
-) : (
-    <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-            End Date (Auto-calculated)
-        </label>
-        <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500">
-            {newLeave.leaveType === 'Maternity' 
-                ? `Auto: ${leaveSettings.maternityLeaveMonths} months from start date`
-                : `Auto: ${leaveSettings.paternityLeaveMonths} month from start date`
-            }
-        </div>
-        <p className="text-xs text-gray-500 mt-1">
-            {newLeave.leaveType} leave duration is automatically calculated
-        </p>
-    </div>
-)}
-                </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {!['Maternity', 'Paternity'].includes(newLeave.leaveType) ? (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">End Date *</label>
+                        <input
+                          type="date"
+                          name="endDate"
+                          value={newLeave.endDate}
+                          onChange={handleEndDateChange}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                          required
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Only weekdays (Mon-Fri) allowed</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          End Date (Auto-calculated)
+                        </label>
+                        <div className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-600">
+                          {newLeave.leaveType === 'Maternity' 
+                            ? `${leaveSettings.maternityLeaveMonths} months from start date`
+                            : `${leaveSettings.paternityLeaveMonths} month from start date`
+                          }
+                        </div>
+                      </div>
+                    )}
 
-                {/* File Upload for Sick Leave */}
-                {newLeave.leaveType === 'Sick' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Medical Certificate
-                    </label>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={handleFileChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      PDF, JPG, or PNG files up to 5MB
-                    </p>
-                    {file && (
-                      <p className="text-sm text-green-600 mt-1">
-                        Selected: {file.name}
-                      </p>
+                    {/* Weekend Policy Section - Only shows when employee is selected */}
+                    {newLeave.employee.id && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <label className="block text-sm font-medium text-gray-700">
+                            Weekend Policy
+                          </label>
+                          <div className="group relative">
+                            <button
+                              type="button"
+                              className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                              onClick={() => {
+                                const policy = getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                  ? "Weekends (Saturday and Sunday) are NOT counted as leave days. Only Monday to Friday are considered."
+                                  : "Weekends (Saturday and Sunday) ARE counted as leave days. All calendar days are considered.";
+                                alert(`ℹ️ Weekend Policy Info:\n\n${policy}`);
+                              }}
+                            >
+                              <InformationCircleIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div className={`px-4 py-3 rounded-lg border ${
+                          getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                            ? 'bg-blue-50 border-blue-200' 
+                            : 'bg-yellow-50 border-yellow-200'
+                        }`}>
+                          <div className="flex items-start gap-3">
+                            <div className="flex-shrink-0 mt-0.5">
+                              {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className={`font-medium ${
+                                getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? 'text-blue-800' : 'text-yellow-800'
+                              }`}>
+                                {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                  ? 'Weekends Excluded' 
+                                  : 'Weekends Included'}
+                              </div>
+                              <div className={`text-sm mt-1 ${
+                                getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? 'text-blue-600' : 'text-yellow-600'
+                              }`}>
+                                {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                  ? 'Only business days (Monday to Friday) will be counted towards your leave balance.' 
+                                  : 'All calendar days including weekends will be counted towards your leave balance.'}
+                              </div>
+                              
+                              {/* Show example calculation if dates are selected */}
+                              {newLeave.startDate && newLeave.endDate && (
+                                <div className="mt-2 pt-2 border-t border-gray-200">
+                                  <div className="text-xs text-gray-500">
+                                    📅 Based on your selected dates:
+                                    <span className="block font-medium text-gray-700 mt-1">
+                                      {(() => {
+                                        const employeeCategory = getSelectedEmployeeCategory();
+                                        const days = calculateLeaveDays(newLeave.startDate, newLeave.endDate, newLeave.leaveType, employeeCategory);
+                                        const isExcluding = employeeCategory?.excludeWeekendsFromLeave !== false;
+                                        return `${days} ${isExcluding ? 'business days' : 'total days'} will be deducted from your leave balance.`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
-                )}
 
-                {/* Reason */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
-                  <textarea
-                    name="reason"
-                    value={newLeave.reason}
-                    onChange={handleInputChange}
-                    rows={4}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter reason for leave"
-                    required
-                  />
-                </div>
+                  {newLeave.leaveType === 'Sick' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Medical Certificate
+                      </label>
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                        <input
+                          type="file"
+                          id="file-upload"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                        <label htmlFor="file-upload" className="flex flex-col items-center justify-center cursor-pointer">
+                          <PhotoIcon className="w-12 h-12 text-gray-400 mb-2" />
+                          <span className="text-sm font-medium text-blue-600 hover:text-blue-700">Click to upload</span>
+                          <span className="text-xs text-gray-500 mt-1">PDF, JPG, or PNG up to 5MB</span>
+                        </label>
+                        {file && (
+                          <div className="mt-3 flex items-center justify-between p-2 bg-green-50 rounded-lg">
+                            <span className="text-sm text-green-700 truncate">{file.name}</span>
+                            <button onClick={() => setFile(null)} className="text-red-500 hover:text-red-700">
+                              <XMarkIcon className="w-5 h-5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
-                {/* Form Actions */}
-                <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
-                  <button
-                    onClick={() => {
-                      setNewLeave({
-                        employee: { id: '' },
-                        leaveType: '',
-                        startDate: '',
-                        endDate: '',
-                        reason: '',
-                        status: 'Pending'
-                      });
-                      setFile(null);
-                    }}
-                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={createLeave}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                  >
-                    Submit Request
-                  </button>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Reason *</label>
+                    <textarea
+                      name="reason"
+                      value={newLeave.reason}
+                      onChange={handleInputChange}
+                      rows={4}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow resize-none"
+                      placeholder="Please provide a detailed reason for your leave request..."
+                      required
+                    />
+                  </div>
+
+                  <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+                    <button
+                      onClick={() => {
+                        setNewLeave({
+                          employee: { id: '' },
+                          leaveType: '',
+                          startDate: '',
+                          endDate: '',
+                          reason: '',
+                          status: 'Pending'
+                        });
+                        setFile(null);
+                      }}
+                      className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={createLeave}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium shadow-sm"
+                    >
+                      Submit Request
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Rejection Reason Modal */}
           {isReasonModalOpen && (
-            <div className="fixed inset-0 flex items-center justify-center bg-black/50 z-50">
-              <div className="bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
+            <div className="fixed inset-0 flex items-center justify-center z-50">
+              <div className="absolute inset-0 bg-black/60" onClick={() => setIsReasonModalOpen(false)}></div>
+              <div className="relative bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-gray-800">Rejection Reason</h2>
-                  <button
-                    onClick={() => setIsReasonModalOpen(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-6 w-6"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                  <h3 className="text-xl font-bold text-gray-900">Rejection Reason</h3>
+                  <button onClick={() => setIsReasonModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                    <XMarkIcon className="w-5 h-5 text-gray-500" />
                   </button>
                 </div>
 
-                <p className="text-gray-700 whitespace-pre-line">{selectedReason}</p>
+                <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                  <p className="text-gray-700 whitespace-pre-line">{selectedReason}</p>
+                </div>
 
                 <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={() => setIsReasonModalOpen(false)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
+                  <button onClick={() => setIsReasonModalOpen(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors">
                     Close
                   </button>
                 </div>
@@ -1047,11 +1948,14 @@ const calculateLeaveDays = (startDate, endDate, leaveType) => {
             </div>
           )}
 
-          {/* Leave Details Modal */}
           {selectedLeave && (
             <LeaveDetailsModal 
-              leave={selectedLeave} 
-              onClose={() => setSelectedLeave(null)} 
+              leave={selectedLeave}
+              apiBaseUrl={API_BASE_URL}
+              onClose={handleModalClose}
+              onApprove={approveLeave}
+              onReject={rejectLeave}
+              autoAction={pendingAction}
             />
           )}
         </main>

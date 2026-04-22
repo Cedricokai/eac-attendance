@@ -7,6 +7,10 @@ const Maintenance = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
+  const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [inputError, setInputError] = useState('');
+  
   const [formData, setFormData] = useState({
     vehicles: '',
     maintenanceType: '',
@@ -39,14 +43,14 @@ const Maintenance = () => {
   const [customMaintenanceType, setCustomMaintenanceType] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
 
- const getApiBaseUrl = () => {
+  // Replace the getApiBaseUrl function in Maintenance.jsx with this:
+
+const getApiBaseUrl = () => {
   const hostname = window.location.hostname;
-  const port = window.location.port;
-
+  
   console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
 
-  // If frontend is opened via localhost → use localhost backend
+  // Local development
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     console.log("🏠 Using LOCALHOST API URL");
     return "http://localhost:8080";
@@ -55,18 +59,18 @@ const Maintenance = () => {
   // LAN access
   if (hostname.startsWith("192.168.")) {
     console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    return import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8080";
   }
 
-  // Public / Tailscale / Cloudflare IP
+  // Public IP
   if (hostname === "100.114.178.13") {
     console.log("🌐 Using PUBLIC API URL");
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
   }
 
   // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  console.log("🌍 Using default API URL");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
 };
 
   const API_BASE_URL = getApiBaseUrl();
@@ -78,18 +82,25 @@ const Maintenance = () => {
 
   // Fetch configuration with token
   const getFetchConfig = (method = 'GET', body = null) => {
+    const token = getAuthToken();
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const config = {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`
-      }
+      headers,
+      credentials: 'include'
     };
-    
+
     if (body) {
       config.body = JSON.stringify(body);
     }
-    
+
     return config;
   };
 
@@ -101,7 +112,16 @@ const Maintenance = () => {
   const loadMaintenanceData = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE_URL}`, getFetchConfig());
+      setError(null);
+      
+      const token = getAuthToken();
+      if (!token) {
+        setError('No authentication token found. Please login again.');
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/maintenance`, getFetchConfig());
       
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
@@ -114,11 +134,11 @@ const Maintenance = () => {
         const data = await response.json();
         setMaintenanceRecords(data);
       } else {
-        console.error('Failed to fetch maintenance data');
-        setMaintenanceRecords([]);
+        throw new Error(`Failed to fetch maintenance data: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
       console.error('Error fetching maintenance data:', error);
+      setError(error.message);
       setMaintenanceRecords([]);
     } finally {
       setIsLoading(false);
@@ -127,7 +147,14 @@ const Maintenance = () => {
 
   const loadVehicles = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}`, getFetchConfig());
+      const token = getAuthToken();
+      if (!token) {
+        console.warn('No authentication token found');
+        setVehicles([]);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/vehicles`, getFetchConfig());
       
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
@@ -166,8 +193,14 @@ const Maintenance = () => {
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this maintenance record?')) {
       try {
-        const response = await fetch(`${`${API_BASE_URL}`}/${id}`, 
-          getFetchConfig('DELETE'));
+        const token = getAuthToken();
+        const response = await fetch(`${API_BASE_URL}/api/maintenance/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
         if (response.status === 401 || response.status === 403) {
           localStorage.removeItem('jwtToken');
@@ -178,8 +211,11 @@ const Maintenance = () => {
 
         if (response.ok) {
           setMaintenanceRecords(maintenanceRecords.filter(record => record.id !== id));
+          setSuccessMessage('Maintenance record deleted successfully!');
+          setTimeout(() => setSuccessMessage(''), 3000);
         } else {
-          alert('Failed to delete maintenance record');
+          const errorText = await response.text();
+          alert(`Failed to delete maintenance record: ${errorText}`);
         }
       } catch (error) {
         console.error('Error deleting maintenance record:', error);
@@ -193,6 +229,7 @@ const Maintenance = () => {
       ...formData,
       [e.target.name]: e.target.value
     });
+    setInputError('');
   };
 
   const handleMaintenanceTypeChange = (e) => {
@@ -241,9 +278,29 @@ const Maintenance = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setInputError('');
     
+    // Validate required fields
+    if (!formData.vehicles || !formData.maintenanceType || !formData.date || !formData.cost || !formData.vendor) {
+      setInputError('Please fill out all required fields.');
+      return;
+    }
+
+    // Validate numeric fields
+    if (parseFloat(formData.cost) <= 0) {
+      setInputError('Please enter a valid positive cost.');
+      return;
+    }
+
     try {
-      let response;
+      const token = getAuthToken();
+      if (!token) {
+        setInputError('No authentication token found. Please login again.');
+        return;
+      }
+
+      let url = `${API_BASE_URL}/api/maintenance`;
+      let method = 'POST';
       const payload = {
         ...formData,
         cost: parseFloat(formData.cost),
@@ -252,12 +309,11 @@ const Maintenance = () => {
       };
 
       if (editingRecord) {
-        response = await fetch(`${`${API_BASE_URL}`}/${editingRecord.id}`, 
-          getFetchConfig('PUT', payload));
-      } else {
-        response = await fetch(`${API_BASE_URL}`, 
-          getFetchConfig('POST', payload));
+        url = `${API_BASE_URL}/api/maintenance/${editingRecord.id}`;
+        method = 'PUT';
       }
+
+      const response = await fetch(url, getFetchConfig(method, payload));
 
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
@@ -273,12 +329,14 @@ const Maintenance = () => {
         setEditingRecord(null);
         setShowCustomInput(false);
         setCustomMaintenanceType('');
+        setSuccessMessage(`Maintenance record ${editingRecord ? 'updated' : 'added'} successfully!`);
+        setTimeout(() => setSuccessMessage(''), 3000);
       } else {
         const errorText = await response.text();
-        alert(`Failed to ${editingRecord ? 'update' : 'create'} maintenance record: ${errorText}`);
+        setInputError(`Failed to ${editingRecord ? 'update' : 'create'} maintenance record: ${errorText}`);
       }
     } catch (error) {
-      alert(`Error ${editingRecord ? 'updating' : 'creating'} maintenance record`);
+      setInputError(`Error ${editingRecord ? 'updating' : 'creating'} maintenance record: ${error.message}`);
     }
   };
 
@@ -287,10 +345,10 @@ const Maintenance = () => {
     setFormData({
       vehicles: record.vehicles || '',
       maintenanceType: record.maintenanceType || '',
-      date: record.date || '',
+      date: record.date ? record.date.split('T')[0] : '',
       cost: record.cost ? record.cost.toString() : '',
       status: record.status || 'Scheduled',
-      nextDue: record.nextDue || '',
+      nextDue: record.nextDue ? record.nextDue.split('T')[0] : '',
       vendor: record.vendor || '',
       description: record.description || ''
     });
@@ -301,6 +359,7 @@ const Maintenance = () => {
     }
     
     setShowForm(true);
+    setInputError('');
   };
 
   const resetForm = () => {
@@ -316,6 +375,7 @@ const Maintenance = () => {
     });
     setShowCustomInput(false);
     setCustomMaintenanceType('');
+    setInputError('');
   };
 
   const cancelEdit = () => {
@@ -379,6 +439,33 @@ const Maintenance = () => {
     );
   }
 
+  if (error && !isLoading) {
+    return (
+      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <Sidebar />
+        <div className="flex-1 p-6 flex flex-col items-center justify-center">
+          <div className="max-w-md p-6 bg-red-50 border border-red-400 text-red-700 rounded-lg shadow-lg">
+            <h2 className="text-lg font-semibold mb-2">Error Loading Maintenance Data</h2>
+            <p className="mb-4">{error}</p>
+            <div className="flex space-x-4">
+              <button 
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Retry
+              </button>
+              <button 
+                onClick={() => window.location.href = '/login'}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+              >
+                Go to Login
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar />

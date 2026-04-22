@@ -38,20 +38,12 @@ const InventoryRequest = () => {
 
   const [manualLocation, setManualLocation] = useState("");
   const [requestLocation, setRequestLocation] = useState("");
+  const [jobsList, setJobsList] = useState([]);
 
-  const jobList = [
-    { id: "general", name: "General Maintenance" },
-    { id: "electrical", name: "Electrical Repair" },
-    { id: "plumbing", name: "Plumbing Work" },
-    { id: "hvac", name: "HVAC Maintenance" },
-    { id: "construction", name: "Construction Project" },
-    { id: "safety", name: "Safety Inspection" },
-    { id: "renovation", name: "Renovation Work" },
-    { id: "emergency", name: "Emergency Repair" },
-    { id: "preventive", name: "Preventive Maintenance" },
-    { id: "project-a", name: "Project Alpha - Phase 2" },
-    { id: "project-b", name: "Project Beta - Installation" }
-  ];
+  const [manualProductName, setManualProductName] = useState("");
+  const [manualProductQuantity, setManualProductQuantity] = useState("");
+  const [manualProducts, setManualProducts] = useState([]);
+  const [showManualProductInput, setShowManualProductInput] = useState(false);
 
   const locationOptions = [
     { value: 'AHAFO_NORTH', label: 'AHAFO NORTH' },
@@ -67,34 +59,30 @@ const InventoryRequest = () => {
   const [ppeItemsList, setPpeItemsList] = useState([]);
 
   const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
+    const hostname = window.location.hostname;
+    const port = window.location.port;
 
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
+    console.log("🖥️ Current hostname:", hostname);
+    console.log("🔌 Current port:", port);
 
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      console.log("🏠 Using LOCALHOST API URL");
+      return "http://localhost:8080";
+    }
 
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
+    if (hostname.startsWith("192.168.")) {
+      console.log("🏠 Using LAN API URL");
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
 
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
+    if (hostname === "100.114.178.13") {
+      console.log("🌐 Using PUBLIC API URL");
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    console.log("🌍 Using PUBLIC API URL (fallback)");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
+  };
 
   const API_BASE_URL = getApiBaseUrl();
 
@@ -162,6 +150,7 @@ const InventoryRequest = () => {
         setLoading(true);
         
         await fetchUserDetails();
+        await fetchJobs();
         
         const token = localStorage.getItem('jwtToken');
         if (!token) {
@@ -184,7 +173,12 @@ const InventoryRequest = () => {
         }
 
         const productsData = await productsResponse.json();
-        setProducts(productsData);
+
+        // FIXED: Filter out both PPE items AND kitchen store items
+        const nonPpeProducts = productsData.filter(product => 
+          !product.ppe && !product.kitchenStore
+        );
+        setProducts(nonPpeProducts);
 
         const ppeItemsFromProducts = productsData
           .filter(product => product.ppe === true)
@@ -192,7 +186,6 @@ const InventoryRequest = () => {
             id: product.id,
             name: product.name,
             ppeType: product.productType || "Safety Equipment",
-            stock: product.stock,
             code: product.code
           }));
         
@@ -207,6 +200,45 @@ const InventoryRequest = () => {
    
     fetchData();
   }, []);
+
+  const fetchJobs = async () => {
+    try {
+      const token = localStorage.getItem('jwtToken');
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/jobs`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Access denied: You don't have permission to view jobs");
+        }
+        throw new Error(`Network response was not ok: ${response.status}`);
+      }
+
+      const jobsData = await response.json();
+      
+      const formattedJobs = jobsData.map(job => ({
+        id: job.id,
+        name: job.name,
+        client: job.client,
+        description: job.description
+      }));
+      
+      setJobsList(formattedJobs);
+
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+      setJobsList([]);
+    }
+  };
 
   const getFinalLocation = () => {
     if (requestLocation === 'other' && manualLocation.trim()) {
@@ -223,6 +255,9 @@ const InventoryRequest = () => {
     if (!searchTerm && searchCategory === "all") return products;
     
     return products.filter(product => {
+      // Already filtered in fetchData, but double-check
+      if (product.ppe || product.kitchenStore) return false;
+      
       const matchesSearch = searchTerm 
         ? product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           product.code?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -238,6 +273,7 @@ const InventoryRequest = () => {
 
   const categories = useMemo(() => {
     const cats = products
+      .filter(p => !p.ppe && !p.kitchenStore)
       .map(p => p.productType)
       .filter((cat, index, self) => cat && self.indexOf(cat) === index);
     return ["all", ...cats];
@@ -246,7 +282,7 @@ const InventoryRequest = () => {
   const handleProductSelection = (productId) => {
     setSelectedProducts(prev => {
       const product = products.find(p => p.id === productId);
-      if (!product) return prev;
+      if (!product || product.ppe || product.kitchenStore) return prev;
       
       const exists = prev.find(p => p.id === productId);
       if (exists) {
@@ -256,9 +292,10 @@ const InventoryRequest = () => {
           id: productId,
           name: product.name,
           code: product.code,
-          stock: product.stock,
           productType: product.productType,
-          quantity: 1
+          quantity: 1,
+          isManual: false,
+          isInventory: true
         }];
       }
     });
@@ -280,6 +317,48 @@ const InventoryRequest = () => {
     setSelectedProducts(prev => prev.filter(p => p.id !== productId));
   };
 
+  const handleAddManualProduct = () => {
+    if (!manualProductName.trim()) {
+      setMessage("❌ Please enter a product name");
+      return;
+    }
+    
+    if (!manualProductQuantity || parseInt(manualProductQuantity) < 1) {
+      setMessage("❌ Please enter a valid quantity");
+      return;
+    }
+    
+    const newManualProduct = {
+      id: `manual-${Date.now()}`,
+      name: manualProductName.trim(),
+      quantity: parseInt(manualProductQuantity) || 1,
+      isManual: true,
+      isInventory: false,
+      notes: "Not in inventory - needs procurement"
+    };
+    
+    setManualProducts(prev => [...prev, newManualProduct]);
+    setManualProductName("");
+    setManualProductQuantity("");
+    setShowManualProductInput(false);
+  };
+
+  const removeManualProduct = (productId) => {
+    setManualProducts(prev => prev.filter(p => p.id !== productId));
+  };
+
+  const handleManualProductQuantityChange = (productId, quantity) => {
+    if (quantity < 1) return;
+    
+    setManualProducts(prev => 
+      prev.map(product => 
+        product.id === productId 
+          ? { ...product, quantity: parseInt(quantity) || 1 }
+          : product
+      )
+    );
+  };
+
   const handlePpeSelection = (ppeId) => {
     setSelectedPpes(prev => {
       const ppe = ppeItemsList.find(p => p.id === ppeId);
@@ -293,9 +372,9 @@ const InventoryRequest = () => {
           id: ppeId,
           name: ppe.name,
           ppeType: ppe.ppeType,
-          stock: ppe.stock || 0,
           code: ppe.code,
-          quantity: 1
+          quantity: 1,
+          isManual: false
         }];
       }
     });
@@ -337,16 +416,20 @@ const InventoryRequest = () => {
     if (job === "other" && manualJob.trim()) {
       return manualJob;
     }
+    
     if (job && job !== "other") {
-      const selectedJob = jobList.find(j => j.id === job);
-      return selectedJob ? selectedJob.name : "";
+      const selectedJob = jobsList.find(j => j.id === job);
+      return selectedJob ? selectedJob.name : job;
     }
+    
     return "";
   };
 
   const getTotalQuantity = () => {
     if (requestType === "inventory") {
-      return selectedProducts.reduce((total, product) => total + product.quantity, 0);
+      const selectedQty = selectedProducts.reduce((total, product) => total + product.quantity, 0);
+      const manualQty = manualProducts.reduce((total, product) => total + product.quantity, 0);
+      return selectedQty + manualQty;
     } else {
       return selectedPpes.reduce((total, ppe) => total + ppe.quantity, 0);
     }
@@ -366,8 +449,8 @@ const InventoryRequest = () => {
         return;
     }
 
-    if (requestType === "inventory" && selectedProducts.length === 0) {
-        setMessage("❌ Please select at least one product");
+    if (requestType === "inventory" && selectedProducts.length === 0 && manualProducts.length === 0) {
+        setMessage("❌ Please select at least one product or add a manual product");
         return;
     }
 
@@ -382,8 +465,11 @@ const InventoryRequest = () => {
           setMessage(`❌ Please enter a valid quantity for ${product.name}`);
           return;
         }
-        if (product.quantity > product.stock) {
-          setMessage(`❌ Quantity for ${product.name} exceeds available stock (${product.stock})`);
+      }
+      
+      for (const product of manualProducts) {
+        if (!product.quantity || product.quantity < 1) {
+          setMessage(`❌ Please enter a valid quantity for ${product.name}`);
           return;
         }
       }
@@ -393,10 +479,6 @@ const InventoryRequest = () => {
       for (const ppe of selectedPpes) {
         if (!ppe.quantity || ppe.quantity < 1) {
           setMessage(`❌ Please enter a valid quantity for ${ppe.name}`);
-          return;
-        }
-        if (ppe.stock && ppe.quantity > ppe.stock) {
-          setMessage(`❌ Quantity for ${ppe.name} exceeds available stock (${ppe.stock})`);
           return;
         }
       }
@@ -410,42 +492,45 @@ const InventoryRequest = () => {
         
         let requestDTO;
         
-        if (requestType === "inventory") {
-          requestDTO = {
-            items: selectedProducts.map(product => ({
-              productId: product.id,
-              quantity: product.quantity,
-              notes: `Requested for ${finalJob} - ${product.name}`.substring(0, 500)
+        const allProducts = [
+          ...selectedProducts.map(p => ({
+            productId: p.id,
+            quantity: p.quantity,
+            isInventory: p.isInventory !== false,
+            productName: p.name,
+            notes: `Requested for ${finalJob} - ${p.name}${p.isInventory === false ? ' (Not in inventory)' : ''}`.substring(0, 500)
+          })),
+          ...manualProducts.map(p => ({
+            productId: null,
+            quantity: p.quantity,
+            isInventory: false,
+            productName: p.name,
+            notes: `MANUAL PRODUCT: ${p.name} - Not in inventory, needs procurement (${finalJob})`.substring(0, 500)
+          }))
+        ];
+
+        const hasManualProducts = manualProducts.length > 0;
+        
+        requestDTO = {
+            items: allProducts.map(item => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                isInventory: item.isInventory,
+                productName: item.productName,
+                notes: item.notes
             })),
             requestedBy: username,
             department: employeeDetails.department,
             projectName: finalJob,
             jobDescription: finalJob,
             location: requestLocation || employeeDetails.location,
-            notes: additionalNotes ? additionalNotes.substring(0, 1000) : `Inventory request for ${selectedProducts.length} items`,
+            notes: `${additionalNotes ? additionalNotes + ' | ' : ''}Request contains ${manualProducts.length} manual products not in inventory.`.substring(0, 1000),
             urgency: urgency,
-            ppeRequest: false,
+            ppeRequest: requestType === "ppe",
             contactPerson: contactPerson.substring(0, 100),
-            contactPhone: contactPhone ? contactPhone.substring(0, 20) : ""
-          };
-        } else {
-          requestDTO = {
-            items: selectedPpes.map(ppe => ({
-              productId: ppe.id,
-              quantity: ppe.quantity,
-              notes: `PPE Request for ${finalJob} - ${ppe.name}`.substring(0, 500)
-            })),
-            requestedBy: username,
-            department: employeeDetails.department,
-            projectName: finalJob,
-            location: getFinalLocation(),
-            notes: additionalNotes ? additionalNotes.substring(0, 1000) : `PPE request for ${selectedPpes.length} items`,
-            urgency: urgency,
-            ppeRequest: true,
-            contactPerson: contactPerson.substring(0, 100),
-            contactPhone: contactPhone ? contactPhone.substring(0, 20) : ""
-          };
-        }
+            contactPhone: contactPhone ? contactPhone.substring(0, 20) : "",
+            hasManualProducts: hasManualProducts
+        };
 
         console.log('Submitting request:', JSON.stringify(requestDTO, null, 2));
         
@@ -470,6 +555,7 @@ const InventoryRequest = () => {
             
             setSelectedProducts([]);
             setSelectedPpes([]);
+            setManualProducts([]);
             setUrgency("normal");
             setAdditionalNotes("");
             setContactPhone("");
@@ -478,6 +564,9 @@ const InventoryRequest = () => {
             setShowManualJobInput(false);
             setSearchTerm("");
             setSearchCategory("all");
+            setManualProductName("");
+            setManualProductQuantity("");
+            setShowManualProductInput(false);
         } else {
             let errorText = '';
             try {
@@ -506,6 +595,8 @@ const InventoryRequest = () => {
   useEffect(() => {
     setSelectedProducts([]);
     setSelectedPpes([]);
+    setManualProducts([]);
+    setShowManualProductInput(false);
   }, [requestType]);
 
   if (loading) {
@@ -522,8 +613,8 @@ const InventoryRequest = () => {
         <div className="max-w-md p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <h2 className="text-lg font-semibold">Error: {error}</h2>
           <p className="mt-2 text-sm">Please check your permissions or contact administrator.</p>
-        </div>
       </div>
+    </div>
     );
   }
 
@@ -654,9 +745,9 @@ const InventoryRequest = () => {
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="">-- Select Job / Project --</option>
-                    {jobList.map((jobItem) => (
+                    {jobsList.map((jobItem) => (
                       <option key={jobItem.id} value={jobItem.id}>
-                        {jobItem.name}
+                        {jobItem.name} {jobItem.client ? `- ${jobItem.client}` : ''}
                       </option>
                     ))}
                     <option value="other">-- Other (Specify below) --</option>
@@ -686,7 +777,7 @@ const InventoryRequest = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-blue-600 dark:text-blue-400">✓</span>
                         <span className="text-blue-700 dark:text-blue-300 font-medium">
-                          Selected: {jobList.find(j => j.id === job)?.name}
+                          Selected: {getFinalJob()}
                         </span>
                       </div>
                     </div>
@@ -727,30 +818,116 @@ const InventoryRequest = () => {
                 </div>
               </div>
 
-              {(requestType === "inventory" && selectedProducts.length > 0) && (
+              {requestType === "inventory" && (
+                <div>
+                  <div className="mt-6 mb-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                        Products Not in Inventory
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setShowManualProductInput(!showManualProductInput)}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                      >
+                        <span>+ Add Manual Product</span>
+                      </button>
+                    </div>
+                    
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                      Can't find what you need in our inventory? Add products that need to be procured.
+                    </p>
+                    
+                    {showManualProductInput && (
+                      <div className="bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-xl p-4 mb-4 transition-all duration-300">
+                        <h5 className="font-medium text-purple-800 dark:text-purple-300 mb-3">
+                          Add New Product (Not in Inventory)
+                        </h5>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Product Name *
+                            </label>
+                            <input
+                              type="text"
+                              value={manualProductName}
+                              onChange={(e) => setManualProductName(e.target.value)}
+                              placeholder="Enter product name"
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Quantity *
+                            </label>
+                            <input
+                              type="number"
+                              value={manualProductQuantity}
+                              onChange={(e) => setManualProductQuantity(e.target.value)}
+                              placeholder="Quantity needed"
+                              min="1"
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowManualProductInput(false);
+                              setManualProductName("");
+                              setManualProductQuantity("");
+                            }}
+                            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAddManualProduct}
+                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                          >
+                            Add to Request
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(requestType === "inventory" && (selectedProducts.length > 0 || manualProducts.length > 0)) && (
                 <div className="mt-4">
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="font-medium text-blue-800 dark:text-blue-300">
-                        Selected Products ({selectedProducts.length})
+                        Selected Products ({selectedProducts.length + manualProducts.length})
                       </h4>
                       <div className="text-sm bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full">
                         Total Items: {getTotalQuantity()}
                       </div>
                     </div>
                     
-                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                    <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
                       {selectedProducts.map(product => (
                         <div 
                           key={product.id}
                           className="flex items-center justify-between bg-white dark:bg-gray-700 p-3 rounded-lg border border-blue-100 dark:border-blue-800"
                         >
                           <div className="flex-1">
-                            <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">
-                              {product.name}
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">
+                                {product.name}
+                              </div>
+                              <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
+                                In Inventory
+                              </span>
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              Code: {product.code} | Stock: {product.stock}
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Code: {product.code} • Type: {product.productType}
                             </div>
                           </div>
                           
@@ -760,7 +937,6 @@ const InventoryRequest = () => {
                               <input
                                 type="number"
                                 min="1"
-                                max={product.stock}
                                 value={product.quantity}
                                 onChange={(e) => handleProductQuantityChange(product.id, e.target.value)}
                                 className="w-16 border border-gray-300 dark:border-gray-600 rounded p-2 dark:bg-gray-600 dark:text-gray-200 text-center text-sm"
@@ -770,6 +946,51 @@ const InventoryRequest = () => {
                             <button
                               type="button"
                               onClick={() => removeProduct(product.id)}
+                              className="text-red-500 hover:text-red-700 p-1"
+                              title="Remove item"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {manualProducts.map(product => (
+                        <div 
+                          key={product.id}
+                          className="flex items-center justify-between bg-white dark:bg-gray-700 p-3 rounded-lg border-2 border-purple-200 dark:border-purple-800"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">
+                                {product.name}
+                              </div>
+                              <span className="text-xs bg-purple-100 dark:bg-purple-800 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full">
+                                Not in Inventory
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Will need to be procured
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 dark:text-gray-400">Qty:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={product.quantity}
+                                onChange={(e) => handleManualProductQuantityChange(product.id, e.target.value)}
+                                className="w-16 border border-gray-300 dark:border-gray-600 rounded p-2 dark:bg-gray-600 dark:text-gray-200 text-center text-sm"
+                              />
+                            </div>
+                            
+                            <button
+                              type="button"
+                              onClick={() => removeManualProduct(product.id)}
                               className="text-red-500 hover:text-red-700 p-1"
                               title="Remove item"
                             >
@@ -808,7 +1029,7 @@ const InventoryRequest = () => {
                               {ppe.name}
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                              Code: {ppe.code} | Stock: {ppe.stock || 0}
+                              Code: {ppe.code} | Type: {ppe.ppeType}
                             </div>
                           </div>
                           
@@ -818,7 +1039,6 @@ const InventoryRequest = () => {
                               <input
                                 type="number"
                                 min="1"
-                                max={ppe.stock || 100}
                                 value={ppe.quantity}
                                 onChange={(e) => handlePpeQuantityChange(ppe.id, e.target.value)}
                                 className="w-16 border border-gray-300 dark:border-gray-600 rounded p-2 dark:bg-gray-600 dark:text-gray-200 text-center text-sm"
@@ -904,6 +1124,11 @@ const InventoryRequest = () => {
                     rows={3}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
+                  {manualProducts.length > 0 && (
+                    <p className="text-sm text-purple-600 dark:text-purple-400 mt-2">
+                      Note: {manualProducts.length} manual product(s) added that are not in inventory.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -911,12 +1136,23 @@ const InventoryRequest = () => {
             <div className="space-y-6">
               {requestType === "inventory" && (
                 <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <label className="block text-gray-700 dark:text-gray-300 font-medium">
-                      Select Products * (Select one or multiple)
-                    </label>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {filteredProducts.length} products found
+                  <div className="mb-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="block text-gray-700 dark:text-gray-300 font-medium">
+                        Select Products * (Select one or multiple)
+                      </label>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {filteredProducts.length} available products
+                      </div>
+                    </div>
+                    
+                    <div className="mb-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-600 dark:text-blue-400">ℹ️</span>
+                        <span className="text-sm text-blue-700 dark:text-blue-300">
+                          PPE items (safety equipment) and Kitchen Store items are not shown here.
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -993,16 +1229,18 @@ const InventoryRequest = () => {
                                 selectedProducts.find(p => p.id === product.id)
                                   ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                                   : "border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-blue-300"
-                              } ${product.stock === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
-                              onClick={() => product.stock > 0 && handleProductSelection(product.id)}
+                              } ${(product.ppe || product.kitchenStore) ? "opacity-50 cursor-not-allowed" : ""}`}
+                              onClick={() => !product.ppe && !product.kitchenStore && handleProductSelection(product.id)}
                             >
                               <div className="flex items-start gap-3">
                                 <input
                                   type="checkbox"
                                   checked={!!selectedProducts.find(p => p.id === product.id)}
-                                  onChange={() => product.stock > 0 && handleProductSelection(product.id)}
-                                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mt-1"
-                                  disabled={product.stock === 0}
+                                  onChange={() => !product.ppe && !product.kitchenStore && handleProductSelection(product.id)}
+                                  disabled={product.ppe || product.kitchenStore}
+                                  className={`h-4 w-4 focus:ring-blue-500 border-gray-300 rounded mt-1 ${
+                                    (product.ppe || product.kitchenStore) ? "cursor-not-allowed opacity-50" : "text-blue-600"
+                                  }`}
                                 />
                                 <div className="flex-1">
                                   <div className="font-medium text-sm text-gray-800 dark:text-gray-200">
@@ -1016,24 +1254,31 @@ const InventoryRequest = () => {
                                       {product.productType}
                                     </div>
                                   )}
-                                  <div className="flex justify-between items-center mt-2">
-                                    <div className="text-xs">
-                                      Stock: <span className={`font-medium ${
-                                        product.stock === 0 
-                                          ? "text-red-500" 
-                                          : product.stock < 10 
-                                            ? "text-yellow-500" 
-                                            : "text-green-600"
-                                      }`}>
-                                        {product.stock}
+                                  {product.ppe ? (
+                                    <div className="text-xs text-red-600 dark:text-red-400 mt-2">
+                                      <span className="inline-flex items-center gap-1">
+                                        ⚠️ PPE Item - Use PPE Request Section
                                       </span>
                                     </div>
-                                    {selectedProducts.find(p => p.id === product.id) && (
-                                      <div className="text-xs bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
-                                        Selected
-                                      </div>
-                                    )}
-                                  </div>
+                                  ) : product.kitchenStore ? (
+                                    <div className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                                      <span className="inline-flex items-center gap-1">
+                                        ⚠️ Kitchen Store Item - Not available for requests
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                                      <span className="inline-flex items-center gap-1">
+                                        <span className="text-green-600">✓</span>
+                                        Available in inventory
+                                      </span>
+                                    </div>
+                                  )}
+                                  {selectedProducts.find(p => p.id === product.id) && (
+                                    <div className="text-xs bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full mt-2">
+                                      Selected
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1056,69 +1301,71 @@ const InventoryRequest = () => {
                     </div>
                   </div>
 
-                  <div className="h-[400px] overflow-y-auto p-4 border border-gray-300 dark:border-gray-600 rounded-lg">
-                    {ppeItemsList.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                        No PPE items available. Please mark products as PPE in the Products section.
+                  {ppeItemsList.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      No PPE items found. Please mark products as PPE in the Products section.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-600 dark:text-green-400">🛡️</span>
+                          <span className="text-sm text-green-700 dark:text-green-300">
+                            Only PPE (Personal Protective Equipment) items are shown here.
+                          </span>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {ppeItemsList.map((ppe) => (
-                          <div
-                            key={ppe.id}
-                            className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
-                              selectedPpes.find(p => p.id === ppe.id)
-                                ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                                : "border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-green-300"
-                            }`}
-                            onClick={() => handlePpeSelection(ppe.id)}
-                          >
-                            <div className="flex items-start gap-3">
-                              <input
-                                type="checkbox"
-                                checked={!!selectedPpes.find(p => p.id === ppe.id)}
-                                onChange={() => handlePpeSelection(ppe.id)}
-                                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded mt-1"
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium text-sm text-gray-800 dark:text-gray-200">
-                                  {ppe.name}
-                                </div>
-                                {ppe.code && (
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                                    Code: {ppe.code}
+                      <div className="h-[400px] overflow-y-auto p-4 border border-gray-300 dark:border-gray-600 rounded-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {ppeItemsList.map((ppe) => (
+                            <div
+                              key={ppe.id}
+                              className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                selectedPpes.find(p => p.id === ppe.id)
+                                  ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                  : "border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-green-300"
+                              }`}
+                              onClick={() => handlePpeSelection(ppe.id)}
+                            >
+                              <div className="flex items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={!!selectedPpes.find(p => p.id === ppe.id)}
+                                  onChange={() => handlePpeSelection(ppe.id)}
+                                  className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded mt-1"
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm text-gray-800 dark:text-gray-200">
+                                    {ppe.name}
                                   </div>
-                                )}
-                                {ppe.ppeType && (
-                                  <div className="text-xs text-green-600 dark:text-green-400 mb-1">
-                                    {ppe.ppeType}
-                                  </div>
-                                )}
-                                <div className="flex justify-between items-center mt-2">
-                                  <div className="text-xs">
-                                    Stock: <span className={`font-medium ${
-                                      (ppe.stock || 0) === 0 
-                                        ? "text-red-500" 
-                                        : (ppe.stock || 0) < 10 
-                                          ? "text-yellow-500" 
-                                          : "text-green-600"
-                                    }`}>
-                                      {ppe.stock || 0} units
-                                    </span>
-                                  </div>
-                                  {selectedPpes.find(p => p.id === ppe.id) && (
-                                    <div className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
-                                      Selected
+                                  {ppe.code && (
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                      Code: {ppe.code}
                                     </div>
                                   )}
+                                  {ppe.ppeType && (
+                                    <div className="text-xs text-green-600 dark:text-green-400 mb-1">
+                                      {ppe.ppeType}
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between items-center mt-2">
+                                    <div className="text-xs text-gray-600 dark:text-gray-400">
+                                      Safety Equipment
+                                    </div>
+                                    {selectedPpes.find(p => p.id === ppe.id) && (
+                                      <div className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
+                                        Selected
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1135,7 +1382,7 @@ const InventoryRequest = () => {
             >
               {requestType === "ppe" 
                 ? `Submit PPE Request (${selectedPpes.length} items, ${getTotalQuantity()} units)` 
-                : `Submit Inventory Request (${selectedProducts.length} items, ${getTotalQuantity()} units)`}
+                : `Submit Inventory Request (${selectedProducts.length + manualProducts.length} items, ${getTotalQuantity()} units)`}
             </button>
 
             {message && (

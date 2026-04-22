@@ -53,7 +53,6 @@ const SupervisorDashboard = () => {
 
   const API_BASE_URL = getApiBaseUrl();
 
-
   useEffect(() => {
     const fetchSupervisorRequests = async () => {
       try {
@@ -63,7 +62,7 @@ const SupervisorDashboard = () => {
           throw new Error("No authentication token found");
         }
 
-        const response = await fetch(`${API_BASE_URL}:8080/api/leave/supervisor`, {
+        const response = await fetch(`${API_BASE_URL}/api/leave/supervisor`, {
           headers: { 
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json"
@@ -165,8 +164,8 @@ const SupervisorDashboard = () => {
       const token = getToken();
       const endpoint =
         decision === "Approved"
-          ? `${API_BASE_URL}:8080/api/leave/supervisor/approve/${selectedRequest.id}`
-          : `${API_BASE_URL}:8080/api/leave/supervisor/reject/${selectedRequest.id}`;
+          ? `${API_BASE_URL}/api/leave/supervisor/approve/${selectedRequest.id}`
+          : `${API_BASE_URL}/api/leave/supervisor/reject/${selectedRequest.id}`;
 
       const response = await fetch(endpoint, {
         method: "POST",

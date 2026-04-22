@@ -13,7 +13,9 @@ import {
   ChevronRight,
   Settings,
   LogOut,
-  X
+  X,
+   FileText,  // Add this for Quotation Master
+  Truck 
 } from 'lucide-react';
 import AttendanceDashboard from '../Eac-attendance/attendanceDashboard';
 import InventoryDashboard from '../Eac-inventory/InventoryDashboard';
@@ -64,6 +66,34 @@ const CentralizedDashboard = () => {
 };
 
   const API_BASE_URL = getApiBaseUrl();
+
+    // ---------- FETCH WITH AUTH ----------
+  const fetchWithAuth = async (url, options = {}) => {
+    const token = localStorage.getItem("jwtToken");
+    if (!token) {
+      navigate("/");
+      throw new Error("No token found");
+    }
+
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      navigate("/");
+      throw new Error("Unauthorized");
+    }
+
+    return res;
+  };
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -141,9 +171,9 @@ const CentralizedDashboard = () => {
       roles: ['admin', 'hr', 'supervisor']
     },
     { 
-      id: 'hr', 
-      name: 'HR Management', 
-      icon: <Briefcase size={18} />, 
+      id: 'quotationMaster', 
+      name: 'Quotation Master', 
+        icon: <FileText size={18} />,
       color: 'bg-purple-100 text-purple-800',
       hover: 'hover:bg-purple-50',
       roles: ['admin', 'hr']
@@ -190,16 +220,16 @@ const CentralizedDashboard = () => {
     },
     { 
       id: 'JobsManagement', 
-      name: 'JobsManagement', 
-      icon: <Settings size={18} />, 
+      name: 'Jobs Management', 
+      icon: <Briefcase size={18} />,
       color: 'bg-gray-100 text-gray-800',
       hover: 'hover:bg-gray-50',
       roles: ['admin']
     },
     { 
       id: 'CostCenterManagement', 
-      name: 'costCenterManagement', 
-      icon: <Settings size={18} />, 
+      name: 'Cost Center Management', 
+       icon: <PieChart size={18} />, 
       color: 'bg-gray-100 text-gray-800',
       hover: 'hover:bg-gray-50',
       roles: ['admin']
@@ -207,7 +237,15 @@ const CentralizedDashboard = () => {
     { 
       id: 'adminDashboard', 
       name: 'Transport Admin Dashboard', 
-      icon: <Settings size={18} />, 
+      icon: <Truck size={18} />,  
+      color: 'bg-gray-100 text-gray-800',
+      hover: 'hover:bg-gray-50',
+      roles: ['admin']
+    },
+      { 
+      id: 'employeeDashboard', 
+      name: 'Employee Dashboard', 
+      icon: <Users size={18} />,  
       color: 'bg-gray-100 text-gray-800',
       hover: 'hover:bg-gray-50',
       roles: ['admin']

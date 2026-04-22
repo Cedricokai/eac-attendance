@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
 import MainSidebar from "../mainSidebar";
+import Header from "../../../components/Header";
 
 const getSafeValue = (value) => {
   if (value === null || value === undefined) return "";
@@ -30,6 +31,10 @@ function Employee() {
   const [isEditMenuOpen, setIsEditMenuOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [isBasicSalaryEditable, setIsBasicSalaryEditable] = useState(false);
+
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   const [newEmployee, setNewEmployee] = useState({
     firstName: "",
@@ -67,12 +72,44 @@ function Employee() {
     rentAllowance: "",
     transportAllowance: "",
     clothingAllowance: "",
-    otherAllowance: ""
+    otherAllowance: "",
+    nssAllowance: "",
+    accountName: "",
+    ssnitAccountName: ""
   });
 
-  const filteredEmployees = selectedCategory 
-    ? employees.filter(emp => emp.category === selectedCategory)
-    : employees;
+ const filteredEmployees = employees.filter(emp => {
+  // Filter by category if selected
+  if (selectedCategory && emp.category !== selectedCategory) {
+    return false;
+  }
+  
+  // Filter by search query if provided
+  if (query.trim()) {
+    const searchTerm = query.toLowerCase().trim();
+    const searchableFields = [
+      emp.employeeId || '',
+      emp.firstName || '',
+      emp.lastName || '',
+      emp.email || '',
+      emp.phone || '',
+      emp.jobPosition || '',
+      emp.category || '',
+      emp.workType || '',
+      emp.tagNumber || '',
+      emp.ssnitNumber || '',
+      emp.tinNumber || '',
+      emp.department || '',
+      emp.location || ''
+    ];
+    
+    return searchableFields.some(field => 
+      field.toLowerCase().includes(searchTerm)
+    );
+  }
+  
+  return true;
+});
 
   const createMenuRef = useRef(null);
   const editMenuRef = useRef(null);
@@ -81,18 +118,29 @@ function Employee() {
     const hostname = window.location.hostname;
     const port = window.location.port;
 
+    console.log("🖥️ Current hostname:", hostname);
+    console.log("🔌 Current port:", port);
+
+    // If frontend is opened via localhost → use localhost backend
     if (hostname === "localhost" || hostname === "127.0.0.1") {
+      console.log("🏠 Using LOCALHOST API URL");
       return "http://localhost:8080";
     }
 
+    // LAN access
     if (hostname.startsWith("192.168.")) {
+      console.log("🏠 Using LAN API URL");
       return import.meta.env.VITE_API_BASE_URL_LOCAL;
     }
 
+    // Public / Tailscale / Cloudflare IP
     if (hostname === "100.114.178.13") {
+      console.log("🌐 Using PUBLIC API URL");
       return import.meta.env.VITE_API_BASE_URL_PUBLIC;
     }
 
+    // Default fallback
+    console.log("🌍 Using PUBLIC API URL (fallback)");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
   };
 
@@ -100,6 +148,87 @@ function Employee() {
 
   const getToken = () => {
     return localStorage.getItem('jwtToken');
+  };
+
+    // Add toggleSidebar function
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  // Add responsive sidebar handling
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+   useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sidebarOpen && window.innerWidth < 768) {
+        const sidebar = document.querySelector('.sidebar-container');
+        if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
+          setSidebarOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sidebarOpen]);
+
+    useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const res = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          },
+          credentials: "include"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUser({
+            name: data.username,
+            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            email: data.email
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch user", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("jwtToken");
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
   const fetchEmployees = async () => {
@@ -127,6 +256,36 @@ function Employee() {
       setLoading(false);
     }
   };
+
+  const toggleEmployeeActive = async (id, currentStatus) => {
+    if (!window.confirm(`Are you sure you want to ${currentStatus ? 'deactivate' : 'activate'} this employee?`)) return;
+    
+    try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE_URL}/api/employee/${id}/toggle-active`, {
+            method: "PUT",
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (!response.ok) throw new Error("Failed to toggle employee status");
+
+        const result = await response.json();
+        
+        // Update the employee in the local state
+        setEmployees(employees.map(emp => 
+            emp.id === id ? { ...emp, active: result.active } : emp
+        ));
+        
+        setSuccessMessage(`Employee ${result.active ? 'activated' : 'deactivated'} successfully!`);
+        setTimeout(() => setSuccessMessage(""), 3000);
+        setOpenMenuId(null);
+    } catch (err) {
+        setError(err.message);
+    }
+};
 
   const getPositionGrades = (positionName) => {
     const position = settings.jobPositions?.find(p => p.name === positionName);
@@ -370,6 +529,13 @@ function Employee() {
               case 'socialsecurity':
                 employee.ssnitNumber = getSafeValue(value);
                 break;
+             case 'ssnitaccountname':
+case 'ssnit_account_name':
+case 'ssnitaccount_name':
+case 'ssnitaccount':
+  employee.ssnitAccountName = getSafeValue(value);
+  break;
+
               case 'tinnumber':
               case 'tin_number':
               case 'tin':
@@ -458,6 +624,11 @@ function Employee() {
               case 'additionalallowance':
               case 'extraallowance':
                 employee.otherAllowance = getSafeValue(value);
+                     break;
+              case 'nssallowance':
+              case 'nss_allowance':
+              case 'nssAllowance':
+                employee.nssAllowance = getSafeValue(value);
                 break;
               case 'location':
               case 'address':
@@ -474,6 +645,10 @@ function Employee() {
               case 'bankname':
               case 'bank_name':
                 employee.bank = getSafeValue(value);
+                break;
+                case 'accountname':
+                case 'account_name':
+                employee.accountName = getSafeValue(value);
                 break;
               case 'bankbranch':
               case 'bank_branch':
@@ -572,6 +747,7 @@ function Employee() {
       'Minimum Rate': employee.minimumRate,
       'Basic Salary': employee.basicSalary,
       'SSNIT Number': employee.ssnitNumber,
+      'SSNIT ACCOUNT NAME': employee.ssnitAccountName,
       'TIN Number': employee.tinNumber,
       'Start Date': employee.startDate,
       'End Date': employee.endDate,
@@ -580,6 +756,7 @@ function Employee() {
       'Location': employee.location,
       'Ghana Card': employee.ghanaCard,
       'Bank': employee.bank,
+      'Account Name': employee.accountName,
       'Bank Branch': employee.bankBranch,
       'Contact Person': employee.contactPerson,
       'Relationship': employee.relationship,
@@ -592,6 +769,7 @@ function Employee() {
       'Transport Allowance': employee.transportAllowance,
       'Clothing Allowance': employee.clothingAllowance,
       'Other Allowance': employee.otherAllowance,
+      'NSS Allowance': employee.nssAllowance,
       'Emergency Contact': employee.emergencyContact,
       'Department': employee.department,
       'Tag Number': employee.tagNumber,
@@ -607,11 +785,13 @@ function Employee() {
       'Total Allowances': (employee.rentAllowance || 0) + 
                           (employee.transportAllowance || 0) + 
                           (employee.clothingAllowance || 0) + 
+                          (employee.nssAllowance || 0) + 
                           (employee.otherAllowance || 0),
       'Total Monthly Cost': (employee.basicSalary || 0) + 
                            (employee.rentAllowance || 0) + 
                            (employee.transportAllowance || 0) + 
                            (employee.clothingAllowance || 0) + 
+                           (employee.nssAllowance || 0) + 
                            (employee.otherAllowance || 0),
       'Years of Service': employee.startDate ? 
                          Math.floor((new Date() - new Date(employee.startDate)) / (365.25 * 24 * 60 * 60 * 1000)) : 0
@@ -650,6 +830,7 @@ function Employee() {
           numberOfChildren: employee.numberOfChildren ? parseInt(employee.numberOfChildren) : 0,
           age: employee.age ? parseInt(employee.age) : 0,
           ssnitNumber: employee.ssnitNumber ? String(employee.ssnitNumber).trim() : null,
+          ssnitAccountName: employee.ssnitAccountName ? String(employee.ssnitAccountName).trim() : null,
           tinNumber: employee.tinNumber ? String(employee.tinNumber).trim() : null,
           startDate: employee.startDate || new Date().toISOString().split('T')[0],
           endDate: employee.endDate || null,
@@ -659,6 +840,7 @@ function Employee() {
           transportAllowance: employee.transportAllowance ? parseFloat(employee.transportAllowance) : 0,
           clothingAllowance: employee.clothingAllowance ? parseFloat(employee.clothingAllowance) : 0,
           otherAllowance: employee.otherAllowance ? parseFloat(employee.otherAllowance) : 0,
+            nssAllowance: employee.nssAllowance ? parseFloat(employee.nssAllowance) : 0,
           tagNumber: employee.tagNumber ? String(employee.tagNumber).trim() : null,
           dateOfBirth: employee.dateOfBirth || null,
           emergencyContact: employee.emergencyContact ? String(employee.emergencyContact).trim() : null,
@@ -666,6 +848,7 @@ function Employee() {
           location: employee.location ? String(employee.location).trim() : null,
           ghanaCard: employee.ghanaCard ? String(employee.ghanaCard).trim() : null,
           bank: employee.bank ? String(employee.bank).trim() : null,
+          accountName: employee.accountName ? String(employee.accountName).trim () : null,
           bankBranch: employee.bankBranch ? String(employee.bankBranch).trim() : null,
           contactPerson: employee.contactPerson ? String(employee.contactPerson).trim() : null,
           relationship: employee.relationship ? String(employee.relationship).trim() : null,
@@ -756,6 +939,9 @@ function Employee() {
       transportAllowance: newEmployee.transportAllowance ? parseFloat(newEmployee.transportAllowance) : 0.0,
       clothingAllowance: newEmployee.clothingAllowance ? parseFloat(newEmployee.clothingAllowance) : 0.0,
       otherAllowance: newEmployee.otherAllowance ? parseFloat(newEmployee.otherAllowance) : 0.0,
+nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 0.0,
+      accountName: newEmployee.accountName || "N/A",
+      ssnitAccountName: newEmployee.ssnitAccountName || "N/A",
       categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
     };
 
@@ -794,14 +980,17 @@ function Employee() {
         minimumRate: "",
         category: "",
         ssnitNumber: "",
+        ssnitAccountName: "",
         tinNumber: "",
         startDate: "",
+        accountName: "",
         accountNumber: "",
         allowances: "",
         employeeId: "",
         usePositionRate: true,
         numberOfChildren: 0,
         age: 0,
+        accountName: "",
         dateOfBirth: "",
         location: "",
         ghanaCard: "",
@@ -818,7 +1007,8 @@ function Employee() {
         rentAllowance: "",
         transportAllowance: "",
         clothingAllowance: "",
-        otherAllowance: ""
+        otherAllowance: "",
+        nssAllowance: ""
       });
 
       setIsCreateMenuOpen(false);
@@ -938,11 +1128,28 @@ function Employee() {
 
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-md z-30">
-        <MainSidebar />
+      <div 
+        className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
+          sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
+        }`}
+      >
+        <MainSidebar isCollapsed={!sidebarOpen} />
       </div>
 
-      <div className="flex-1 ml-64">
+      {/* Mobile overlay */}
+      {sidebarOpen && window.innerWidth < 768 && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Main content with dynamic margin - SAME AS ATTENDANCE COMPONENT */}
+      <div 
+        className={`flex-1 transition-all duration-300 ${
+          sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
+        }`}
+      >
         {(isCreateMenuOpen || isEditMenuOpen || isPopupOpen) && (
           <div className="fixed inset-0 bg-black/50 z-40" onClick={closeAllModals}></div>
         )}
@@ -965,73 +1172,12 @@ function Employee() {
           </div>
         )}
 
-        <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            <button className="p-1 hover:bg-gray-100 rounded-md">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                strokeWidth="1.5"
-                stroke="currentColor"
-                className="size-6"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              </svg>
-            </button>
-
-            <div className="flex items-center gap-5">
-              <div className="relative" ref={settingsMenuRef}>
-                <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="size-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004-.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                  </svg>
-                </Link>
-              </div>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <button className="p-1 hover:bg-gray-200 rounded-full relative">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="size-6"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0M3.124 7.5A8.969 8.969 0 0 1 5.292 3m13.416 0a8.969 8.969 0 0 1 2.168 4.5"
-                  />
-                </svg>
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">3</span>
-              </button>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                  A
-                </div>
-                <span className="font-medium">Adams</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-          </header>
+        <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+           <Header
+            toggleSidebar={toggleSidebar}
+            user={user}
+            onLogout={handleLogout}
+          />
 
           <section className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
@@ -1155,6 +1301,9 @@ function Employee() {
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Rate
                       </th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+    Status
+</th>
                       <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
@@ -1201,6 +1350,13 @@ function Employee() {
                               )}
                             </div>
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+    <span className={`px-2 py-1 rounded-full text-xs ${
+        employee.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+    }`}>
+        {employee.active ? 'Active' : 'Inactive'}
+    </span>
+</td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex justify-end items-center gap-3">
                               <button
@@ -1246,6 +1402,12 @@ function Employee() {
                                       >
                                         Delete
                                       </button>
+                                      <button
+    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+    onClick={() => toggleEmployeeActive(employee.id, employee.active)}
+>
+    {employee.active ? 'Deactivate' : 'Activate'} Employee
+</button>
                                     </div>
                                   </div>
                                 )}
@@ -1262,8 +1424,13 @@ function Employee() {
                                   <p className="text-xs text-gray-500">Phone</p>
                                   <p className="text-sm font-medium">{employee.phone || 'N/A'}</p>
                                 </div>
+
+                                 <div>
+                                  <p className="text-xs text-gray-500">SSNIT Account Name</p>
+                                  <p className="text-sm font-medium">{employee.ssnitAccountName || 'N/A'}</p>
+                                </div>
                                 <div>
-                                  <p className="text-xs text-gray-500">SSNIT</p>
+                                  <p className="text-xs text-gray-500">SSNIT Number</p>
                                   <p className="text-sm font-medium">{employee.ssnitNumber || 'N/A'}</p>
                                 </div>
                                 <div>
@@ -1285,6 +1452,11 @@ function Employee() {
                                 <div>
                                   <p className="text-xs text-gray-500">Account Number</p>
                                   <p className="text-sm font-medium">{employee.accountNumber || 'N/A'}</p>
+                                </div>
+
+                                 <div>
+                                  <p className="text-xs text-gray-500">Account Name</p>
+                                  <p className="text-sm font-medium">{employee.accountName || 'N/A'}</p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Location</p>
@@ -1334,6 +1506,10 @@ function Employee() {
                                   <p className="text-xs text-gray-500">Department</p>
                                   <p className="text-sm font-medium">{employee.department || 'N/A'}</p>
                                 </div>
+                                 <div>
+                                  <p className="text-xs text-gray-500">Tag Number</p>
+                                  <p className="text-sm font-medium">{employee.tagNumber || 'N/A'}</p>
+                                </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Basic Salary</p>
                                   <p className="text-sm font-medium">{formatCurrency(employee.basicSalary)}</p>
@@ -1353,6 +1529,10 @@ function Employee() {
                                 <div>
                                   <p className="text-xs text-gray-500">Other Allowance</p>
                                   <p className="text-sm font-medium">{formatCurrency(employee.otherAllowance)}</p>
+                                </div>
+                                   <div>
+                                  <p className="text-xs text-gray-500">NSS Allowance</p>
+                                  <p className="text-sm font-medium">{formatCurrency(employee.nssAllowance)}</p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Start Date</p>
@@ -1581,6 +1761,17 @@ function Employee() {
                   />
                 </div>
 
+                   <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
+                  <input
+                    type="text"
+                    placeholder="Ssnit account name"
+                    value={getSafeValue(newEmployee.ssnitAccountName)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, ssnitAccountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
@@ -1611,16 +1802,6 @@ function Employee() {
                     type="date"
                     value={getSafeValue(newEmployee.startDate)}
                     onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
-                  <input
-                    type="number"
-                    value={getSafeValue(newEmployee.allowances)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, allowances: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
@@ -1659,6 +1840,16 @@ function Employee() {
                       type="text"
                       value={getSafeValue(newEmployee.accountNumber)}
                       onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                     <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.accountName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, accountName: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
@@ -1876,7 +2067,20 @@ function Employee() {
                   </p>
                 </div>
 
+                  
+               
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(editingEmployee.ssnitAccountName)}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, ssnitAccountName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
                     <input
@@ -1897,6 +2101,223 @@ function Employee() {
                     />
                   </div>
                 </div>
+
+                // Add these fields in the edit modal section (isEditMenuOpen)
+
+// Emergency Contact
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.emergencyContact)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, emergencyContact: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Department
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.department)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, department: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Date of Birth
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+  <input
+    type="date"
+    value={getSafeValue(editingEmployee.dateOfBirth)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, dateOfBirth: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Location
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.location)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, location: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Ghana Card
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.ghanaCard)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, ghanaCard: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Bank Details
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.bank)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, bank: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.bankBranch)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, bankBranch: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.accountName)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, accountName: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Contact Person Details
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.contactPerson)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, contactPerson: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.relationship)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, relationship: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Residence Details
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.townOfResidence)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, townOfResidence: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.houseNumber)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, houseNumber: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Family Details
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
+  <input
+    type="text"
+    value={getSafeValue(editingEmployee.spouse)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, spouse: e.target.value })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
+  <input
+    type="number"
+    value={getSafeValue(editingEmployee.numberOfChildren)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+  <input
+    type="number"
+    value={getSafeValue(editingEmployee.age)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, age: parseInt(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+// Allowances
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
+  <input
+    type="number"
+    step="0.01"
+    value={getSafeValue(editingEmployee.rentAllowance)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, rentAllowance: parseFloat(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Transport Allowance</label>
+  <input
+    type="number"
+    step="0.01"
+    value={getSafeValue(editingEmployee.transportAllowance)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, transportAllowance: parseFloat(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Clothing Allowance</label>
+  <input
+    type="number"
+    step="0.01"
+    value={getSafeValue(editingEmployee.clothingAllowance)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, clothingAllowance: parseFloat(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowance</label>
+  <input
+    type="number"
+    step="0.01"
+    value={getSafeValue(editingEmployee.otherAllowance)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, otherAllowance: parseFloat(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
+
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Nss Allowance</label>
+  <input
+    type="number"
+    step="0.01"
+    value={getSafeValue(editingEmployee.nssAllowance)}
+    onChange={(e) => setEditingEmployee({ ...editingEmployee, nssAllowance: parseFloat(e.target.value) || 0 })}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  />
+</div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -1969,6 +2390,7 @@ function Employee() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Account Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
@@ -1989,9 +2411,11 @@ function Employee() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clothing Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Other Allowance</th>
+                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSS Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ghana Card</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank</th>
+                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank Branch</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact Person</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relationship</th>
@@ -2012,6 +2436,7 @@ function Employee() {
                         <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.lastName}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitAccountName || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
@@ -2036,9 +2461,11 @@ function Employee() {
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.transportAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.clothingAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.otherAllowance || 'N/A'}</td>
+                           <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.nssAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.location || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ghanaCard || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bank || 'N/A'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountName || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bankBranch || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.contactPerson || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.relationship || 'N/A'}</td>

@@ -16,6 +16,21 @@ function Profile() {
   const [categories, setCategories] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [jobPositions, setJobPositions] = useState([]);
+  // Document related state
+  const [documents, setDocuments] = useState([]);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [documentForm, setDocumentForm] = useState({
+    title: '',
+    documentType: '',
+    description: '',
+    tags: '',
+    issueDate: new Date().toISOString().split('T')[0],
+    expiryDate: ''
+  });
 
   const getToken = () => {
     return localStorage.getItem("jwtToken");
@@ -92,6 +107,47 @@ function Profile() {
     }
   };
 
+  // Fixed fetchDocuments function
+  const fetchDocuments = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}/documents`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data);
+      } else if (response.status === 404) {
+        // No documents found, set empty array
+        setDocuments([]);
+      } else {
+        console.error('Error fetching documents:', response.status);
+        setDocuments([]);
+      }
+    } catch (err) {
+      console.error('Error fetching documents:', err);
+      setDocuments([]);
+    }
+  };
+
+  // Refetch documents when tab changes to documents
+  useEffect(() => {
+    if (activeTab === "documents") {
+      fetchDocuments();
+    }
+  }, [activeTab]);
+
+  // Also refetch when employee ID changes
+  useEffect(() => {
+    if (id) {
+      fetchDocuments();
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchSettings();
     fetchCategories();
@@ -121,7 +177,34 @@ function Profile() {
         
         setFormData({
           ...data,
-          category: categoryName
+          category: categoryName,
+          startDate: data.startDate ? data.startDate.split('T')[0] : '',
+          endDate: data.endDate ? data.endDate.split('T')[0] : '',
+          dateOfBirth: data.dateOfBirth ? data.dateOfBirth.split('T')[0] : '',
+          emergencyContact: data.emergencyContact || '',
+          department: data.department || '',
+          tagNumber: data.tagNumber || '',
+          accountNumber: data.accountNumber || '',
+          ssnitNumber: data.ssnitNumber || '',
+          tinNumber: data.tinNumber || '',
+          ghanaCard: data.ghanaCard || '',
+          location: data.location || '',
+          bank: data.bank || '',
+          bankBranch: data.bankBranch || '',
+          contactPerson: data.contactPerson || '',
+          relationship: data.relationship || '',
+          townOfResidence: data.townOfResidence || '',
+          houseNumber: data.houseNumber || '',
+          spouse: data.spouse || '',
+          numberOfChildren: data.numberOfChildren || 0,
+          age: data.age || 0,
+          rentAllowance: data.rentAllowance || 0,
+          transportAllowance: data.transportAllowance || 0,
+          clothingAllowance: data.clothingAllowance || 0,
+          otherAllowance: data.otherAllowance || 0,
+          nssAllowance: data.nssAllowance || 0,
+          accountName: data.accountName || '',
+          ssnitAccountName: data.ssnitAccountName || ''
         });
       } catch (err) {
         setError(err.message);
@@ -222,8 +305,10 @@ function Profile() {
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "Invalid Date";
       const options = { year: "numeric", month: "long", day: "numeric" };
-      return new Date(dateString).toLocaleDateString(undefined, options);
+      return date.toLocaleDateString(undefined, options);
     } catch (error) {
       return "Invalid Date";
     }
@@ -242,6 +327,166 @@ function Profile() {
   const getAvatarInitials = (firstName, lastName) => {
     if (!firstName && !lastName) return "NA";
     return `${firstName ? firstName[0] : ""}${lastName ? lastName[0] : ""}`.toUpperCase();
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+
+    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    if (!validTypes.includes(file.type)) {
+      setUploadError('Please select a valid file type (PDF, JPG, PNG, DOC, DOCX, XLS, XLSX)');
+      return;
+    }
+
+    if (file.size > maxSize) {
+      setUploadError('File size must be less than 10MB');
+      return;
+    }
+
+    setSelectedFile(file);
+    setUploadError('');
+    
+    // Set default title from filename
+    setDocumentForm(prev => ({
+      ...prev,
+      title: file.name.replace(/\.[^/.]+$/, "") // Remove extension
+    }));
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      setUploadError('Please select a file to upload');
+      return;
+    }
+
+    if (!documentForm.title.trim()) {
+      setUploadError('Please enter a document title');
+      return;
+    }
+
+    setUploading(true);
+    setUploadError('');
+    setUploadSuccess('');
+
+    try {
+      const token = getToken();
+      
+      // Create FormData
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('title', documentForm.title);
+      formData.append('documentType', documentForm.documentType || 'GENERAL');
+      formData.append('description', documentForm.description || '');
+      formData.append('tags', documentForm.tags || '');
+      formData.append('issueDate', documentForm.issueDate || '');
+      if (documentForm.expiryDate) {
+        formData.append('expiryDate', documentForm.expiryDate);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}/documents`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
+
+      const uploadedDocument = await response.json();
+      
+      // Add to documents list
+      setDocuments(prev => [...prev, uploadedDocument]);
+      
+      // Reset form
+      setDocumentForm({
+        title: '',
+        documentType: '',
+        description: '',
+        tags: '',
+        issueDate: new Date().toISOString().split('T')[0],
+        expiryDate: ''
+      });
+      setSelectedFile(null);
+      
+      setUploadSuccess('Document uploaded successfully!');
+      setTimeout(() => {
+        setUploadSuccess('');
+        setIsUploadModalOpen(false);
+      }, 3000);
+
+    } catch (err) {
+      setUploadError(err.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (documentId) => {
+    if (!window.confirm('Are you sure you want to delete this document?')) return;
+
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}/documents/${documentId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        // Remove from documents list
+        setDocuments(prev => prev.filter(doc => doc.id !== documentId));
+        setUploadSuccess('Document deleted successfully!');
+        setTimeout(() => setUploadSuccess(''), 3000);
+      } else {
+        throw new Error('Failed to delete document');
+      }
+    } catch (err) {
+      setUploadError(err.message || 'Failed to delete document');
+    }
+  };
+
+  const handleDownloadDocument = async (documentId, fileName) => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}/documents/${documentId}/download`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Failed to download document');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      setUploadError(err.message || 'Failed to download document');
+    }
   };
 
   const getAvatarColor = (firstName, lastName) => {
@@ -447,11 +692,14 @@ function Profile() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Info label="Email Address" value={employee.email} />
                 <Info label="Phone Number" value={employee.phone} />
+                 <Info label="SSNIT ACCOUNT NAME" value={employee.ssnitAccountName} />
                 <Info label="SSNIT Number" value={employee.ssnitNumber} />
                 <Info label="TIN Number" value={employee.tinNumber} />
                 <Info label="Date of Birth" value={formatDate(employee.dateOfBirth)} />
                 <Info label="Emergency Contact" value={employee.emergencyContact} />
+                 <Info label="Bank Name" value={employee.bank} />
                 <Info label="Account Number" value={employee.accountNumber} />
+                <Info label="Account Name" value={employee.accountName} />
                 <Info label="Ghana Card" value={employee.ghanaCard} />
                 <Info label="Location" value={employee.location} />
                 <Info label="Age" value={employee.age} />
@@ -486,6 +734,7 @@ function Profile() {
                 <Info label="Transport Allowance" value={formatCurrency(employee.transportAllowance)} />
                 <Info label="Clothing Allowance" value={formatCurrency(employee.clothingAllowance)} />
                 <Info label="Other Allowances" value={formatCurrency(employee.otherAllowance)} />
+                 <Info label="NSS Allowances" value={formatCurrency(employee.nssAllowance)} />
               </div>
             </div>
           )}
@@ -519,23 +768,121 @@ function Profile() {
             <div className="space-y-6">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-lg font-semibold text-gray-800">Documents</h2>
-                <button className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors">
+                <button 
+                  onClick={() => setIsUploadModalOpen(true)}
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors px-3 py-2 rounded-lg hover:bg-blue-50"
+                >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
-                  Upload
+                  Upload Document
                 </button>
               </div>
               
-              <div className="text-center py-10 text-gray-500">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="mt-3">No documents uploaded yet</p>
-                <button className="mt-2 text-blue-600 hover:text-blue-800 text-sm">
-                  Upload your first document
-                </button>
-              </div>
+              {documents.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Document
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Issue Date
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Expiry Date
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Size
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {documents.map((doc) => (
+                        <tr key={doc.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center space-x-3">
+                              <div className="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                {doc.fileType === 'pdf' || doc.fileName?.endsWith('.pdf') ? (
+                                  <svg className="h-6 w-6 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                  </svg>
+                                ) : doc.fileName?.match(/\.(jpg|jpeg|png)$/i) ? (
+                                  <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                ) : doc.fileName?.match(/\.(doc|docx)$/i) ? (
+                                  <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                ) : (
+                                  <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                )}
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900">{doc.title}</div>
+                                <div className="text-sm text-gray-500">{doc.description || 'No description'}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                              {doc.documentType || 'GENERAL'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {formatDate(doc.issueDate)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {doc.expiryDate ? formatDate(doc.expiryDate) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {doc.fileSize ? `${(doc.fileSize / 1024).toFixed(1)} KB` : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium">
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleDownloadDocument(doc.id, doc.fileName)}
+                                className="text-blue-600 hover:text-blue-900"
+                              >
+                                Download
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDocument(doc.id)}
+                                className="text-red-600 hover:text-red-900"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-10 text-gray-500">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="mt-3">No documents uploaded yet</p>
+                  <button 
+                    onClick={() => setIsUploadModalOpen(true)}
+                    className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  >
+                    Upload your first document
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -605,6 +952,8 @@ function Profile() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+
+                    
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
@@ -758,6 +1107,19 @@ function Profile() {
                       />
                     </div>
 
+                     <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                      <input
+                        type="text"
+                        name="Account Name"
+                        value={formData.acc || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
                       <input
@@ -860,6 +1222,17 @@ function Profile() {
                     />
                   </div>
 
+                    <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
+                    <input
+                      type="text"
+                      name="ssnitAccountName"
+                      value={formData.ssnitAccountName || ""}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
                     <input
@@ -940,6 +1313,17 @@ function Profile() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+
+                      <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">NSS Allowance</label>
+                      <input
+                        type="number"
+                        name="nssAllowance"
+                        value={formData.nssAllowance || ""}
+                        onChange={handleInputChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -960,6 +1344,194 @@ function Profile() {
                   }`}
                 >
                   {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isUploadModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-lg w-full max-w-md">
+              <div className="flex justify-between items-center border-b p-6">
+                <h2 className="text-xl font-semibold text-gray-800">Upload Document</h2>
+                <button
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    setSelectedFile(null);
+                    setDocumentForm({
+                      title: '',
+                      documentType: '',
+                      description: '',
+                      tags: '',
+                      issueDate: new Date().toISOString().split('T')[0],
+                      expiryDate: ''
+                    });
+                    setUploadError('');
+                    setUploadSuccess('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select File *
+                  </label>
+                  <div className="flex items-center justify-center w-full">
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer ${selectedFile ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:bg-gray-50'}`}>
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        {selectedFile ? (
+                          <>
+                            <svg className="w-8 h-8 text-green-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <p className="text-sm text-green-600 font-medium">{selectedFile.name}</p>
+                            <p className="text-xs text-green-500">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            <p className="text-sm text-gray-600">
+                              <span className="font-semibold">Click to upload</span> or drag and drop
+                            </p>
+                            <p className="text-xs text-gray-500">PDF, JPG, PNG, DOC, XLS (Max: 10MB)</p>
+                          </>
+                        )}
+                      </div>
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        onChange={handleFileSelect}
+                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Document Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={documentForm.title}
+                    onChange={(e) => setDocumentForm({...documentForm, title: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., Employee Contract, CV, Certificate"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Document Type
+                  </label>
+                  <select
+                    value={documentForm.documentType}
+                    onChange={(e) => setDocumentForm({...documentForm, documentType: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Type</option>
+                    <option value="CONTRACT">Employment Contract</option>
+                    <option value="CV">CV/Resume</option>
+                    <option value="CERTIFICATE">Certificate</option>
+                    <option value="ID">ID Document</option>
+                    <option value="PAYSLIP">Payslip</option>
+                    <option value="LEAVE">Leave Document</option>
+                    <option value="PERFORMANCE">Performance Review</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description (Optional)
+                  </label>
+                  <textarea
+                    value={documentForm.description}
+                    onChange={(e) => setDocumentForm({...documentForm, description: e.target.value})}
+                    rows="2"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Brief description of the document"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Issue Date
+                    </label>
+                    <input
+                      type="date"
+                      value={documentForm.issueDate}
+                      onChange={(e) => setDocumentForm({...documentForm, issueDate: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Expiry Date (Optional)
+                    </label>
+                    <input
+                      type="date"
+                      value={documentForm.expiryDate}
+                      onChange={(e) => setDocumentForm({...documentForm, expiryDate: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {uploadError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-600">{uploadError}</p>
+                  </div>
+                )}
+
+                {uploadSuccess && (
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm text-green-600">{uploadSuccess}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t p-6">
+                <button
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    setSelectedFile(null);
+                    setDocumentForm({
+                      title: '',
+                      documentType: '',
+                      description: '',
+                      tags: '',
+                      issueDate: new Date().toISOString().split('T')[0],
+                      expiryDate: ''
+                    });
+                    setUploadError('');
+                    setUploadSuccess('');
+                  }}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  disabled={uploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpload}
+                  disabled={!selectedFile || !documentForm.title.trim() || uploading}
+                  className={`px-4 py-2 rounded-lg text-white transition-colors ${
+                    !selectedFile || !documentForm.title.trim() || uploading
+                      ? "bg-blue-300 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
+                >
+                  {uploading ? "Uploading..." : "Upload Document"}
                 </button>
               </div>
             </div>

@@ -1,9 +1,33 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from 'xlsx';
 import MainSidebar from "../mainSidebar";
-import Search from "../../../compnents/search";
+import Search from "../../../components/search";
 import { Download } from "lucide-react";
+import TimesheetAttendanceSync from '../../../components/sync/TimesheetAttendanceSync';
+import Header from "../../../components/Header";
+import BiometricStatus from './BiometricStatus';
+
+const AttendanceCodes = {
+  PRESENT: 'P',
+  ABSENT: 'A',
+  LEAVE: 'L',
+  HOLIDAY: 'H',
+  SICK: 'S',
+  WEEKEND_PRESENT: 'WP',
+  HOLIDAY_PRESENT: 'HP',
+  LATE: 'LT',
+  OFF_DAY: 'OFF',
+  PATERNITY_LEAVE: 'PL',
+  MATERNITY_LEAVE: 'ML'
+};
+
+const TimesheetStatus = {
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  PAID: 'PAID'
+};
 
 function Attendance() {
   const [query, setQuery] = useState('');
@@ -25,6 +49,18 @@ function Attendance() {
   
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
+  const [selectedAttendanceIds, setSelectedAttendanceIds] = useState(new Set());
+
+  const getSelectedEmployeeIdsFromAttendances = () => {
+    const employeeIds = new Set();
+    attendances.forEach(attendance => {
+      if (selectedAttendanceIds.has(attendance.id) && attendance.employee?.id) {
+        employeeIds.add(attendance.employee.id);
+      }
+    });
+    return employeeIds;
+  };
+  
   const navigate = useNavigate();
   const [attendances, setAttendances] = useState([]);
   const [error, setError] = useState('');
@@ -35,7 +71,6 @@ function Attendance() {
   const [isAllSelected, setIsAllSelected] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
-  const [globalDate, setGlobalDate] = useState(new Date().toISOString().split('T')[0]);
   const [showExcludedEmployees, setShowExcludedEmployees] = useState(false);
   const [leaves, setLeaves] = useState([]);
   const [leavesData, setLeavesData] = useState([]);
@@ -43,9 +78,6 @@ function Attendance() {
   const [showExcelPreview, setShowExcelPreview] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   const [excelFileName, setExcelFileName] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [datesToClear, setDatesToClear] = useState([]);
   const [showHidden, setShowHidden] = useState(false);
   const [selectedDateToClear, setSelectedDateToClear] = useState('');
   const [showBiometricImport, setShowBiometricImport] = useState(false);
@@ -57,6 +89,24 @@ function Attendance() {
   const [biometricImportResult, setBiometricImportResult] = useState(null);
   const [biometricError, setBiometricError] = useState(null);
   const [processedBiometricData, setProcessedBiometricData] = useState(null);
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [syncHistory, setSyncHistory] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  
+  // IMPROVED: Single source of truth for date filtering
+  const [dateFilterMode, setDateFilterMode] = useState("single"); // "single" | "range" | "none"
+  const [singleDate, setSingleDate] = useState(new Date().toISOString().split('T')[0]);
+  const [rangeStart, setRangeStart] = useState(new Date().toISOString().split('T')[0]);
+  const [rangeEnd, setRangeEnd] = useState(new Date().toISOString().split('T')[0]);
+
+  // Date mode for create/edit form
+  const [createDateMode, setCreateDateMode] = useState("single");
+  const [createRangeStart, setCreateRangeStart] = useState(new Date().toISOString().split('T')[0]);
+  const [createRangeEnd, setCreateRangeEnd] = useState(new Date().toISOString().split('T')[0]);
+  const [isEditing, setIsEditing] = useState(false);
 
   const [clearedDates, setClearedDates] = useState(() => {
     const saved = localStorage.getItem('clearedAttendanceDates');
@@ -117,27 +167,36 @@ function Attendance() {
   };
 
   const loadSettings = async () => {
-  try {
-    const token = getToken();
-    const response = await fetch(`${API_BASE_URL}/api/settings/system`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/system`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const systemSettings = await response.json();
+        setSettings(prev => ({
+          ...prev,
+          ...systemSettings,
+          lateArrivalTime: systemSettings.lateArrivalTime || '09:00'
+        }));
       }
-    });
-    
-    if (response.ok) {
-      const systemSettings = await response.json();
-      setSettings(prev => ({
-        ...prev,
-        ...systemSettings,
-        // Ensure lateArrivalTime is set
-        lateArrivalTime: systemSettings.lateArrivalTime || '09:00'
-      }));
+    } catch (error) {
+      console.error('Error loading settings:', error);
     }
-  } catch (error) {
-    console.error('Error loading settings:', error);
-  }
+  };
+
+const getUniqueCategories = () => {
+  const categories = new Set();
+  attendances.forEach(attendance => {
+    if (attendance.employee?.category?.name) {
+      categories.add(attendance.employee.category.name);
+    }
+  });
+  return Array.from(categories).sort();
 };
 
   const loadHolidays = async () => {
@@ -182,6 +241,25 @@ function Attendance() {
     } catch (error) {
       console.error('Error loading job positions:', error);
     }
+  };
+
+  const getSyncDataFromSelectedAttendances = () => {
+    const employeeIds = new Set();
+    const dates = new Set();
+    
+    attendances.forEach(attendance => {
+      if (selectedAttendanceIds.has(attendance.id) && attendance.employee?.id) {
+        employeeIds.add(attendance.employee.id);
+        dates.add(attendance.date);
+      }
+    });
+    
+    return {
+      employeeIds: employeeIds,
+      dates: Array.from(dates),
+      startDate: dates.size > 0 ? Array.from(dates).sort()[0] : null,
+      endDate: dates.size > 0 ? Array.from(dates).sort()[dates.size - 1] : null
+    };
   };
 
   const loadSpecialWeekends = async () => {
@@ -294,21 +372,12 @@ function Attendance() {
 
     const interval = setInterval(refreshSettings, 300000);
     return () => clearInterval(interval);
-  }, [globalDate]);
+  }, []);
 
-  useEffect(() => {
-    if (startDate || endDate) {
-      const timer = setTimeout(() => {
-        fetchAttendance();
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [startDate, endDate, showHidden]);
-
+  // IMPROVED: Fetch attendance when filter changes
   useEffect(() => {
     fetchAttendance();
-  }, [globalDate, clearedDates]);
+  }, [dateFilterMode, singleDate, rangeStart, rangeEnd, showHidden, clearedDates]);
 
   const isSpecialWeekend = (dateString) => {
     return settings.specialWeekends?.some(specialWeekend => 
@@ -327,39 +396,61 @@ function Attendance() {
   };
 
   const getPositionStandardHours = (jobPositionName, jobGrade) => {
-    if (!jobPositionName) return settings.standardWorkHours || 8;
+    if (!jobPositionName || typeof jobPositionName !== 'string') return settings.standardWorkHours;
     
     const position = settings.jobPositions?.find(pos => 
-      pos.name?.toLowerCase() === jobPositionName?.toLowerCase()
+      pos.name && typeof pos.name === 'string' &&
+      pos.name.toLowerCase() === jobPositionName.toLowerCase()
     );
     
     if (!position) {
-      return settings.standardWorkHours || 8;
+      return settings.standardWorkHours;
     }
     
     if (position.grades && jobGrade && position.grades.length > 0) {
       const grade = position.grades.find(g => 
-        g.level?.toLowerCase() === jobGrade?.toLowerCase()
+        g.level && typeof g.level === 'string' &&
+        jobGrade && typeof jobGrade === 'string' &&
+        g.level.toLowerCase() === jobGrade.toLowerCase()
       );
       if (grade && (grade.standardWorkHours || grade.standardWorkHours === 0)) {
         return grade.standardWorkHours;
       }
     }
     
-    return position.standardWorkHours || settings.standardWorkHours || 8;
+    return position.standardWorkHours || settings.standardWorkHours;
   };
 
   const getEmployeeStandardHours = (employee) => {
-    if (!employee) {
-      return settings.standardWorkHours || 8;
+    if (!employee) return settings.standardWorkHours || 0;
+    
+    if (employee.category && typeof employee.category === 'string') {
+      const category = settings.categories?.find(cat => 
+        cat.name && typeof cat.name === 'string' &&
+        cat.name.toLowerCase() === employee.category.toLowerCase()
+      );
+      if (category?.standardRateHours !== undefined) {
+        return category.standardRateHours;
+      }
     }
     
-    if (employee.jobPosition) {
-      const standardHours = getPositionStandardHours(employee.jobPosition, employee.jobGrade);
-      return standardHours;
+    return settings.standardWorkHours;
+  };
+
+  const getEmployeeWorkStartTime = (employee) => {
+    if (!employee) return settings.lateArrivalTime || '09:00';
+    
+    if (employee.category && typeof employee.category === 'string') {
+      const category = settings.categories?.find(cat => 
+        cat.name && typeof cat.name === 'string' &&
+        cat.name.toLowerCase() === employee.category.toLowerCase()
+      );
+      if (category?.workStartTime) {
+        return category.workStartTime;
+      }
     }
     
-    return settings.standardWorkHours || 8;
+    return settings.lateArrivalTime || '09:00';
   };
 
   const calculateHours = (checkIn, checkOut) => {
@@ -411,6 +502,23 @@ function Attendance() {
   const getStatusDisplay = (attendance) => {
     const date = attendance.date;
     
+    const hasCheckIn = attendance.checkIn && attendance.checkIn !== '--:--';
+    const hasCheckOut = attendance.checkOut && attendance.checkOut !== '--:--';
+    
+    if (hasCheckIn && !hasCheckOut) {
+      return {
+        text: 'Half Day (Checked In)',
+        class: 'bg-yellow-100 text-yellow-800'
+      };
+    }
+    
+    if (!hasCheckIn && hasCheckOut) {
+      return {
+        text: 'Half Day (Checked Out)',
+        class: 'bg-yellow-100 text-yellow-800'
+      };
+    }
+    
     if (isHoliday(date)) {
       return {
         text: 'Holiday Present',
@@ -433,6 +541,12 @@ function Attendance() {
         class: attendance.status === 'Present' ? 'bg-green-100 text-green-800' :
                attendance.status === 'Absent' ? 'bg-red-100 text-red-800' :
                attendance.status === 'Late' ? 'bg-yellow-100 text-yellow-800' :
+               attendance.status === 'Half Day' ? 'bg-yellow-100 text-yellow-800' :
+               attendance.status === 'On Leave' ? 'bg-blue-100 text-blue-800' :
+               attendance.status === 'Sick' ? 'bg-orange-100 text-orange-800' :
+               attendance.status === 'Maternity Leave' ? 'bg-pink-100 text-pink-800' :
+               attendance.status === 'Paternity Leave' ? 'bg-teal-100 text-teal-800' :
+               attendance.status === 'Off Day' ? 'bg-gray-100 text-gray-800' :
                'bg-gray-100 text-gray-800'
       };
     }
@@ -482,22 +596,24 @@ function Attendance() {
       const overtimesData = overtimeRes.ok ? await overtimeRes.json() : [];
       const leavesData = leavesRes.ok ? await leavesRes.json() : [];
 
+      const currentSingleDate = dateFilterMode === 'single' ? singleDate : rangeStart;
+      
       const filteredEmployees = employeesData.filter(employee => {
         const hasAttendance = attendancesData.some(a => 
           a.employee?.id === employee.id && 
-          a.date === globalDate
+          a.date === currentSingleDate
         );
         
         const hasOvertime = overtimesData.some(o => 
           o.employee?.id === employee.id && 
-          o.date === globalDate
+          o.date === currentSingleDate
         );
         
         const isOnLeave = leavesData.some(l => 
           l.employee?.id === employee.id &&
           l.status === "Approved" &&
-          new Date(globalDate) >= new Date(l.startDate) && 
-          new Date(globalDate) <= new Date(l.endDate)
+          new Date(currentSingleDate) >= new Date(l.startDate) && 
+          new Date(currentSingleDate) <= new Date(l.endDate)
         );
 
         return !hasAttendance && !hasOvertime && !isOnLeave;
@@ -509,6 +625,58 @@ function Attendance() {
       setEmployees([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const fetchAttendanceData = async () => {
+    setLoading(true);
+    try {
+      const token = getToken();
+      const { start, end } = getActiveDateRange();
+      
+      const response = await fetch(
+        `${API_BASE_URL}/api/attendance?startDate=${start}&endDate=${end}&includeEmployee=true`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+      
+      if (!response.ok) throw new Error('Failed to fetch attendance');
+      
+      const data = await response.json();
+      setAttendances(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // IMPROVED: Get the active date range based on filter mode
+  const getActiveDateRange = () => {
+    if (dateFilterMode === 'range' && rangeStart && rangeEnd) {
+      return { start: rangeStart, end: rangeEnd };
+    } else if (dateFilterMode === 'single' && singleDate) {
+      return { start: singleDate, end: singleDate };
+    } else {
+      // Show all dates (no filter)
+      return { start: '2000-01-01', end: '2099-12-31' };
+    }
+  };
+
+  // IMPROVED: Get display text for the current filter
+  const getFilterDisplayText = () => {
+    if (dateFilterMode === 'range' && rangeStart && rangeEnd) {
+      return `📅 ${rangeStart} to ${rangeEnd}`;
+    } else if (dateFilterMode === 'single' && singleDate) {
+      const date = new Date(singleDate);
+      return `📅 ${date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
+    } else {
+      return `📅 All Dates (${attendances.length} records)`;
     }
   };
 
@@ -535,18 +703,18 @@ function Attendance() {
       if (!attendanceRes.ok) throw new Error('Failed to fetch attendance');
       
       let data = await attendanceRes.json();
+      console.log('Attendance record sample:', data[0]);
+    console.log('Employee in attendance:', data[0]?.employee);
       const leavesData = leavesRes.ok ? await leavesRes.json() : [];
 
-      if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        data = data.filter(att => {
-          const attDate = new Date(att.date);
-          return attDate >= start && attDate <= end;
-        });
-      } else if (globalDate) {
-        data = data.filter(att => att.date === globalDate);
-      }
+      // IMPROVED: Apply date filter based on active mode
+      const { start, end } = getActiveDateRange();
+      data = data.filter(att => {
+        const attDate = new Date(att.date);
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        return attDate >= startDate && attDate <= endDate;
+      });
 
       const leaveAttendanceRecords = generateLeaveAttendanceRecords(leavesData, data);
       const combinedData = [...data, ...leaveAttendanceRecords];
@@ -563,20 +731,66 @@ function Attendance() {
     }
   };
 
-  const generateLeaveAttendanceRecords = (leavesData, existingAttendance) => {
-    const leaveRecords = [];
+  // IMPROVED: Reset all date filters
+  const resetDateFilters = () => {
+    setDateFilterMode('none');
+    setSingleDate(new Date().toISOString().split('T')[0]);
+    setRangeStart(new Date().toISOString().split('T')[0]);
+    setRangeEnd(new Date().toISOString().split('T')[0]);
+  };
+
+  // IMPROVED: Apply single date filter
+  const applySingleDateFilter = () => {
+    setDateFilterMode('single');
+    fetchAttendance();
+  };
+
+  // IMPROVED: Apply range filter
+  const applyRangeFilter = () => {
+    if (rangeStart && rangeEnd) {
+      if (new Date(rangeStart) > new Date(rangeEnd)) {
+        alert("Start date cannot be after end date");
+        return;
+      }
+      setDateFilterMode('range');
+      fetchAttendance();
+    } else {
+      alert("Please select both start and end dates");
+    }
+  };
+
+  // Replace the existing generateLeaveAttendanceRecords function with this:
+
+const generateLeaveAttendanceRecords = (leavesData, existingAttendance) => {
+  const leaveRecords = [];
+  
+  // Get the active date range
+  const { start, end } = getActiveDateRange();
+  const filterStartDate = new Date(start);
+  const filterEndDate = new Date(end);
+  
+  leavesData.forEach(leave => {
+    if (leave.status !== 'Approved') return;
     
-    leavesData.forEach(leave => {
-      if (leave.status !== 'Approved') return;
+    const leaveStartDate = new Date(leave.startDate);
+    const leaveEndDate = new Date(leave.endDate);
+    const employeeId = leave.employee?.id;
+    
+    if (!employeeId) return;
+    
+    // Calculate the intersection between leave period and filter period
+    const effectiveStart = new Date(Math.max(leaveStartDate, filterStartDate));
+    const effectiveEnd = new Date(Math.min(leaveEndDate, filterEndDate));
+    
+    // Skip if no overlap with filter period
+    if (effectiveStart > effectiveEnd) return;
+    
+    const currentDate = new Date(effectiveStart);
+    while (currentDate <= effectiveEnd) {
+      const dayOfWeek = currentDate.getDay();
       
-      const startDate = new Date(leave.startDate);
-      const endDate = new Date(leave.endDate);
-      const employeeId = leave.employee?.id;
-      
-      if (!employeeId) return;
-      
-      const currentDate = new Date(startDate);
-      while (currentDate <= endDate) {
+      // Only create attendance records for weekdays (Monday-Friday)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
         const dateStr = currentDate.toISOString().split('T')[0];
         
         const existingRecord = existingAttendance.find(att => 
@@ -584,13 +798,16 @@ function Attendance() {
         );
         
         if (!existingRecord) {
+          const employee = employees.find(emp => emp.id === employeeId);
+          const standardHours = getEmployeeStandardHours(employee);
+          
           leaveRecords.push({
             id: `leave-${leave.id}-${dateStr}`,
             employee: leave.employee,
             date: dateStr,
             checkIn: '--:--',
             checkOut: '--:--',
-            minimumHour: 8,
+            minimumHour: standardHours,
             shift: 'Day',
             workType: 'Regular',
             status: 'On Leave',
@@ -598,13 +815,45 @@ function Attendance() {
             leaveType: leave.leaveType
           });
         }
-        
-        currentDate.setDate(currentDate.getDate() + 1);
       }
+      
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+  });
+  
+  return leaveRecords;
+};
+
+const filteredAttendancesBySearch = useMemo(() => {
+  let filtered = attendances;
+  
+  // Apply search query filter
+  if (searchQuery.trim()) {
+    const query = searchQuery.toLowerCase().trim();
+    filtered = filtered.filter(attendance => {
+      const fullName = `${attendance.employee?.firstName || ''} ${attendance.employee?.lastName || ''}`.toLowerCase();
+      const employeeId = (attendance.employee?.employeeId || '').toLowerCase();
+      const date = attendance.date;
+      const status = (attendance.status || '').toLowerCase();
+      const category = (attendance.employee?.category?.name || '').toLowerCase();
+      
+      return fullName.includes(query) || 
+             employeeId.includes(query) || 
+             date.includes(query) ||
+             status.includes(query) ||
+             category.includes(query);
     });
-    
-    return leaveRecords;
-  };
+  }
+  
+  // Apply category filter
+  if (selectedCategoryFilter) {
+    filtered = filtered.filter(attendance => 
+      attendance.employee?.category?.name === selectedCategoryFilter
+    );
+  }
+  
+  return filtered;
+}, [attendances, searchQuery, selectedCategoryFilter]);
 
   const handleInputChange = (e) => {
     const { name, value, options } = e.target;
@@ -623,112 +872,168 @@ function Attendance() {
     }
   };
 
-  const handleHeaderCheckboxChange = (e) => {
-    const isChecked = e.target.checked;
-    setIsAllSelected(isChecked);
-    
-    attendances.forEach(attendance => {
-      const checkbox = document.getElementById(`checkbox-${attendance.id}`);
-      if (checkbox) {
-        checkbox.checked = isChecked;
+const handleHeaderCheckboxChange = (e) => {
+  const isChecked = e.target.checked;
+  setIsAllSelected(isChecked);
+  
+  if (isChecked) {
+    const newSelected = new Set(filteredAttendancesBySearch.map(a => a.id));
+    setSelectedAttendanceIds(newSelected);
+  } else {
+    setSelectedAttendanceIds(new Set());
+  }
+};
+
+  const handleAttendanceCheckboxChange = (attendanceId, isChecked) => {
+    setSelectedAttendanceIds(prev => {
+      const newSet = new Set(prev);
+      if (isChecked) {
+        newSet.add(attendanceId);
+      } else {
+        newSet.delete(attendanceId);
       }
+      return newSet;
     });
+    
+    const allChecked = attendances.length > 0 && 
+      Array.from(selectedAttendanceIds).length + (isChecked ? 1 : -1) === attendances.length;
+    setIsAllSelected(allChecked);
   };
 
   const createAttendance = async () => {
     try {
-      const calculateTotalHours = (checkIn, checkOut) => {
-        if (!checkIn || !checkOut) return 0;
-        
-        try {
-          const [inHour, inMinute] = checkIn.split(':').map(Number);
-          const [outHour, outMinute] = checkOut.split(':').map(Number);
-          
-          const totalInMinutes = inHour * 60 + inMinute;
-          const totalOutMinutes = outHour * 60 + outMinute;
-          
-          const diffMinutes = totalOutMinutes - totalInMinutes;
-          return parseFloat((diffMinutes / 60).toFixed(2));
-        } catch (e) {
-          console.error('Error calculating hours:', e);
-          return 0;
-        }
-      };
-
       const formatTimeToHHMMSS = (time) => {
         if (!time) return '00:00:00';
-        if (time.length === 5) return time + ':00';
+        if (time.length === 5) return `${time}:00`;
         if (time.length === 8) return time;
-        const parts = time.split(':');
-        if (parts.length === 2) return `${parts[0]}:${parts[1]}:00`;
-        return '00:00:00';
+        const [h, m] = time.split(':');
+        return `${h}:${m}:00`;
       };
 
-      const totalHoursWorked = calculateTotalHours(newAttendance.checkIn, newAttendance.checkOut);
-      
-      if (totalHoursWorked <= 0) {
-        alert('Check-out time must be after check-in time');
+      const singleDate = newAttendance.date || singleDate;
+
+      const datesToProcess =
+        !isEditing && createDateMode === "range"
+          ? getDatesInRange(createRangeStart, createRangeEnd)
+          : [singleDate];
+
+      if (!datesToProcess.length) {
+        alert("Please select a valid date or date range");
         return;
       }
 
-      const determinedStatus = determineStatus(newAttendance.date || globalDate);
-
-      const employeeIdsToProcess = selectAllEmployees 
+      const employeeIdsToProcess = selectAllEmployees
         ? employees.map(emp => emp.id)
-        : selectedEmployees.length > 0 
+        : selectedEmployees.length > 0
           ? selectedEmployees.map(id => parseInt(id))
-          : newAttendance.employee?.id ? [newAttendance.employee.id] : [];
+          : newAttendance.employee?.id
+            ? [newAttendance.employee.id]
+            : [];
 
       if (employeeIdsToProcess.length === 0) {
-        alert("Please select at least one employee");
+        alert('Please select at least one employee');
         return;
       }
 
       const token = getToken();
       const overtimeRecords = [];
 
-      const attendancePayload = await Promise.all(
-        employeeIdsToProcess.map(async (employeeId) => {
-          const employee = employees.find(emp => emp.id === employeeId);
-          const employeeStandardHours = getEmployeeStandardHours(employee);
-          
-          const regularHours = Math.min(totalHoursWorked, employeeStandardHours);
-          const overtimeHours = parseFloat(Math.max(totalHoursWorked - employeeStandardHours, 0).toFixed(2));
+      const attendancePayload = [];
 
-          if (overtimeHours > 0) {
+      for (const dateStr of datesToProcess) {
+        for (const employeeId of employeeIdsToProcess) {
+          const employee = employees.find(emp => emp.id === employeeId);
+          
+          const workStartTime = getEmployeeWorkStartTime(employee);
+          
+          const calculateTotalMinutesWithWorkStart = (checkIn, checkOut, workStartTime) => {
+            if (!checkIn || !checkOut) return 0;
+            
+            const [inH, inM] = checkIn.split(':').map(Number);
+            const [startH, startM] = workStartTime.split(':').map(Number);
+            const [outH, outM] = checkOut.split(':').map(Number);
+            
+            const checkInMinutes = inH * 60 + inM;
+            const workStartMinutes = startH * 60 + startM;
+            const checkOutMinutes = outH * 60 + outM;
+            
+            const effectiveStartMinutes = Math.max(checkInMinutes, workStartMinutes);
+            
+            return Math.max(0, checkOutMinutes - effectiveStartMinutes);
+          };
+          
+          const totalWorkedMinutes = calculateTotalMinutesWithWorkStart(
+            newAttendance.checkIn,
+            newAttendance.checkOut,
+            workStartTime
+          );
+
+          if (totalWorkedMinutes <= 0) {
+            alert(`Check-out time must be after work start time for ${employee.firstName} ${employee.lastName}`);
+            return;
+          }
+
+          const standardHours = getEmployeeStandardHours(employee);
+          const standardMinutes = standardHours * 60;
+
+          const overtimeMinutes = Math.max(0, totalWorkedMinutes - standardMinutes);
+
+          if (overtimeMinutes > 0) {
             overtimeRecords.push({
               employeeId,
               employee,
-              overtimeHours,
-              standardHours: employeeStandardHours,
-              totalHours: totalHoursWorked,
+              overtimeMinutes,
+              standardMinutes,
+              standardHours,
+              totalWorkedMinutes,
               checkIn: newAttendance.checkIn,
               checkOut: newAttendance.checkOut,
-              date: newAttendance.date || globalDate
+              date: dateStr
             });
           }
 
-          return {
+          let determinedStatus = newAttendance.status;
+          if (!determinedStatus) {
+            if (isHoliday(dateStr)) {
+              determinedStatus = "Holiday Present";
+            } else if (isSpecialWeekend(dateStr)) {
+              determinedStatus = "Special Weekend Present";
+            } else if (isWeekend(dateStr)) {
+              determinedStatus = "Weekend Present";
+            } else {
+              const isLate = (() => {
+                if (!newAttendance.checkIn || !workStartTime) return false;
+                const [inH, inM] = newAttendance.checkIn.split(':').map(Number);
+                const [startH, startM] = workStartTime.split(':').map(Number);
+                const checkInMinutes = inH * 60 + inM;
+                const workStartMinutes = startH * 60 + startM;
+                return checkInMinutes > workStartMinutes + 1;
+              })();
+              
+              determinedStatus = isLate ? "Late" : "Present";
+            }
+          }
+
+          attendancePayload.push({
             employee: { id: employeeId },
             shift: newAttendance.shift || determineShift(newAttendance.checkIn),
-            workType: newAttendance.workType || "Regular",
-            date: newAttendance.date || globalDate,
-            status: newAttendance.status || determineStatus(newAttendance.date || globalDate, newAttendance.checkIn),
-            minimumHour: regularHours,
-            overtime: overtimeHours,
+            workType: newAttendance.workType || 'Regular',
+            date: dateStr,
+            status: determinedStatus,
             checkIn: newAttendance.checkIn,
             checkOut: newAttendance.checkOut,
-            totalHoursWorked: totalHoursWorked,
-            standardHours: employeeStandardHours
-          };
-        })
-      );
+            minimumHour: totalWorkedMinutes / 60,
+            overtime: overtimeMinutes / 60,
+            standardHours: standardHours
+          });
+        }
+      }
 
       const response = await fetch(`${API_BASE_URL}/api/attendance/batch`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(attendancePayload)
       });
@@ -740,124 +1045,93 @@ function Attendance() {
 
       const savedAttendances = await response.json();
 
-      if (overtimeRecords.length > 0) {
-        for (const overtimeRecord of overtimeRecords) {
-          try {
-            const correspondingAttendance = savedAttendances.find(
-              att => att.employee?.id === overtimeRecord.employeeId
-            );
+      for (const overtimeRecord of overtimeRecords) {
+        const correspondingAttendance = savedAttendances.find(
+          att =>
+            att.employee?.id === overtimeRecord.employeeId &&
+            att.date === overtimeRecord.date
+        );
 
-            if (correspondingAttendance && overtimeRecord.overtimeHours > 0) {
-              const calculateOvertimeStartTime = (checkIn, standardHours) => {
-                if (!checkIn) return '';
-                
-                try {
-                  const [hours, minutes] = checkIn.split(':').map(Number);
-                  const totalMinutes = hours * 60 + minutes + (standardHours * 60);
-                  
-                  const overtimeHours = Math.floor(totalMinutes / 60) % 24;
-                  const overtimeMinutes = totalMinutes % 60;
-                  
-                  return `${String(overtimeHours).padStart(2, '0')}:${String(overtimeMinutes).padStart(2, '0')}`;
-                } catch (error) {
-                  console.error('Error calculating overtime start time:', error);
-                  return checkIn;
-                }
-              };
+        if (!correspondingAttendance) continue;
 
-              const calculateOvertimeMultiplier = (dateString, overtimeHours) => {
-                const date = new Date(dateString);
-                const dayOfWeek = date.getDay();
-                
-                let multiplier = settings.defaultOvertimeMultiplier || 1.5;
-                
-                if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
-                  multiplier = settings.sundayOvertimeMultiplier || 2.0;
-                }
-                
-                if (settings.enableTimeAndHalfAfter8Hours && overtimeHours > 8) {
-                  multiplier = settings.timeAndHalfMultiplier || 1.5;
-                }
-                
-                return multiplier;
-              };
+        const [h, m] = overtimeRecord.checkIn.split(':').map(Number);
+        const overtimeStartTotalMinutes = h * 60 + m + overtimeRecord.standardMinutes;
+        const overtimeStartHour = Math.floor(overtimeStartTotalMinutes / 60) % 24;
+        const overtimeStartMinute = overtimeStartTotalMinutes % 60;
+        const overtimeStartTime = `${String(overtimeStartHour).padStart(2, '0')}:${String(overtimeStartMinute).padStart(2, '0')}`;
 
-              const getEmployeeRate = (employeeId) => {
-                const employee = employees.find(emp => emp.id === employeeId);
-                return employee?.minimumRate || settings.hourlyRate;
-              };
+        const date = new Date(overtimeRecord.date);
+        const dayOfWeek = date.getDay();
 
-              const overtimeStartTime = calculateOvertimeStartTime(
-                overtimeRecord.checkIn, 
-                overtimeRecord.standardHours
-              );
+        let multiplier = settings.defaultOvertimeMultiplier || 1.5;
+        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
+          multiplier = settings.sundayOvertimeMultiplier || 2.0;
+        }
+        if (settings.enableTimeAndHalfAfter8Hours && overtimeRecord.overtimeMinutes > 480) {
+          multiplier = settings.timeAndHalfMultiplier || 1.5;
+        }
 
-              const employeeRate = getEmployeeRate(overtimeRecord.employeeId);
-              const multiplier = calculateOvertimeMultiplier(
-                overtimeRecord.date, 
-                overtimeRecord.overtimeHours
-              );
-              
-              const calculatedPay = (employeeRate * multiplier * overtimeRecord.overtimeHours).toFixed(2);
+        const employeeRate =
+          employees.find(emp => emp.id === overtimeRecord.employeeId)?.minimumRate ||
+          settings.hourlyRate;
 
-              const overtimeData = {
-                employeeId: overtimeRecord.employeeId,
-                date: overtimeRecord.date,
-                startTime: formatTimeToHHMMSS(overtimeStartTime),
-                endTime: formatTimeToHHMMSS(overtimeRecord.checkOut),
-                status: 'Pending',
-                baseHourlyRate: employeeRate,
-                overtimeMultiplier: multiplier,
-                overtimeHours: Number(overtimeRecord.overtimeHours),
-                calculatedOvertimePay: Number(calculatedPay)
-              };
+        const overtimeHours = Number((overtimeRecord.overtimeMinutes / 60).toFixed(2));
+        const calculatedPay = Number((employeeRate * multiplier * overtimeHours).toFixed(2));
 
-              const overtimeResponse = await fetch(`${API_BASE_URL}/api/overtime`, {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`,
-                },
-                body: JSON.stringify(overtimeData),
-              });
+        const overtimeData = {
+          employeeId: overtimeRecord.employeeId,
+          date: overtimeRecord.date,
+          startTime: formatTimeToHHMMSS(overtimeStartTime),
+          endTime: formatTimeToHHMMSS(overtimeRecord.checkOut),
+          status: 'Pending',
+          baseHourlyRate: employeeRate,
+          overtimeMultiplier: multiplier,
+          overtimeHours,
+          calculatedOvertimePay: calculatedPay
+        };
 
-              if (!overtimeResponse.ok) {
-                const errorText = await overtimeResponse.text();
-                console.error('Failed to create overtime:', errorText);
-              } else {
-                const overtimeResult = await overtimeResponse.json();
-                console.log('Overtime created successfully:', overtimeResult);
-              }
-            }
-          } catch (overtimeError) {
-            console.error('Error creating overtime record:', overtimeError);
-          }
+        const overtimeResponse = await fetch(`${API_BASE_URL}/api/overtime`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(overtimeData)
+        });
+
+        if (!overtimeResponse.ok) {
+          const errorText = await overtimeResponse.text();
+          console.error('Failed to create overtime:', errorText);
         }
       }
 
-      const successMessage = overtimeRecords.length > 0 
-        ? `Successfully created ${savedAttendances.length} attendance record(s) with ${overtimeRecords.length} overtime record(s)`
-        : `Successfully created ${savedAttendances.length} attendance record(s)`;
-
-      alert(successMessage);
+      alert(
+        overtimeRecords.length > 0
+          ? `Successfully created ${savedAttendances.length} attendance record(s) with ${overtimeRecords.length} overtime record(s)`
+          : `Successfully created ${savedAttendances.length} attendance record(s)`
+      );
 
       setNewAttendance({
         employee: { id: '' },
         shift: '',
         workType: '',
-        date: globalDate,
+        date: singleDate,
         status: '',
         minimumHour: '',
         checkIn: '',
-        checkOut: '',
+        checkOut: ''
       });
+
       setSelectedEmployees([]);
       setSelectAllEmployees(false);
-      
+      setIsEditing(false);
+      setCreateDateMode("single");
+      setCreateRangeStart(singleDate);
+      setCreateRangeEnd(singleDate);
+
       fetchAttendance();
       fetchEmployees();
       setIsCreateMenuOpen(false);
-
     } catch (err) {
       console.error('Error creating attendance:', err);
       alert(`Failed to create attendance: ${err.message}`);
@@ -865,8 +1139,71 @@ function Attendance() {
     }
   };
 
+  const calculateEffectiveHours = (checkIn, checkOut, workStartTime, standardHours) => {
+    if (!checkIn || !checkOut) return { regularHours: 0, overtimeHours: 0, totalHours: 0 };
+    
+    try {
+      const [inHour, inMinute] = checkIn.split(':').map(Number);
+      const [startHour, startMinute] = workStartTime.split(':').map(Number);
+      const [outHour, outMinute] = checkOut.split(':').map(Number);
+      
+      const checkInMinutes = inHour * 60 + inMinute;
+      const workStartMinutes = startHour * 60 + startMinute;
+      const checkOutMinutes = outHour * 60 + outMinute;
+      
+      const effectiveStartMinutes = Math.max(checkInMinutes, workStartMinutes);
+      
+      const totalMinutes = Math.max(0, checkOutMinutes - effectiveStartMinutes);
+      const totalHours = totalMinutes / 60;
+      
+      const regularHours = Math.min(totalHours, standardHours);
+      const overtimeHours = Math.max(0, totalHours - standardHours);
+      
+      return {
+        totalHours: Number(totalHours.toFixed(2)),
+        regularHours: Number(regularHours.toFixed(2)),
+        overtimeHours: Number(overtimeHours.toFixed(2))
+      };
+    } catch (e) {
+      console.error('Error calculating hours:', e);
+      return { totalHours: 0, regularHours: 0, overtimeHours: 0 };
+    }
+  };
+
+  const isEmployeeLate = (checkInTime, workStartTime) => {
+    if (!checkInTime || !workStartTime) return false;
+    
+    try {
+      const [checkInHour, checkInMinute] = checkInTime.split(':').map(Number);
+      const [startHour, startMinute] = workStartTime.split(':').map(Number);
+      
+      const checkInMinutes = checkInHour * 60 + checkInMinute;
+      const workStartMinutes = startHour * 60 + startMinute;
+      
+      return checkInMinutes > workStartMinutes + 1;
+    } catch (error) {
+      console.error('Error checking late arrival:', error);
+      return false;
+    }
+  };
+
+  const determineStatus = (dateString, checkInTime, employee) => {
+    if (isHoliday(dateString)) {
+      return "Holiday Present";
+    } else if (isSpecialWeekend(dateString)) {
+      return "Special Weekend Present";
+    } else if (isWeekend(dateString)) {
+      return "Weekend Present";
+    } else {
+      if (checkInTime && isEmployeeLate(checkInTime, employee)) {
+        return "Late";
+      }
+      return "Present";
+    }
+  };
+
   const StatusDropdown = () => {
-    const date = newAttendance.date || globalDate;
+    const date = newAttendance.date || singleDate;
     const statusOptions = getStatusOptions(date);
     
     return (
@@ -888,9 +1225,16 @@ function Attendance() {
     const statusDisplay = getStatusDisplay(attendance);
     
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusDisplay.class}`}>
-        {statusDisplay.text}
-      </span>
+      <div className="flex items-center gap-2">
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusDisplay.class}`}>
+          {statusDisplay.text}
+        </span>
+        {attendance.biometric && (
+          <span className="text-xs text-blue-600" title="Biometric Record">
+            📱
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -988,6 +1332,11 @@ function Attendance() {
   const handleEditAttendance = (id) => {
     const attendance = attendances.find(a => a.id === id);
     if (attendance) {
+      setIsEditing(true);
+      setCreateDateMode("single");
+      setCreateRangeStart(attendance.date);
+      setCreateRangeEnd(attendance.date);
+
       setNewAttendance({
         ...attendance,
         employee: { id: attendance.employee?.id || '' }
@@ -1022,22 +1371,24 @@ function Attendance() {
   };
 
   const clearTableAndForm = () => {
-    if (!globalDate) {
-      alert("Please select a date first");
+    const dateToClear = dateFilterMode === 'single' ? singleDate : null;
+    
+    if (!dateToClear) {
+      alert("Please select a single date mode to clear records");
       return;
     }
   
-    if (!window.confirm(`Are you sure you want to hide all records for ${globalDate}?`)) {
+    if (!window.confirm(`Are you sure you want to hide all records for ${dateToClear}?`)) {
       return;
     }
   
     setClearedDates(prev => 
-      prev.includes(globalDate) ? prev : [...prev, globalDate]
+      prev.includes(dateToClear) ? prev : [...prev, dateToClear]
     );
     
-    setAttendances(prev => prev.filter(att => att.date !== globalDate));
+    setAttendances(prev => prev.filter(att => att.date !== dateToClear));
     
-    alert(`Hidden records for ${globalDate}. Use "Reset All" to show them again.`);
+    alert(`Hidden records for ${dateToClear}. Use "Show Cleared" to see them again.`);
   };
 
   const resetClearedDates = () => {
@@ -1140,7 +1491,7 @@ function Attendance() {
   });
 
   useEffect(() => {
-    const date = newAttendance.date || globalDate;
+    const date = newAttendance.date || singleDate;
     if (!date) return;
 
     if (!newAttendance.status || newAttendance.status === '') {
@@ -1166,7 +1517,7 @@ function Attendance() {
         }));
       }
     }
-  }, [newAttendance.date, newAttendance.status, globalDate]);
+  }, [newAttendance.date, newAttendance.status, singleDate]);
 
   useEffect(() => {
     const minAmount = newAttendance.minimumHour * settings.hourlyRate;
@@ -1914,39 +2265,23 @@ function Attendance() {
     }
   };
 
-const isEmployeeLate = (checkInTime) => {
-  if (!checkInTime || !settings.lateArrivalTime) return false;
-  
-  try {
-    const [checkInHour, checkInMinute] = checkInTime.split(':').map(Number);
-    const [lateHour, lateMinute] = settings.lateArrivalTime.split(':').map(Number);
-    
-    const checkInTotalMinutes = checkInHour * 60 + checkInMinute;
-    const lateTotalMinutes = lateHour * 60 + lateMinute;
-    
-    return checkInTotalMinutes > lateTotalMinutes;
-  } catch (error) {
-    console.error('Error checking late arrival:', error);
-    return false;
-  }
-};
+  const toISODate = (d) => d.toISOString().split("T")[0];
 
-// Then update your status determination logic:
-const determineStatus = (dateString, checkInTime) => {
-  if (isHoliday(dateString)) {
-    return "Holiday Present";
-  } else if (isSpecialWeekend(dateString)) {
-    return "Special Weekend Present";
-  } else if (isWeekend(dateString)) {
-    return "Weekend Present";
-  } else {
-    // Check if employee is late using the setting
-    if (checkInTime && isEmployeeLate(checkInTime)) {
-      return "Late";
+  const getDatesInRange = (startStr, endStr) => {
+    if (!startStr || !endStr) return [];
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+    if (start > end) return [];
+
+    const dates = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      dates.push(toISODate(cur));
+      cur.setDate(cur.getDate() + 1);
     }
-    return "Present";
-  }
-};
+    return dates;
+  };
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
@@ -2293,6 +2628,705 @@ const determineStatus = (dateString, checkInTime) => {
     );
   };
 
+  const convertAttendanceToTimesheet = (attendanceRecords, settings, employees) => {
+    const timesheetMap = new Map();
+    
+    attendanceRecords.forEach(record => {
+      const employeeId = record.employee?.id || record.employeeId;
+      const { date, checkIn, checkOut, status, minimumHour, overtime } = record;
+      
+      if (!employeeId) return;
+      
+      const employee = employees.find(e => e.id === employeeId);
+      const standardHours = getEmployeeStandardHours(employee, settings);
+      
+      const key = `${employeeId}-${date}`;
+      let attendanceCode = 'P';
+      
+      const statusUpper = (status || "").toUpperCase();
+      
+      if (statusUpper === "ON LEAVE" || statusUpper === "LEAVE") {
+        attendanceCode = "L";
+      } else if (statusUpper === "SICK" || statusUpper === "SICK LEAVE") {
+        attendanceCode = "S";
+      } else if (statusUpper === "ABSENT") {
+        attendanceCode = "A";
+      } else if (statusUpper === "OFF DAY") {
+        attendanceCode = "OFF";
+      } else if (statusUpper === "MATERNITY LEAVE") {
+        attendanceCode = "ML";
+      } else if (statusUpper === "PATERNITY LEAVE") {
+        attendanceCode = "PL";
+      } else if (statusUpper === "HOLIDAY PRESENT") {
+        attendanceCode = "HP";
+      } else if (statusUpper === "WEEKEND PRESENT") {
+        attendanceCode = "WP";
+      } else if (statusUpper === "SPECIAL WEEKEND PRESENT") {
+        attendanceCode = "WP";
+      } else if (statusUpper === "PRESENT" || statusUpper === "LATE") {
+        attendanceCode = "P";
+      } else if (statusUpper === "HOLIDAY") {
+        attendanceCode = "H";
+      }
+      
+      let regularHours = 0;
+      let overtimeHours = 0;
+      let totalHours = 0;
+      
+      const isPresentCode = ['P', 'WP', 'HP'].includes(attendanceCode);
+      
+      if (isPresentCode) {
+        if (minimumHour !== undefined && minimumHour !== null) {
+          regularHours = parseFloat(minimumHour) || 0;
+          overtimeHours = parseFloat(overtime) || 0;
+          totalHours = regularHours + overtimeHours;
+        } else if (checkIn && checkOut) {
+          totalHours = calculateHoursFromTime(checkIn, checkOut);
+          regularHours = Math.min(totalHours, standardHours);
+          overtimeHours = Math.max(totalHours - standardHours, 0);
+        } else {
+          regularHours = standardHours;
+          totalHours = standardHours;
+          overtimeHours = 0;
+        }
+      }
+      
+      const hourlyRate = employee?.minimumRate || employee?.hourlyRate || settings.hourlyRate || 0;
+      const dateMultiplier = getDateRateMultiplier(date, settings);
+      const overtimeMultiplier = settings.timeAndHalfAfter8Hours ? 1.5 : 1.0;
+      
+      const regularPay = regularHours * hourlyRate * dateMultiplier;
+      const overtimePay = overtimeHours * hourlyRate * overtimeMultiplier * dateMultiplier;
+      const earnings = regularPay + overtimePay;
+      
+      timesheetMap.set(key, {
+        employee: {
+          id: employeeId,
+          firstName: employee?.firstName,
+          lastName: employee?.lastName,
+          employeeId: employee?.employeeId
+        },
+        employeeId: employeeId,
+        employeeName: `${employee?.firstName} ${employee?.lastName}`,
+        date,
+        regularHours: parseFloat(regularHours.toFixed(2)),
+        overtimeHours: parseFloat(overtimeHours.toFixed(2)),
+        breakHours: 0,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        earnings: parseFloat(earnings.toFixed(2)),
+        status: 'PENDING',
+        attendanceCode: attendanceCode,
+        source: 'attendance_sync',
+        details: [{
+          checkIn,
+          checkOut,
+          attendanceStatus: status,
+          calculatedHours: totalHours
+        }]
+      });
+    });
+    
+    return Array.from(timesheetMap.values());
+  };
+
+  const convertAttendanceStatusToCode = (attendanceStatus, date, settings) => {
+    const dateObj = new Date(date);
+    
+    if (settings.holidays?.some(h => h.date === date)) {
+      switch (attendanceStatus) {
+        case 'Holiday Present':
+        case 'Present':
+          return 'HP';
+        case 'Absent':
+          return 'H';
+        case 'On Leave':
+        case 'Maternity Leave':
+        case 'Paternity Leave':
+          return 'L';
+        case 'Sick':
+          return 'S';
+        case 'Off Day':
+          return 'OFF';
+        default:
+          return 'H';
+      }
+    }
+    
+    if (settings.specialWeekends?.some(s => s.date === date)) {
+      switch (attendanceStatus) {
+        case 'Special Weekend Present':
+        case 'Present':
+          return 'WP';
+        case 'Absent':
+          return 'A';
+        case 'On Leave':
+        case 'Maternity Leave':
+        case 'Paternity Leave':
+          return 'L';
+        case 'Sick':
+          return 'S';
+        case 'Off Day':
+          return 'OFF';
+        default:
+          return 'A';
+      }
+    }
+    
+    if (settings.weekendDays?.includes(dateObj.getDay())) {
+      switch (attendanceStatus) {
+        case 'Weekend Present':
+        case 'Present':
+          return 'WP';
+        case 'Absent':
+          return 'A';
+        case 'On Leave':
+        case 'Maternity Leave':
+        case 'Paternity Leave':
+          return 'L';
+        case 'Sick':
+          return 'S';
+        case 'Off Day':
+          return 'OFF';
+        default:
+          return 'A';
+      }
+    }
+    
+    switch (attendanceStatus) {
+      case 'Present':
+      case 'Late':
+        return 'P';
+      case 'Absent':
+        return 'A';
+      case 'On Leave':
+        return 'L';
+      case 'Sick Leave':
+      case 'Sick':
+        return 'S';
+      case 'Maternity Leave':
+        return 'ML';
+      case 'Paternity Leave':
+        return 'PL';
+      case 'Off Day':
+        return 'OFF';
+      case 'Holiday Present':
+        return 'HP';
+      case 'Weekend Present':
+        return 'WP';
+      case 'Special Weekend Present':
+        return 'WP';
+      default:
+        return 'A';
+    }
+  };
+
+  const calculateEarnings = (employee, date, regularHours, overtimeHours, settings) => {
+    const employeeRate = employee.minimumRate || settings.hourlyRate;
+    const dateMultiplier = getDateRateMultiplier(date, settings);
+    
+    const regularPay = regularHours * employeeRate * dateMultiplier;
+    
+    const overtimeMultiplier = settings.timeAndHalfAfter8Hours ? 1.5 : 1.0;
+    const overtimeRate = employeeRate * overtimeMultiplier * dateMultiplier;
+    const overtimePay = overtimeHours * overtimeRate;
+    
+    return {
+      regularHours,
+      overtimeHours,
+      regularPay,
+      overtimePay,
+      totalPay: regularPay + overtimePay,
+      rate: employeeRate,
+      overtimeRate: overtimeRate,
+      multiplier: dateMultiplier,
+      overtimeMultiplier: overtimeMultiplier
+    };
+  };
+
+  const getDateRateMultiplier = (date, settings) => {
+    const dateObj = new Date(date);
+    
+    if (settings.holidays?.some(h => h.date === date)) {
+      return settings.holidayRate || 1.5;
+    }
+    
+    if (settings.specialWeekends?.some(s => s.date === date)) {
+      const specialWeekend = settings.specialWeekends.find(s => s.date === date);
+      return specialWeekend?.rateMultiplier || settings.weekendRate || 1.25;
+    }
+    
+    if (settings.weekendDays?.includes(dateObj.getDay())) {
+      if (settings.doubleTimeOnSunday && dateObj.getDay() === 0) {
+        return 2.0;
+      }
+      return settings.weekendRate || 1.25;
+    }
+    
+    return 1.0;
+  };
+
+  const handleSync = async (dateRange, direction) => {
+    setIsSyncing(true);
+    try {
+      const token = getToken();
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+
+      const results = {};
+
+      const convertAttendanceToTimesheet = (attendanceRecords, settings) => {
+        const timesheetMap = new Map();
+        
+        attendanceRecords.forEach(record => {
+          const { employee, date, checkIn, checkOut, status, minimumHour, overtime } = record;
+          const employeeId = employee?.id;
+          
+          if (!employeeId) return;
+          
+          const key = `${employeeId}-${date}`;
+          
+          if (!timesheetMap.has(key)) {
+            const dateObj = new Date(date);
+            let attendanceCode = 'P';
+            
+            if (settings.holidays?.some(h => h.date === date)) {
+              if (status === 'Holiday Present' || status === 'Present') {
+                attendanceCode = 'HP';
+              } else if (status === 'Absent') {
+                attendanceCode = 'H';
+              } else if (status === 'On Leave') {
+                attendanceCode = 'L';
+              } else if (status === 'Sick') {
+                attendanceCode = 'S';
+              } else {
+                attendanceCode = 'H';
+              }
+            } else if (settings.specialWeekends?.some(s => s.date === date)) {
+              if (status === 'Special Weekend Present' || status === 'Present') {
+                attendanceCode = 'WP';
+              } else if (status === 'Absent') {
+                attendanceCode = 'A';
+              } else if (status === 'On Leave') {
+                attendanceCode = 'L';
+              } else if (status === 'Sick') {
+                attendanceCode = 'S';
+              } else {
+                attendanceCode = 'A';
+              }
+            } else if (settings.weekendDays?.includes(dateObj.getDay())) {
+              if (status === 'Weekend Present' || status === 'Present') {
+                attendanceCode = 'WP';
+              } else if (status === 'Absent') {
+                attendanceCode = 'A';
+              } else if (status === 'On Leave') {
+                attendanceCode = 'L';
+              } else if (status === 'Sick') {
+                attendanceCode = 'S';
+              } else {
+                attendanceCode = 'A';
+              }
+            } else {
+              if (status === 'Present' || status === 'Late') {
+                attendanceCode = 'P';
+              } else if (status === 'Absent') {
+                attendanceCode = 'A';
+              } else if (status === 'On Leave') {
+                attendanceCode = 'L';
+              } else if (status === 'Sick') {
+                attendanceCode = 'S';
+              } else if (status === 'Holiday Present') {
+                attendanceCode = 'HP';
+              } else if (status === 'Weekend Present') {
+                attendanceCode = 'WP';
+              } else {
+                attendanceCode = 'P';
+              }
+            }
+            
+            timesheetMap.set(key, {
+              employeeId,
+              employeeName: `${employee.firstName} ${employee.lastName}`,
+              date,
+              regularHours: 0,
+              overtimeHours: 0,
+              breakHours: 0,
+              totalHours: 0,
+              earnings: 0,
+              status: 'PENDING',
+              attendanceCode: attendanceCode,
+              details: []
+            });
+          }
+          
+          const timesheet = timesheetMap.get(key);
+          const totalHours = calculateHours(checkIn, checkOut);
+          const regularHours = Math.min(totalHours, minimumHour || 8);
+          const overtimeHours = overtime || Math.max(totalHours - (minimumHour || 8), 0);
+          
+          timesheet.regularHours = regularHours;
+          timesheet.overtimeHours = overtimeHours;
+          timesheet.totalHours = totalHours;
+          
+          timesheet.details.push({
+            checkIn,
+            checkOut,
+            attendanceStatus: status,
+            calculatedHours: totalHours
+          });
+        });
+        
+        return Array.from(timesheetMap.values());
+      };
+
+      const calculateHours = (checkIn, checkOut) => {
+        if (!checkIn || !checkOut) return 0;
+        
+        try {
+          const [inHour, inMinute] = checkIn.split(':').map(Number);
+          const [outHour, outMinute] = checkOut.split(':').map(Number);
+          
+          const totalInMinutes = inHour * 60 + inMinute;
+          const totalOutMinutes = outHour * 60 + outMinute;
+          
+          const diffMinutes = totalOutMinutes - totalInMinutes;
+          return (diffMinutes / 60).toFixed(2);
+        } catch (e) {
+          console.error('Error calculating hours:', e);
+          return 0;
+        }
+      };
+
+      if (direction === 'both' || direction === 'attendanceToTimesheet') {
+        const attendanceRes = await fetch(
+          `${API_BASE_URL}/api/attendance?startDate=${dateRange.start}&endDate=${dateRange.end}&includeEmployee=true`,
+          { headers }
+        );
+        
+        const attendanceData = await attendanceRes.json();
+        
+        const timesheetData = convertAttendanceToTimesheet(attendanceData, settings);
+        
+        const saveRes = await fetch(`${API_BASE_URL}/api/timesheets/batch`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(timesheetData)
+        });
+        
+        results.attendanceToTimesheet = await saveRes.json();
+      }
+
+      if (direction === 'both' || direction === 'timesheetToAttendance') {
+        const timesheetRes = await fetch(
+          `${API_BASE_URL}/api/timesheets?startDate=${dateRange.start}&endDate=${dateRange.end}&includeEmployee=true`,
+          { headers }
+        );
+        
+        const timesheetData = await timesheetRes.json();
+        
+        const attendanceRes = await fetch(
+          `${API_BASE_URL}/api/employee`,
+          { headers }
+        );
+        const employeesData = await attendanceRes.json();
+        
+        const convertTimesheetToAttendance = (timesheetRecords, employees, settings) => {
+          const attendanceRecords = [];
+          
+          timesheetRecords.forEach(record => {
+            const { employeeId, date, attendanceCode, regularHours, overtimeHours } = record;
+            const employee = employees.find(e => e.id === employeeId);
+            
+            if (!employee) return;
+            
+            const employeeStandardHours = getEmployeeStandardHours(employee);
+            
+            const dateObj = new Date(date);
+            
+            let status = 'Present';
+            if (settings.holidays?.some(h => h.date === date)) {
+              if (attendanceCode === 'HP' || attendanceCode === 'P') {
+                status = 'Holiday Present';
+              } else if (attendanceCode === 'A') {
+                status = 'Absent';
+              } else if (attendanceCode === 'L') {
+                status = 'On Leave';
+              } else if (attendanceCode === 'S') {
+                status = 'Sick';
+              } else {
+                status = 'Absent';
+              }
+            } else if (settings.specialWeekends?.some(s => s.date === date)) {
+              if (attendanceCode === 'WP' || attendanceCode === 'P') {
+                status = 'Special Weekend Present';
+              } else if (attendanceCode === 'A') {
+                status = 'Absent';
+              } else if (attendanceCode === 'L') {
+                status = 'On Leave';
+              } else if (attendanceCode === 'S') {
+                status = 'Sick';
+              } else {
+                status = 'Absent';
+              }
+            } else if (settings.weekendDays?.includes(dateObj.getDay())) {
+              if (attendanceCode === 'WP' || attendanceCode === 'P') {
+                status = 'Weekend Present';
+              } else if (attendanceCode === 'A') {
+                status = 'Absent';
+              } else if (attendanceCode === 'L') {
+                status = 'On Leave';
+              } else if (attendanceCode === 'S') {
+                status = 'Sick';
+              } else {
+                status = 'Absent';
+              }
+            } else {
+              if (attendanceCode === 'P') {
+                status = 'Present';
+              } else if (attendanceCode === 'A') {
+                status = 'Absent';
+              } else if (attendanceCode === 'L') {
+                status = 'On Leave';
+              } else if (attendanceCode === 'S') {
+                status = 'Sick';
+              } else if (attendanceCode === 'WP') {
+                status = 'Weekend Present';
+              } else if (attendanceCode === 'HP') {
+                status = 'Holiday Present';
+              } else {
+                status = 'Present';
+              }
+            }
+            
+            const totalHours = regularHours + overtimeHours;
+            const checkIn = '09:00';
+            let checkOut = '';
+            
+            if (totalHours > 0) {
+              const endHour = 9 + totalHours;
+              checkOut = `${Math.floor(endHour).toString().padStart(2, '0')}:${((endHour % 1) * 60).toString().padStart(2, '0')}`;
+            }
+            
+            const attendanceRecord = {
+              employee: { id: employeeId },
+              date,
+              status,
+              minimumHour: regularHours,
+              overtime: overtimeHours,
+              checkIn: totalHours > 0 ? checkIn : null,
+              checkOut: totalHours > 0 ? checkOut : null,
+              totalHoursWorked: totalHours,
+              shift: determineShift(checkIn),
+              workType: 'Regular',
+              category: employee.category || 'Default',
+              notes: `Converted from timesheet. Code: ${attendanceCode}`,
+              standardHours: employeeStandardHours
+            };
+            
+            attendanceRecords.push(attendanceRecord);
+          });
+          
+          return attendanceRecords;
+        };
+
+        const determineShift = (checkInTime) => {
+          if (!checkInTime) return 'Day';
+          const [hours] = checkInTime.split(':').map(Number);
+          return hours >= 18 || hours < 6 ? 'Night' : 'Day';
+        };
+
+        const attendanceData = convertTimesheetToAttendance(timesheetData, employeesData, settings);
+        
+        const saveRes = await fetch(`${API_BASE_URL}/api/attendance/batch`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(attendanceData)
+        });
+        
+        results.timesheetToAttendance = await saveRes.json();
+      }
+
+      setSyncResult(results);
+      setSyncHistory(prev => [{
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        direction: direction,
+        dateRange,
+        result: results
+      }, ...prev.slice(0, 9)]);
+
+      fetchAttendance();
+      
+      return results;
+      
+    } catch (error) {
+      console.error('Sync error:', error);
+      setSyncResult({ error: error.message });
+      throw error;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const SyncControlPanel = () => {
+    const [syncDirection, setSyncDirection] = useState('both');
+    const [dateRange, setDateRange] = useState({
+      start: new Date().toISOString().split('T')[0],
+      end: new Date().toISOString().split('T')[0]
+    });
+
+    const handleSync = async () => {
+      setIsSyncing(true);
+      try {
+        const result = await handleSync(dateRange, syncDirection);
+        setSyncResult(result);
+      } catch (error) {
+        setSyncResult({ error: error.message });
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Attendance ↔ Timesheet Sync
+          </h3>
+          <div className="text-sm text-gray-500">
+            Last sync: {syncHistory[0]?.timestamp ? new Date(syncHistory[0].timestamp).toLocaleString() : 'Never'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Sync Direction</label>
+            <select
+              value={syncDirection}
+              onChange={(e) => setSyncDirection(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="attendanceToTimesheet">Attendance → Timesheet</option>
+              <option value="timesheetToAttendance">Timesheet → Attendance</option>
+              <option value="both">Two-way Sync</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center mb-4">
+          <div className="text-sm text-gray-600">
+            {syncDirection === 'both' && 'Will sync records in both directions'}
+            {syncDirection === 'attendanceToTimesheet' && 'Will convert attendance to timesheet'}
+            {syncDirection === 'timesheetToAttendance' && 'Will convert timesheet to attendance'}
+          </div>
+          
+          <button
+            onClick={handleSync}
+            disabled={isSyncing}
+            className={`px-6 py-2 rounded-lg font-medium flex items-center gap-2 ${
+              isSyncing
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            {isSyncing ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Syncing...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Start Sync
+              </>
+            )}
+          </button>
+        </div>
+
+        {syncResult && (
+          <div className={`p-4 rounded-lg mb-4 ${
+            syncResult.error 
+              ? 'bg-red-50 border border-red-200' 
+              : 'bg-green-50 border border-green-200'
+          }`}>
+            <div className="flex items-start gap-3">
+              {syncResult.error ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              <div>
+                <h4 className="font-medium">
+                  {syncResult.error ? 'Sync Failed' : 'Sync Completed'}
+                </h4>
+                <p className="text-sm mt-1">
+                  {syncResult.error || 'Data synchronized successfully'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {syncHistory.length > 0 && (
+          <div className="border-t pt-4">
+            <h4 className="font-medium text-gray-700 mb-2">Recent Sync History</h4>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {syncHistory.map((item) => (
+                <div key={item.id} className="text-sm p-2 bg-gray-50 rounded">
+                  <div className="flex justify-between">
+                    <span>{new Date(item.timestamp).toLocaleString()}</span>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      item.direction === 'attendanceToTimesheet' 
+                        ? 'bg-blue-100 text-blue-800'
+                        : item.direction === 'timesheetToAttendance'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}>
+                      {item.direction}
+                    </span>
+                  </div>
+                  <div className="text-gray-500">
+                    {item.dateRange.start} to {item.dateRange.end}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
       <div 
@@ -2319,127 +3353,12 @@ const determineStatus = (dateString, checkInTime) => {
           <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsCreateMenuOpen(false)}></div>
         )}
 
-        <main className="flex-1 max-w-7xl mx-auto px-4 md:px-6 py-6">
-          <header className="flex justify-between items-center border border-white bg-white h-16 w-full rounded-r-2xl px-6 shadow-md">
-            <button 
-              onClick={toggleSidebar}
-              className="p-1 hover:bg-gray-100 rounded-md transition-colors hamburger-button"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                strokeWidth="1.5"
-                stroke="currentColor"
-                className="size-6"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              </svg>
-            </button>
-
-            <div className="flex items-center gap-5">
-              <div className="relative">
-                <Link to="/settingspage" className="p-1 hover:bg-gray-200 rounded-full">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="size-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.350.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-                    />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                  </svg>
-                </Link>
-              </div>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <button className="p-1 hover:bg-gray-200 rounded-full relative">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="size-6"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0M3.124 7.5A8.969 8.969 0 0 1 5.292 3m13.416 0a8.969 8.969 0 0 1 2.168 4.5"
-                  />
-                </svg>
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">3</span>
-              </button>
-
-              <div className="border-l border-gray-300 h-8"></div>
-
-              <div className="relative">
-                <div 
-                  className="flex items-center gap-2 cursor-pointer group"
-                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                >
-                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-600 to-indigo-400 flex items-center justify-center text-white">
-                    <span className="font-medium">{user?.name?.charAt(0) || 'U'}</span>
-                  </div>
-                  <span className="font-medium text-gray-700 group-hover:text-gray-900">
-                    {user?.name || 'User'}
-                  </span>
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    className={`h-4 w-4 text-gray-500 group-hover:text-gray-700 transition-transform ${userDropdownOpen ? 'rotate-180' : ''}`}
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-
-                {userDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
-                    <div className="px-4 py-2 border-b border-gray-100">
-                      <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
-                      <p className="text-xs text-gray-500 truncate">{user?.email || ''}</p>
-                      <p className="text-xs text-indigo-600 capitalize mt-1">{user?.role || 'employee'}</p>
-                    </div>
-                    
-                    <button
-                      onClick={() => {
-                        navigate('/settings');
-                        setUserDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      Settings
-                    </button>
-                    
-                    <button
-                      onClick={() => {
-                        handleLogout();
-                        setUserDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors border-t border-gray-100"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      </svg>
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </header>
+        <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+          <Header
+            toggleSidebar={toggleSidebar} 
+            user={user} 
+            onLogout={handleLogout} 
+          />
 
           <div className="p-6">
             <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white rounded-xl shadow-sm p-6">
@@ -2448,19 +3367,61 @@ const determineStatus = (dateString, checkInTime) => {
                 <p className="text-gray-600">Track and manage employee attendance records</p>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <Search attendances={attendances} onResults={setSearchResults} />
+           <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+  <div className="relative flex-1 min-w-[200px]">
+    <input
+      type="text"
+      placeholder="Search by name, ID, date, or status..."
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+    />
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
+    {searchQuery && (
+      <button
+        onClick={() => setSearchQuery('')}
+        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    )}
+  </div>
 
-                <button
-                  onClick={() => setIsCreateMenuOpen(true)}
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Attendance
-                </button>
-              </div>
+  {/* Category Filter Dropdown */}
+  <div className="relative min-w-[180px]">
+    <select
+      value={selectedCategoryFilter}
+      onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700"
+    >
+      <option value="">All Categories</option>
+      {getUniqueCategories().map(category => (
+        <option key={category} value={category}>{category}</option>
+      ))}
+    </select>
+  </div>
+
+  <button
+    onClick={() => setIsCreateMenuOpen(true)}
+    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+    </svg>
+    Add Attendance
+  </button>
+</div>
+
             </section>
 
             {searchResults.length > 0 && (
@@ -2515,6 +3476,38 @@ const determineStatus = (dateString, checkInTime) => {
           
           <div className="mb-4">
             <button
+              onClick={() => setShowSyncPanel(!showSyncPanel)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors mb-4"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${showSyncPanel ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Sync with Timesheet
+              <span className="text-xs text-gray-500 ml-1">
+                ({showSyncPanel ? 'Hide' : 'Show'})
+              </span>
+            </button>
+            
+            {showSyncPanel && (
+              <TimesheetAttendanceSync 
+                attendances={attendances}
+                employees={employees}
+                settings={settings}
+                selectedEmployeeIds={getSyncDataFromSelectedAttendances().employeeIds}
+                selectedDates={getSyncDataFromSelectedAttendances().dates}
+                onSyncComplete={(results) => {
+                  if (results.attendanceToTimesheet) {
+                    console.log('Attendance converted to timesheets:', results.attendanceToTimesheet.count);
+                    alert(`Successfully converted ${results.attendanceToTimesheet.count} attendance records to timesheet!`);
+                  }
+                  fetchAttendance();
+                }}
+              />
+            )}
+          </div>
+
+          <div className="mb-4">
+            <button
               onClick={() => setShowBiometricImport(!showBiometricImport)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
             >
@@ -2534,6 +3527,7 @@ const determineStatus = (dateString, checkInTime) => {
             )}
           </div>
 
+          {/* IMPROVED: Date Filters Panel - Clean and clear */}
           <div className="mb-6">
             <button
               onClick={() => setShowDatePanel(!showDatePanel)}
@@ -2552,12 +3546,7 @@ const determineStatus = (dateString, checkInTime) => {
                 <div className="text-left">
                   <h3 className="font-semibold text-blue-800">Date Filters & Actions</h3>
                   <p className="text-sm text-blue-600">
-                    {startDate && endDate 
-                      ? `Viewing: ${startDate} to ${endDate}`
-                      : globalDate 
-                      ? `Viewing: ${globalDate}`
-                      : 'All dates'
-                    }
+                    {getFilterDisplayText()}
                   </p>
                 </div>
               </div>
@@ -2565,9 +3554,9 @@ const determineStatus = (dateString, checkInTime) => {
                 <span className="text-sm text-blue-600 bg-blue-100 px-2 py-1 rounded">
                   {showDatePanel ? 'Hide' : 'Show'} Controls
                 </span>
-                {datesToClear.length > 0 && (
-                  <span className="bg-amber-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    {datesToClear.length}
+                {dateFilterMode !== 'none' && (
+                  <span className="bg-green-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                    ✓
                   </span>
                 )}
               </div>
@@ -2577,56 +3566,113 @@ const determineStatus = (dateString, checkInTime) => {
               <div className="mt-2 p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   
+                  {/* Left Column: Date Filter Controls */}
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 mb-2">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      <h3 className="text-lg font-semibold text-gray-800">Date Selection</h3>
+                      <h3 className="text-lg font-semibold text-gray-800">Filter by Date</h3>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Single Date</label>
-                      <div className="flex items-center gap-3 bg-blue-50 px-4 py-3 rounded-lg border border-blue-100">
-                        <input
-                          type="date"
-                          value={globalDate}
-                          onChange={(e) => setGlobalDate(e.target.value)}
-                          className="bg-transparent border-none focus:ring-0 text-sm font-medium w-full"
-                        />
-                      </div>
+                    {/* Mode Selection */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => setDateFilterMode('single')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          dateFilterMode === 'single'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Single Date
+                      </button>
+                      <button
+                        onClick={() => setDateFilterMode('range')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          dateFilterMode === 'range'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Date Range
+                      </button>
+                      <button
+                        onClick={() => setDateFilterMode('none')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          dateFilterMode === 'none'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        All Dates
+                      </button>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Date Range</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Start date"
-                        />
-                        <span className="text-gray-400">→</span>
-                        <input
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="End date"
-                        />
+                    {/* Single Date Picker */}
+                    {dateFilterMode === 'single' && (
+                      <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="date"
+                            value={singleDate}
+                            onChange={(e) => setSingleDate(e.target.value)}
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                          <button
+                            onClick={applySingleDateFilter}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                          >
+                            Apply
+                          </button>
+                        </div>
                       </div>
-                      {(startDate || endDate) && (
+                    )}
+
+                    {/* Date Range Picker */}
+                    {dateFilterMode === 'range' && (
+                      <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Date Range</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Start Date</label>
+                            <input
+                              type="date"
+                              value={rangeStart}
+                              onChange={(e) => setRangeStart(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">End Date</label>
+                            <input
+                              type="date"
+                              value={rangeEnd}
+                              onChange={(e) => setRangeEnd(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
                         <button
-                          onClick={fetchAttendance}
-                          className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+                          onClick={applyRangeFilter}
+                          className="w-full mt-3 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                         >
-                          Apply Date Range
+                          Apply Range
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
+
+                    {/* All Dates Info */}
+                    {dateFilterMode === 'none' && (
+                      <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 text-center">
+                        <p className="text-gray-600">Showing all attendance records</p>
+                        <p className="text-xs text-gray-400 mt-1">Total records: {attendances.length}</p>
+                      </div>
+                    )}
                   </div>
 
+                  {/* Right Column: Actions */}
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2656,12 +3702,13 @@ const determineStatus = (dateString, checkInTime) => {
 
                       <button
                         onClick={clearTableAndForm}
-                        disabled={!globalDate}
+                        disabled={dateFilterMode !== 'single'}
                         className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                          globalDate
+                          dateFilterMode === 'single'
                             ? "bg-amber-500 hover:bg-amber-600 text-white"
                             : "bg-gray-100 text-gray-400 cursor-not-allowed"
                         }`}
+                        title={dateFilterMode !== 'single' ? "Switch to Single Date mode to clear records" : ""}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -2696,9 +3743,7 @@ const determineStatus = (dateString, checkInTime) => {
                       <button
                         onClick={() => {
                           resetClearedDates();
-                          setStartDate('');
-                          setEndDate('');
-                          setDatesToClear([]);
+                          resetDateFilters();
                         }}
                         className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors"
                       >
@@ -2752,6 +3797,9 @@ const determineStatus = (dateString, checkInTime) => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Employee
                     </th>
+                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Category
+                    </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
                     </th>
@@ -2780,12 +3828,14 @@ const determineStatus = (dateString, checkInTime) => {
                 </thead>
 
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {attendances.map((attendance) => (
+                 {filteredAttendancesBySearch.map((attendance) => (
                     <tr key={attendance.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <input 
                           type="checkbox" 
                           id={`checkbox-${attendance.id}`}
+                          checked={selectedAttendanceIds.has(attendance.id)}
+                          onChange={(e) => handleAttendanceCheckboxChange(attendance.id, e.target.checked)}
                           className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                         />
                       </td>
@@ -2806,6 +3856,11 @@ const determineStatus = (dateString, checkInTime) => {
                           </div>
                         </div>
                       </td>
+                       <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-500">
+  {attendance?.employee?.category?.name || 'No Category'}
+</div>
+</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(attendance.date).toLocaleDateString('en-US', {
                           year: 'numeric',
@@ -2820,33 +3875,8 @@ const determineStatus = (dateString, checkInTime) => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {attendance.checkOut || '--:--'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          attendance.minimumHour >= 8 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {attendance.minimumHour || 0} hrs
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-gray-400">
-                            Standard: {getEmployeeStandardHours(attendance.employee)}h
-                          </span>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            attendance.minimumHour >= getEmployeeStandardHours(attendance.employee) 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            Worked: {attendance.minimumHour || 0}h
-                          </span>
-                          {attendance.minimumHour > getEmployeeStandardHours(attendance.employee) && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                              Overtime: +{attendance.minimumHour - getEmployeeStandardHours(attendance.employee)}h
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.minimumHour.toFixed(2)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.standardHours}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           attendance.shift === 'Day' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
@@ -2859,6 +3889,7 @@ const determineStatus = (dateString, checkInTime) => {
                           <StatusBadge attendance={attendance} />
                         </div>
                       </td>
+                      
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end items-center gap-2">
                           <button
@@ -2884,19 +3915,26 @@ const determineStatus = (dateString, checkInTime) => {
                       </td>
                     </tr>
                   ))}
+
                 </tbody>
               </table>
             </div>
 
-            {attendances.length === 0 && (
-              <div className="text-center py-8">
-                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No attendance records</h3>
-                <p className="mt-1 text-sm text-gray-500">Get started by creating a new attendance record.</p>
-              </div>
-            )}
+           {filteredAttendancesBySearch.length === 0 && (
+  <div className="text-center py-8">
+    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    <h3 className="mt-2 text-sm font-medium text-gray-900">
+      {searchQuery ? 'No matching attendance records' : 'No attendance records'}
+    </h3>
+    <p className="mt-1 text-sm text-gray-500">
+      {searchQuery 
+        ? `No results found for "${searchQuery}". Try a different search term.`
+        : 'Get started by creating a new attendance record.'}
+    </p>
+  </div>
+)}
           </div>
 
           {isCreateMenuOpen && (
@@ -2918,18 +3956,60 @@ const determineStatus = (dateString, checkInTime) => {
 
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                    <input
-                      type="date"
-                      value={globalDate}
-                      onChange={(e) => {
-                        setGlobalDate(e.target.value);
-                        setNewAttendance({...newAttendance, date: e.target.value});
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date Mode</label>
+                      <select
+                        value={createDateMode}
+                        onChange={(e) => setCreateDateMode(e.target.value)}
+                        disabled={isEditing}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm"
+                      >
+                        <option value="single">Single Date</option>
+                        <option value="range">Date Range</option>
+                      </select>
+                    </div>
+
+                    {createDateMode === "single" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                        <input
+                          type="date"
+                          value={newAttendance.date || singleDate}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setNewAttendance(prev => ({ ...prev, date: v }));
+                            setCreateRangeStart(v);
+                            setCreateRangeEnd(v);
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm"
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {createDateMode === "range" && !isEditing && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                        <input
+                          type="date"
+                          value={createRangeStart}
+                          onChange={(e) => setCreateRangeStart(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                        <input
+                          type="date"
+                          value={createRangeEnd}
+                          onChange={(e) => setCreateRangeEnd(e.target.value)}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -2981,7 +4061,7 @@ const determineStatus = (dateString, checkInTime) => {
                         {filteredEmployees.length > 0 ? (
                           filteredEmployees.map((employee) => (
                             <option key={employee.id} value={employee.id} className="px-3 py-2">
-                              {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'})
+                             {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'}) - {employee.category?.name || 'No Category'}
                             </option>
                           ))
                         ) : (
@@ -2996,16 +4076,16 @@ const determineStatus = (dateString, checkInTime) => {
                       <div className="w-full h-64 px-3 py-2 border-none overflow-y-auto bg-gray-50">
                         {employees.filter(employee => {
                           const hasAttendance = attendances.some(a => 
-                            a.employee?.id === employee.id && a.date === globalDate
+                            a.employee?.id === employee.id && a.date === singleDate
                           );
                           const hasOvertime = overtimes.some(o => 
-                            o.employee?.id === employee.id && o.date === globalDate
+                            o.employee?.id === employee.id && o.date === singleDate
                           );
                           const activeLeaves = leaves.filter(l => 
                             l.employee?.id === employee.id &&
                             l.status === "Approved" &&
-                            new Date(globalDate) >= new Date(l.startDate) && 
-                            new Date(globalDate) <= new Date(l.endDate)
+                            new Date(singleDate) >= new Date(l.startDate) && 
+                            new Date(singleDate) <= new Date(l.endDate)
                           );
                           
                           return hasAttendance || hasOvertime || activeLeaves.length > 0;
@@ -3013,8 +4093,8 @@ const determineStatus = (dateString, checkInTime) => {
                           const activeLeaves = leaves.filter(l => 
                             l.employee?.id === employee.id &&
                             l.status === "Approved" &&
-                            new Date(globalDate) >= new Date(l.startDate) && 
-                            new Date(globalDate) <= new Date(l.endDate)
+                            new Date(singleDate) >= new Date(l.startDate) && 
+                            new Date(singleDate) <= new Date(l.endDate)
                           );
                           
                           return (
@@ -3038,16 +4118,16 @@ const determineStatus = (dateString, checkInTime) => {
                         
                         {employees.filter(employee => {
                           const hasAttendance = attendances.some(a => 
-                            a.employee?.id === employee.id && a.date === globalDate
+                            a.employee?.id === employee.id && a.date === singleDate
                           );
                           const hasOvertime = overtimes.some(o => 
-                            o.employee?.id === employee.id && o.date === globalDate
+                            o.employee?.id === employee.id && o.date === singleDate
                           );
                           const activeLeaves = leaves.filter(l => 
                             l.employee?.id === employee.id &&
                             l.status === "Approved" &&
-                            new Date(globalDate) >= new Date(l.startDate) && 
-                            new Date(globalDate) <= new Date(l.endDate)
+                            new Date(singleDate) >= new Date(l.startDate) && 
+                            new Date(singleDate) <= new Date(l.endDate)
                           );
                           
                           return hasAttendance || hasOvertime || activeLeaves.length > 0;
@@ -3112,15 +4192,15 @@ const determineStatus = (dateString, checkInTime) => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                     <StatusDropdown />
-                    {(isHoliday(newAttendance.date || globalDate) || isWeekend(newAttendance.date || globalDate) || isSpecialWeekend(newAttendance.date || globalDate)) && (
+                    {(isHoliday(newAttendance.date || singleDate) || isWeekend(newAttendance.date || singleDate) || isSpecialWeekend(newAttendance.date || singleDate)) && (
                       <p className="text-xs text-purple-600 mt-1 flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        {isHoliday(newAttendance.date || globalDate) 
+                        {isHoliday(newAttendance.date || singleDate) 
                           ? "This date is configured as a holiday"
-                          : isSpecialWeekend(newAttendance.date || globalDate)
-                          ? `This is a special weekend: ${settings.specialWeekends?.find(sw => sw.date === (newAttendance.date || globalDate))?.name}`
+                          : isSpecialWeekend(newAttendance.date || singleDate)
+                          ? `This is a special weekend: ${settings.specialWeekends?.find(sw => sw.date === (newAttendance.date || singleDate))?.name}`
                           : "This date falls on a weekend"
                         }
                       </p>
@@ -3136,7 +4216,7 @@ const determineStatus = (dateString, checkInTime) => {
                         shift: '',
                         workType: '',
                         category: '',
-                        date: globalDate,
+                        date: singleDate,
                         status: '',
                         minimumHour: '',
                         checkIn: '',
@@ -3159,6 +4239,7 @@ const determineStatus = (dateString, checkInTime) => {
               </div>
             </div>
           )}
+
 
           {popupMenu.isOpen && (
             <>
@@ -3193,6 +4274,7 @@ const determineStatus = (dateString, checkInTime) => {
           )}
         </main>
       </div>
+         <BiometricStatus />
     </div>
   );
 }

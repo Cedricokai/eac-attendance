@@ -144,7 +144,7 @@ const Received = () => {
     
     const [filteredRequests, setFilteredRequests] = useState([]);
     
-    const locations = ['AHAFO_NORTH', 'NPI', 'LAYDOWN', 'MKV', 'SUG', 'PROCUREMENT PLANT', 'AROPLANT', 'PLANT SITE'];
+    const locations = ['AHAFO_NORTH', 'NPI', 'LAYDOWN', 'MKV', 'SUG', 'RANK CAMP', 'RO PLANT', 'PLANT SITE'];
     const departments = ['Maintenance', 'Engineering', 'IT', 'Safety Department', 'Chemical Lab', 'Fire Department', 'Procurement', 'Operations'];
     const urgencyLevels = ['all', 'urgent', 'high', 'normal', 'low'];
     

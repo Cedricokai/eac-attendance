@@ -64,7 +64,7 @@ const PlannerDashboard = () => {
       try {
         setLoading(true);
         const token = getToken();
-        const response = await fetch(`{API_BASE_URL}/api/leave/planner`, {
+        const response = await fetch(`${API_BASE_URL}/api/leave/planner`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",

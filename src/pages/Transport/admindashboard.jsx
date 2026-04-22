@@ -3,7 +3,6 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
-import axios from 'axios';
 import Sidebar from './Sidebar';
 
 const AdminDashboard = () => {
@@ -25,82 +24,54 @@ const AdminDashboard = () => {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
- const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
 
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
+    console.log("🖥️ Current hostname:", hostname);
+    console.log("🔌 Current port:", port);
 
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      console.log("🏠 Using LOCALHOST API URL");
+      return "http://localhost:8080";
+    }
 
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
+    if (hostname.startsWith("192.168.")) {
+      console.log("🏠 Using LAN API URL");
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
 
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
+    if (hostname === "100.114.178.13") {
+      console.log("🌐 Using PUBLIC API URL");
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
+
+    console.log("🌍 Using PUBLIC API URL (fallback)");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
+  };
 
   const API_BASE_URL = getApiBaseUrl();
-  // Get authentication token
+
   const getAuthToken = () => {
     return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
   };
 
-  // Axios configuration with token
-  const getAxiosConfig = () => {
-    return {
+  const getFetchConfig = (method = 'GET', body = null) => {
+    const config = {
+      method,
       headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      credentials: 'include'
     };
+
+    if (body) {
+      config.body = JSON.stringify(body);
+    }
+
+    return config;
   };
-
-  // Mock data
-  const mockUsers = [
-    { id: 1, name: 'John Doe', email: 'john@eac.com', phone: '+233 24 123 4567', role: 'admin', status: 'active' },
-    { id: 2, name: 'Jane Smith', email: 'jane@eac.com', phone: '+233 24 234 5678', role: 'manager', status: 'active' },
-    { id: 3, name: 'Mike Johnson', email: 'mike@eac.com', phone: '+233 24 345 6789', role: 'user', status: 'active' }
-  ];
-
-  const mockVehicles = [
-    { id: 1, name: 'Truck A', type: 'Heavy Duty Truck', licensePlate: 'GA-1234-21', fuelType: 'diesel', status: 'active', dvlaLicenseExpiry: '2024-12-31', roadWorthyExpiry: '2024-06-30', insuranceExpiry: '2024-03-15' },
-    { id: 2, name: 'Van B', type: 'Delivery Van', licensePlate: 'GA-5678-21', fuelType: 'petrol', status: 'active', dvlaLicenseExpiry: '2024-11-30', roadWorthyExpiry: '2024-05-31', insuranceExpiry: '2024-02-28' },
-    { id: 3, name: 'Car C', type: 'Sedan', licensePlate: 'GA-9012-21', fuelType: 'petrol', status: 'maintenance', dvlaLicenseExpiry: '2024-10-31', roadWorthyExpiry: '2024-04-30', insuranceExpiry: '2024-12-31' }
-  ];
-
-  const mockDrivers = [
-    { id: 1, name: 'Kwame Mensah', licenseNumber: 'DL-123456', licenseExpiry: '2025-03-15', phone: '+233 24 456 7890', email: 'kwame@eac.com', status: 'active' },
-    { id: 2, name: 'Ama Boateng', licenseNumber: 'DL-234567', licenseExpiry: '2025-06-20', phone: '+233 24 567 8901', email: 'ama@eac.com', status: 'active' },
-    { id: 3, name: 'Kofi Asante', licenseNumber: 'DL-345678', licenseExpiry: '2024-12-10', phone: '+233 24 678 9012', email: 'kofi@eac.com', status: 'on-leave' }
-  ];
-
-  const mockFuelEntries = [
-    { id: 1, vehicle: 'Truck A', driver: 'Kwame Mensah', date: '2024-01-15', time: '08:30', liters: 120, cost: 1440, odometer: 12500, vendor: 'GOIL Station' },
-    { id: 2, vehicle: 'Van B', driver: 'Ama Boateng', date: '2024-01-16', time: '14:15', liters: 60, cost: 720, odometer: 8900, vendor: 'Shell Station' },
-    { id: 3, vehicle: 'Truck A', driver: 'Kwame Mensah', date: '2024-01-18', time: '09:45', liters: 110, cost: 1320, odometer: 13100, vendor: 'Total Station' }
-  ];
-
-  const mockMaintenanceRecords = [
-    { id: 1, vehicle: 'Car C', type: 'Oil Change', date: '2024-01-10', cost: 350, status: 'completed', vendor: 'AutoCare Services', description: 'Regular oil and filter change' },
-    { id: 2, vehicle: 'Truck A', type: 'Brake Service', date: '2024-01-20', cost: 1200, status: 'scheduled', vendor: 'Truck Masters', description: 'Brake pad replacement and servicing' },
-    { id: 3, vehicle: 'Van B', type: 'Tire Replacement', date: '2024-01-25', cost: 800, status: 'in-progress', vendor: 'Tire Express', description: 'Replace all four tires' }
-  ];
 
   useEffect(() => {
     loadInitialData();
@@ -117,22 +88,13 @@ const AdminDashboard = () => {
     try {
       setIsLoading(true);
       
-      try {
-        await Promise.all([
-          fetchUsers(),
-          fetchVehicles(),
-          fetchDrivers(),
-          fetchFuelEntries(),
-          fetchMaintenanceRecords()
-        ]);
-      } catch (error) {
-        console.log('API not available, using mock data');
-        setUsers(mockUsers);
-        setVehicles(mockVehicles);
-        setDrivers(mockDrivers);
-        setFuelEntries(mockFuelEntries);
-        setMaintenanceRecords(mockMaintenanceRecords);
-      }
+      await Promise.all([
+        fetchUsers(),
+        fetchVehicles(),
+        fetchDrivers(),
+        fetchFuelEntries(),
+        fetchMaintenanceRecords()
+      ]);
       
     } catch (error) {
       console.error('Error loading initial data:', error);
@@ -143,75 +105,80 @@ const AdminDashboard = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/users`, getAxiosConfig());
-      setUsers(response.data);
+      const response = await fetch(`${API_BASE_URL}/users`, getFetchConfig());
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch users: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setUsers(data);
     } catch (error) {
       console.error('Error fetching users:', error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-      }
       throw error;
     }
   };
 
   const fetchVehicles = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/vehicles`, getAxiosConfig());
-      setVehicles(response.data);
+      const response = await fetch(`${API_BASE_URL}/vehicles`, getFetchConfig());
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch vehicles: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setVehicles(data);
     } catch (error) {
       console.error('Error fetching vehicles:', error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-      }
       throw error;
     }
   };
 
   const fetchDrivers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/drivers`, getAxiosConfig());
-      setDrivers(response.data);
+      const response = await fetch(`${API_BASE_URL}/drivers`, getFetchConfig());
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch drivers: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setDrivers(data);
     } catch (error) {
       console.error('Error fetching drivers:', error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-      }
       throw error;
     }
   };
 
   const fetchFuelEntries = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/fuel`, getAxiosConfig());
-      setFuelEntries(response.data);
+      const response = await fetch(`${API_BASE_URL}/fuel`, getFetchConfig());
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch fuel entries: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setFuelEntries(data);
     } catch (error) {
       console.error('Error fetching fuel entries:', error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-      }
       throw error;
     }
   };
 
   const fetchMaintenanceRecords = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/fuel`, getAxiosConfig());
-      setMaintenanceRecords(response.data);
+      const response = await fetch(`${API_BASE_URL}/maintenance`, getFetchConfig());
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch maintenance records: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setMaintenanceRecords(data);
     } catch (error) {
       console.error('Error fetching maintenance records:', error);
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-      }
       throw error;
     }
   };

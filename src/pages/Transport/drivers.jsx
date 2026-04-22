@@ -9,6 +9,10 @@ const Drivers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [expiryNotifications, setExpiryNotifications] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [inputError, setInputError] = useState('');
 
   const [formData, setFormData] = useState({
     driverName: '',
@@ -20,15 +24,14 @@ const Drivers = () => {
     assignedVehicle: ''
   });
 
-  // API base URL
- const getApiBaseUrl = () => {
+  // Replace the getApiBaseUrl function in Drivers.jsx with this:
+
+const getApiBaseUrl = () => {
   const hostname = window.location.hostname;
-  const port = window.location.port;
-
+  
   console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
 
-  // If frontend is opened via localhost → use localhost backend
+  // Local development
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     console.log("🏠 Using LOCALHOST API URL");
     return "http://localhost:8080";
@@ -37,18 +40,18 @@ const Drivers = () => {
   // LAN access
   if (hostname.startsWith("192.168.")) {
     console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    return import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8080";
   }
 
-  // Public / Tailscale / Cloudflare IP
+  // Public IP - adjust this based on your environment
   if (hostname === "100.114.178.13") {
     console.log("🌐 Using PUBLIC API URL");
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
   }
 
   // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  console.log("🌍 Using default API URL");
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
 };
 
   const API_BASE_URL = getApiBaseUrl();
@@ -58,56 +61,106 @@ const Drivers = () => {
     return localStorage.getItem('jwtToken') || localStorage.getItem('authToken');
   };
 
-  // Fetch configuration with token
+  // Fetch configuration with token - similar to products.jsx
   const getFetchConfig = (method = 'GET', body = null) => {
+    const token = getAuthToken();
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const config = {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`
-      }
+      headers,
+      credentials: 'include'
     };
-    
+
     if (body) {
       config.body = JSON.stringify(body);
     }
-    
+
     return config;
   };
 
   useEffect(() => {
     loadDriversData();
+    fetchEmployees();
   }, []);
 
   useEffect(() => {
     checkLicenseExpiry();
   }, [drivers]);
 
+  // Fetch drivers data
   const loadDriversData = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(API_BASE_URL, getFetchConfig());
+      setError(null);
       
-      if (response.status === 401 || response.status === 403) {
-        // Token expired or invalid
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
+      const token = getAuthToken();
+      if (!token) {
+        setError('No authentication token found. Please login again.');
+        setIsLoading(false);
         return;
       }
-      
-      if (response.ok) {
-        const data = await response.json();
-        setDrivers(data);
-      } else {
-        console.error('Failed to fetch drivers data');
-        setDrivers([]);
+
+      const response = await fetch(`${API_BASE_URL}/api/drivers`, getFetchConfig());
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch drivers: ${response.status} ${response.statusText}`);
       }
+
+      const data = await response.json();
+      setDrivers(data);
     } catch (error) {
       console.error('Error fetching drivers data:', error);
+      setError(error.message);
       setDrivers([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Fetch employees from employee API
+  const fetchEmployees = async () => {
+    try {
+      const token = getAuthToken();
+      
+      if (!token) {
+        console.warn('No authentication token found for fetching employees');
+        setEmployees([]);
+        return;
+      }
+
+      console.log("Fetching employees from:", `${API_BASE_URL}/api/employees`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/employees`, getFetchConfig());
+      
+      if (!response.ok) {
+        console.warn(`Failed to fetch employees from /api/employees: ${response.status}. Trying /api/employee...`);
+        
+        const altResponse = await fetch(`${API_BASE_URL}/api/employee`, getFetchConfig());
+        
+        if (!altResponse.ok) {
+          console.error('Failed to fetch employees from both endpoints');
+          setEmployees([]);
+          return;
+        }
+        
+        const altData = await altResponse.json();
+        setEmployees(Array.isArray(altData) ? altData : [altData]);
+        return;
+      }
+      
+      const data = await response.json();
+      setEmployees(Array.isArray(data) ? data : [data]);
+      
+    } catch (error) {
+      console.error('Error fetching employees data:', error);
+      setEmployees([]);
     }
   };
 
@@ -187,6 +240,7 @@ const Drivers = () => {
     }
   };
 
+  // Filter drivers based on search term and status
   const filteredDrivers = drivers.filter(driver => {
     const matchesSearch = 
       driver.driverName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -200,22 +254,19 @@ const Drivers = () => {
     return matchesSearch && matchesStatus;
   });
 
+  // Handle delete driver
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this driver?')) {
       try {
-        const response = await fetch(`${API_BASE_URL}/${id}`, getFetchConfig('DELETE'));
-
-        if (response.status === 401 || response.status === 403) {
-          localStorage.removeItem('jwtToken');
-          localStorage.removeItem('authToken');
-          window.location.href = '/login';
-          return;
-        }
+        const response = await fetch(`${API_BASE_URL}/api/drivers/${id}`, getFetchConfig('DELETE'));
 
         if (response.ok) {
           setDrivers(drivers.filter(driver => driver.id !== id));
+          setSuccessMessage('Driver deleted successfully!');
+          setTimeout(() => setSuccessMessage(''), 3000);
         } else {
-          alert('Failed to delete driver');
+          const errorText = await response.text();
+          alert(`Failed to delete driver: ${errorText}`);
         }
       } catch (error) {
         console.error('Error deleting driver:', error);
@@ -224,62 +275,102 @@ const Drivers = () => {
     }
   };
 
+  // Handle input change for form
   const handleInputChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    setInputError('');
+    
+    if (name === 'driverName') {
+      const selectedEmployee = employees.find(emp => {
+        const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+        return fullName === value;
+      });
+      
+      setFormData({
+        ...formData,
+        [name]: value,
+        ...(selectedEmployee && {
+          contact: selectedEmployee.phone || selectedEmployee.contact || '',
+          email: selectedEmployee.email || ''
+        })
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
+    }
   };
 
+  // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setInputError('');
     
+    if (!formData.driverName || !formData.licenseNumber || !formData.licenseExpiry || 
+        !formData.contact || !formData.email || !formData.status) {
+      setInputError('Please fill out all required fields.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setInputError('Please enter a valid email address.');
+      return;
+    }
+
+    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+    const cleanedPhone = formData.contact.replace(/[\s\-\(\)]/g, '');
+    if (!phoneRegex.test(cleanedPhone)) {
+      setInputError('Please enter a valid phone number.');
+      return;
+    }
+
     try {
       let response;
+      let url = `${API_BASE_URL}/api/drivers`;
+      let method = 'POST';
       
       if (editingDriver) {
-        response = await fetch(`${API_BASE_URL}/${editingDriver.id}`, 
-          getFetchConfig('PUT', formData));
-      } else {
-        response = await fetch(API_BASE_URL, 
-          getFetchConfig('POST', formData));
+        url = `${API_BASE_URL}/api/drivers/${editingDriver.id}`;
+        method = 'PUT';
       }
 
-      if (response.status === 401 || response.status === 403) {
-        localStorage.removeItem('jwtToken');
-        localStorage.removeItem('authToken');
-        window.location.href = '/login';
-        return;
-      }
+      response = await fetch(url, getFetchConfig(method, formData));
 
       if (response.ok) {
         await loadDriversData();
         resetForm();
         setShowForm(false);
         setEditingDriver(null);
+        setSuccessMessage(`Driver ${editingDriver ? 'updated' : 'created'} successfully!`);
+        setTimeout(() => setSuccessMessage(''), 3000);
       } else {
         const errorText = await response.text();
-        alert(`Failed to ${editingDriver ? 'update' : 'create'} driver: ${errorText}`);
+        setInputError(`Failed to ${editingDriver ? 'update' : 'create'} driver: ${errorText}`);
       }
     } catch (error) {
-      alert(`Error ${editingDriver ? 'updating' : 'creating'} driver`);
+      setInputError(`Error ${editingDriver ? 'updating' : 'creating'} driver: ${error.message}`);
     }
   };
 
+  // Handle edit driver
   const handleEdit = (driver) => {
     setEditingDriver(driver);
     setFormData({ 
       driverName: driver.driverName || '',
       licenseNumber: driver.licenseNumber || '',
-      licenseExpiry: driver.licenseExpiry || '',
+      licenseExpiry: driver.licenseExpiry ? driver.licenseExpiry.split('T')[0] : '',
       contact: driver.contact || '',
       email: driver.email || '',
       status: driver.status || 'active',
       assignedVehicle: driver.assignedVehicle || ''
     });
     setShowForm(true);
+    setInputError('');
   };
 
+  // Reset form
   const resetForm = () => {
     setFormData({
       driverName: '',
@@ -290,14 +381,17 @@ const Drivers = () => {
       status: 'active',
       assignedVehicle: ''
     });
+    setInputError('');
   };
 
+  // Cancel edit
   const cancelEdit = () => {
     setEditingDriver(null);
     setShowForm(false);
     resetForm();
   };
 
+  // Get status color class
   const getStatusColor = (status) => {
     switch (status) {
       case 'active': return 'bg-emerald-500/10 text-emerald-700 border-emerald-200';
@@ -307,6 +401,7 @@ const Drivers = () => {
     }
   };
 
+  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return 'Not set';
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -316,16 +411,47 @@ const Drivers = () => {
     });
   };
 
+  // Get unique employee names for dropdown
+  const getEmployeeNames = () => {
+    if (!employees || employees.length === 0) {
+      console.log('No employees available');
+      return [];
+    }
+
+    const names = employees
+      .map(emp => {
+        if (emp.firstName && emp.lastName) {
+          return `${emp.firstName} ${emp.lastName}`.trim();
+        } else if (emp.name) {
+          return emp.name.trim();
+        } else if (emp.employeeName) {
+          return emp.employeeName.trim();
+        } else if (emp.driverName) {
+          return emp.driverName.trim();
+        }
+        return '';
+      })
+      .filter(name => name !== '')
+      .filter((name, index, self) => self.indexOf(name) === index);
+
+    console.log('Employee names found:', names);
+    return names;
+  };
+
   // Statistics
   const stats = {
     total: drivers.length,
     active: drivers.filter(d => d.status === 'active').length,
     onLeave: drivers.filter(d => d.status === 'on-leave').length,
     inactive: drivers.filter(d => d.status === 'inactive').length,
-    assigned: drivers.filter(d => d.assignedVehicle).length,
-    expiring: drivers.filter(d => getExpiryStatus(d.licenseExpiry) === 'warning' || 
-                                 getExpiryStatus(d.licenseExpiry) === 'critical').length
+    assigned: drivers.filter(d => d.assignedVehicle && d.assignedVehicle.trim() !== '').length,
+    expiring: drivers.filter(d => {
+      const status = getExpiryStatus(d.licenseExpiry);
+      return status === 'warning' || status === 'critical';
+    }).length
   };
+
+  const employeeNames = getEmployeeNames();
 
   if (isLoading) {
     return (
@@ -346,6 +472,34 @@ const Drivers = () => {
     );
   }
 
+  if (error && !isLoading) {
+    return (
+      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <Sidebar />
+        <div className="flex-1 p-6 flex flex-col items-center justify-center">
+          <div className="max-w-md p-6 bg-red-50 border border-red-400 text-red-700 rounded-lg shadow-lg">
+            <h2 className="text-lg font-semibold mb-2">Error Loading Drivers</h2>
+            <p className="mb-4">{error}</p>
+            <div className="flex space-x-4">
+              <button 
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Retry
+              </button>
+              <button 
+                onClick={() => window.location.href = '/login'}
+                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+              >
+                Go to Login
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar />
@@ -353,6 +507,21 @@ const Drivers = () => {
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
+            
+            {/* Error Display */}
+            {error && (
+              <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                <p>{error}</p>
+              </div>
+            )}
+
+            {/* Success Message */}
+            {successMessage && (
+              <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+                {successMessage}
+              </div>
+            )}
+
             {/* Header Section */}
             <div className="mb-8">
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
@@ -709,17 +878,31 @@ const Drivers = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <span className="text-red-500">*</span> Full Name
+                      <span className="text-red-500">*</span> Driver Name
                     </label>
-                    <input
-                      type="text"
+                    <select
                       name="driverName"
                       value={formData.driverName}
                       onChange={handleInputChange}
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="e.g., John Doe"
                       required
-                    />
+                    >
+                      <option value="">Select an employee</option>
+                      {employeeNames.length > 0 ? (
+                        employeeNames.map((name, index) => (
+                          <option key={index} value={name}>
+                            {name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="" disabled>No employees found. Please add employees first.</option>
+                      )}
+                    </select>
+                    {employeeNames.length === 0 && (
+                      <p className="text-sm text-amber-600 mt-1">
+                        No employees found. Please make sure employees are added to the system.
+                      </p>
+                    )}
                   </div>
                   
                   <div>
@@ -766,7 +949,7 @@ const Drivers = () => {
                       <span className="text-red-500">*</span> Contact Number
                     </label>
                     <input
-                      type="tel"
+                      type="text"
                       name="contact"
                       value={formData.contact}
                       onChange={handleInputChange}
@@ -821,6 +1004,12 @@ const Drivers = () => {
                     />
                   </div>
                 </div>
+                
+                {inputError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+                    <p>{inputError}</p>
+                  </div>
+                )}
                 
                 <div className="flex justify-end space-x-4">
                   <button

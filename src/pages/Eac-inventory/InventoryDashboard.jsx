@@ -120,8 +120,15 @@ const InventoryDashboard = () => {
     { 
       icon: <ChartBarIcon className="h-6 w-6" />, 
       title: "Reports", 
-      path: "/reports",
+      path: "/ReportsDashboard",
       description: "Analytics & insights",
+      color: "from-pink-500 to-pink-600"
+    },
+    { 
+      icon: <ChartBarIcon className="h-6 w-6" />, 
+      title: "Product History", 
+      path: "/history",
+      description: "Track product and stock history",
       color: "from-pink-500 to-pink-600"
     },
 
