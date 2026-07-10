@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { 
   Calendar, Clock, User, Check, X, Filter, Download, Plus, ChevronLeft,
   ChevronRight, Search, MoreVertical, Edit, Trash2, RefreshCw, ChevronDown,
   ChevronUp, FileText, DollarSign, Building, Upload, File, Users, Receipt,
   CalendarRange, AlertCircle, CalendarDays, ArrowRightLeft, Settings,
   Info, HelpCircle, BarChart, Eye, EyeOff, Save, CheckCircle, XCircle, UserCheck,
-  ArrowLeftRight, Menu 
+  ArrowLeftRight, Menu, Flag, AlertTriangle 
 } from "lucide-react";
 import MainSidebar from "../mainSidebar";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -70,23 +70,87 @@ function Timesheet() {
     currentNH: 0,
     currentOT: 0
   });
-  const [attendanceCodeSettings, setAttendanceCodeSettings] = useState({
-    P: { capNH: false, defaultNH: 8, allowOT: true, description: "Regular Present" },
-    WP: { capNH: false, defaultNH: 8, allowOT: true, description: "Weekend Present" },
-    HP: { capNH: false, defaultNH: 8, allowOT: true, description: "Holiday Present" },
-    H: { capNH: false, defaultNH: 8, allowOT: false, description: "Holiday" },
-    L: { capNH: false, defaultNH: 8, allowOT: false, description: "Leave" },
-    S: { capNH: false, defaultNH: 8, allowOT: false, description: "Sick Leave" },
-    ML: { capNH: false, defaultNH: 8, allowOT: false, description: "Maternity Leave" },
-    PL: { capNH: false, defaultNH: 8, allowOT: false, description: "Paternity Leave" },
-    OFF: { capNH: false, defaultNH: 0, allowOT: false, description: "Off Day" },
-    A: { capNH: false, defaultNH: 0, allowOT: false, description: "Absent" }
-  });
+  const [attendanceCodeSettings, setAttendanceCodeSettings] = useState({});
+
+  const fetchAttendanceCodeSettings = async () => {
+    try {
+        const token = localStorage.getItem("jwtToken");
+        const response = await fetch(`${API_BASE_URL}/api/settings/attendance-codes`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const data = await response.json();
+            setAttendanceCodeSettings(data);
+        } else {
+            setAttendanceCodeSettings({
+                P: { capNH: false, defaultNH: 8, allowOT: true, description: "Regular Present" },
+                WP: { capNH: false, defaultNH: 8, allowOT: true, description: "Weekend Present" },
+                HP: { capNH: false, defaultNH: 8, allowOT: true, description: "Holiday Present" },
+                H: { capNH: false, defaultNH: 8, allowOT: false, description: "Holiday" },
+                L: { capNH: false, defaultNH: 8, allowOT: false, description: "Leave" },
+                S: { capNH: false, defaultNH: 8, allowOT: false, description: "Sick Leave" },
+                ML: { capNH: false, defaultNH: 8, allowOT: false, description: "Maternity Leave" },
+                PL: { capNH: false, defaultNH: 8, allowOT: false, description: "Paternity Leave" },
+                OFF: { capNH: false, defaultNH: 0, allowOT: false, description: "Off Day" },
+                A: { capNH: false, defaultNH: 0, allowOT: false, description: "Absent" }
+            });
+        }
+    } catch (err) {
+        console.error("Error fetching attendance code settings:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAttendanceCodeSettings();
+  }, []);
+
+  const saveAttendanceCodeSettings = async () => {
+    try {
+        const token = localStorage.getItem("jwtToken");
+        const promises = Object.entries(attendanceCodeSettings).map(([code, settings]) =>
+            fetch(`${API_BASE_URL}/api/settings/attendance-codes/${code}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            })
+        );
+        
+        await Promise.all(promises);
+        setSaveMessage({ type: "success", text: "Attendance code settings saved successfully!" });
+        setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+    } catch (err) {
+        console.error("Error saving settings:", err);
+        setSaveMessage({ type: "error", text: "Failed to save settings: " + err.message });
+        setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+    }
+  };
+
   const [saveSpecificDate, setSaveSpecificDate] = useState({
     open: false,
     date: "",
+    endDate: "",
+    rangeMode: false,
+    employeeIds: new Set(),
+    isSaving: false
+  });
+  
+  const [missingSourceEntries, setMissingSourceEntries] = useState({});
+  const [showMissingSourceModal, setShowMissingSourceModal] = useState(false);
+  const [missingSourceFilter, setMissingSourceFilter] = useState("all");
+  const [missingSourceModalData, setMissingSourceModalData] = useState({
+    startDate: "",
+    endDate: "",
+    reason: "",
     employeeIds: new Set()
   });
+  
+  const [autoSyncWithBilling, setAutoSyncWithBilling] = useState(true);
+  const userManuallyChangedRef = useRef(false);
+  const autoSyncPerformedRef = useRef(false);
+  
   const [bulkAction, setBulkAction] = useState({
     scope: "period",
     date: "",
@@ -175,6 +239,48 @@ function Timesheet() {
     isDeleting: false
   });
 
+  const getLastBillingDate = (nextBillingDate, billingCycle) => {
+    const next = new Date(nextBillingDate);
+    const last = new Date(next);
+    
+    switch (billingCycle) {
+      case 'WEEKLY':
+        last.setDate(last.getDate() - 7);
+        break;
+      case 'BI_WEEKLY':
+        last.setDate(last.getDate() - 14);
+        break;
+      case 'MONTHLY':
+        last.setMonth(last.getMonth() - 1);
+        break;
+      case 'QUARTERLY':
+        last.setMonth(last.getMonth() - 3);
+        break;
+      default:
+        last.setMonth(last.getMonth() - 1);
+    }
+    
+    return last;
+  };
+
+  const getDaysBetween = (startDate, endDate) => {
+    const days = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    
+    const current = new Date(start);
+    
+    while (current <= end) {
+      days.push(new Date(current));
+      current.setDate(current.getDate() + 1);
+    }
+    
+    return days;
+  };
+
   const openDeleteForDay = (employeeId, dateStr) => {
     setDeleteModal({
       open: true,
@@ -187,6 +293,163 @@ function Timesheet() {
       selectedDateForDay: dateStr,
       isDeleting: false
     });
+  };
+
+  const toggleMissingSourceFlag = (employeeId, dateStr, currentFlag) => {
+    const key = `${employeeId}_${dateStr}`;
+    setMissingSourceEntries(prev => ({
+      ...prev,
+      [key]: {
+        flagged: !currentFlag,
+        reason: !currentFlag ? "No hard copy timesheet received" : null,
+        flaggedAt: !currentFlag ? new Date().toISOString() : null,
+        flaggedBy: user?.name || "Unknown"
+      }
+    }));
+  };
+
+  const bulkMarkMissingSource = () => {
+    const { startDate, endDate, reason, employeeIds } = missingSourceModalData;
+    
+    if (!startDate || !endDate) {
+      setSaveMessage({ type: "error", text: "Please select start and end dates" });
+      return;
+    }
+    
+    const ids = employeeIds.size > 0 ? Array.from(employeeIds) : Array.from(selectedEmployeeIds);
+    
+    if (ids.length === 0) {
+      setSaveMessage({ type: "error", text: "Select at least one employee" });
+      return;
+    }
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const dateRange = [];
+    const current = new Date(start);
+    
+    while (current <= end) {
+      dateRange.push(toYMD(current));
+      current.setDate(current.getDate() + 1);
+    }
+    
+    const newMissingEntries = { ...missingSourceEntries };
+    
+    ids.forEach(empId => {
+      dateRange.forEach(dateStr => {
+        const key = `${empId}_${dateStr}`;
+        newMissingEntries[key] = {
+          flagged: true,
+          reason: reason || "No hard copy timesheet received",
+          flaggedAt: new Date().toISOString(),
+          flaggedBy: user?.name || "Unknown"
+        };
+      });
+    });
+    
+    setMissingSourceEntries(newMissingEntries);
+    setShowMissingSourceModal(false);
+    setMissingSourceModalData({ startDate: "", endDate: "", reason: "", employeeIds: new Set() });
+    setSaveMessage({ type: "success", text: `Marked ${dateRange.length * ids.length} entries as "No Source Document"` });
+    setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+  };
+
+  const isMissingSource = (employeeId, dateStr) => {
+    const key = `${employeeId}_${dateStr}`;
+    return missingSourceEntries[key]?.flagged === true;
+  };
+
+  const getMissingSourceReason = (employeeId, dateStr) => {
+    const key = `${employeeId}_${dateStr}`;
+    return missingSourceEntries[key]?.reason || "No source document";
+  };
+
+  const handleExportInvoice = async () => {
+    if (!selectedJob || selectedJob === '' || selectedJob === 'no-job') {
+        setSaveMessage({ type: "error", text: "Please select a job first" });
+        return;
+    }
+    
+    const { start, end } = getDateRange();
+    const startDate = toYMD(start);
+    const endDate = toYMD(end);
+    
+    if (!startDate || !endDate) {
+        setSaveMessage({ type: "error", text: "Please ensure date range is selected" });
+        return;
+    }
+    
+    setIsGenerating(true);
+    setSaveMessage({ type: "info", text: "Generating invoice with attachments..." });
+    
+    try {
+        const token = localStorage.getItem("jwtToken");
+        const response = await fetch(
+            `${API_BASE_URL}/api/timesheets/invoice/export-with-attachments?jobId=${selectedJob}&startDate=${startDate}&endDate=${endDate}`,
+            {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            }
+        );
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || "Failed to generate invoice");
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `Invoice_${selectedJob}_${startDate}_to_${endDate}.zip`;
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+            const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (match && match[1]) {
+                filename = match[1].replace(/['"]/g, '');
+            }
+        }
+        
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        setSaveMessage({ type: "success", text: "Invoice ZIP generated successfully!" });
+        
+    } catch (err) {
+        console.error("Error generating invoice:", err);
+        setSaveMessage({ type: "error", text: `Failed to generate invoice: ${err.message}` });
+    } finally {
+        setIsGenerating(false);
+        setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+    }
+  };
+
+  const getFilteredEmployeesWithSourceFilter = () => {
+    let filtered = getFilteredEmployees();
+    
+    if (missingSourceFilter === "verified") {
+      filtered = filtered.filter(emp => {
+        const hasAnyMissing = days.some(day => {
+          const dateStr = toYMD(day);
+          return isMissingSource(emp.id, dateStr) && attendanceData[emp.id]?.[dateStr];
+        });
+        return !hasAnyMissing;
+      });
+    } else if (missingSourceFilter === "unverified") {
+      filtered = filtered.filter(emp => {
+        return days.some(day => {
+          const dateStr = toYMD(day);
+          return isMissingSource(emp.id, dateStr) && attendanceData[emp.id]?.[dateStr];
+        });
+      });
+    }
+    
+    return filtered;
   };
 
   const STANDARD_HOURS_CODES = new Set(["P", "WP", "HP", "H", "L", "S", "ML", "PL"]);
@@ -215,53 +478,100 @@ function Timesheet() {
         return;
       }
 
-      if (!saveSpecificDate.date) {
+      if (!saveSpecificDate.rangeMode && !saveSpecificDate.date) {
         setSaveMessage({ type: "error", text: "Please select a date to save." });
         return;
       }
 
+      if (saveSpecificDate.rangeMode && (!saveSpecificDate.date || !saveSpecificDate.endDate)) {
+        setSaveMessage({ type: "error", text: "Please select start and end dates." });
+        return;
+      }
+
       const selectedEmployees = filteredEmployees.filter(e => ids.includes(e.id));
-      const dateStr = saveSpecificDate.date;
+      
+      const datesToSave = [];
+      if (!saveSpecificDate.rangeMode) {
+        datesToSave.push(saveSpecificDate.date);
+      } else {
+        const start = new Date(saveSpecificDate.date);
+        const end = new Date(saveSpecificDate.endDate);
+        
+        if (start > end) {
+          setSaveMessage({ type: "error", text: "Start date cannot be after end date." });
+          return;
+        }
+        
+        const current = new Date(start);
+        while (current <= end) {
+          datesToSave.push(toYMD(current));
+          current.setDate(current.getDate() + 1);
+        }
+      }
 
       const timesheetData = [];
       let hasData = false;
 
       selectedEmployees.forEach(employee => {
-        const attendanceStatus = attendanceData[employee.id]?.[dateStr];
+        datesToSave.forEach(dateStr => {
+          const attendanceStatus = attendanceData[employee.id]?.[dateStr];
 
-        if (attendanceStatus && attendanceStatus !== "") {
-          hasData = true;
+          if (attendanceStatus && attendanceStatus !== "") {
+            hasData = true;
 
-          const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
-          const nh = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
-          const ot = parseFloat(employeeOvertime?.[employee.id]?.[dateStr] || 0);
-          
-          let earnings = 0;
-          if (isPresentCode(attendanceStatus)) {
-            const earningsCalc = calculateEarnings(employee, new Date(dateStr), nh, ot);
-            earnings = earningsCalc.totalPay;
+            const key = `${employee.id}_${dateStr}`;
+            const sourceMissing = missingSourceEntries[key]?.flagged || false;
+
+            if (isPresentCode(attendanceStatus)) {
+              const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
+              const nh = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
+              const ot = parseFloat(employeeOvertime?.[employee.id]?.[dateStr] || 0);
+              const earnings = calculateEarnings(employee, new Date(dateStr), nh, ot);
+              
+              const employeeJob = employees.find(e => e.id === employee.id)?.job;
+              const jobId = employeeJob?.id;
+
+              timesheetData.push({
+                employeeId: employee.id,
+                date: dateStr,
+                regularHours: nh,
+                overtimeHours: ot,
+                breakHours: 0,
+                totalHours: totalHours,
+                earnings: earnings.totalPay,
+                attendanceCode: attendanceStatus,
+                sourceDocumentMissing: sourceMissing,
+                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                jobId: jobId
+              });
+            } else {
+              timesheetData.push({
+                employeeId: employee.id,
+                date: dateStr,
+                regularHours: 0,
+                overtimeHours: 0,
+                breakHours: 0,
+                totalHours: 0,
+                earnings: 0,
+                attendanceCode: attendanceStatus,
+                sourceDocumentMissing: sourceMissing,
+                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                jobId: jobId
+              });
+            }
           }
-
-          timesheetData.push({
-            employeeId: employee.id,
-            date: dateStr,
-            regularHours: isPresentCode(attendanceStatus) ? nh : 0,
-            overtimeHours: isPresentCode(attendanceStatus) ? ot : 0,
-            breakHours: 0,
-            totalHours: isPresentCode(attendanceStatus) ? totalHours : 0,
-            earnings: earnings,
-            attendanceCode: attendanceStatus
-          });
-        }
+        });
       });
 
       if (!hasData) {
-        setSaveMessage({ type: "error", text: "No data to save for selected date." });
+        setSaveMessage({ type: "error", text: "No data to save for selected employees." });
         return;
       }
 
-      setIsGenerating(true);
-      setSaveMessage({ type: "info", text: `Saving data for ${dateStr}...` });
+      setSaveSpecificDate(prev => ({ ...prev, isSaving: true }));
+      setSaveMessage({ type: "info", text: `Saving data for ${datesToSave.length} day(s) for ${ids.length} employees...` });
 
       const response = await fetch(`${API_BASE_URL}/api/timesheets/generate`, {
         method: "POST",
@@ -284,29 +594,36 @@ function Timesheet() {
 
       setSaveMessage({
         type: "success",
-        text: `Saved ${dateStr} for ${ids.length} employees. Created: ${result.createdCount || 0}, Updated: ${result.updatedCount || 0}`
+        text: `Saved ${datesToSave.length} day(s) for ${ids.length} employees. Created: ${result.createdCount || 0}, Updated: ${result.updatedCount || 0}`
       });
 
       await fetchTimesheets();
 
-      setSaveSpecificDate({ open: false, date: "", employeeIds: new Set() });
+      setSaveSpecificDate({ 
+        open: false, 
+        date: "", 
+        endDate: "", 
+        rangeMode: false, 
+        employeeIds: new Set(),
+        isSaving: false 
+      });
 
     } catch (err) {
       console.error("Save error:", err);
       setSaveMessage({ type: "error", text: `Save failed: ${err.message}` });
+      setSaveSpecificDate(prev => ({ ...prev, isSaving: false }));
     } finally {
-      setIsGenerating(false);
       setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
     }
   };
 
   const toYMD = (date) => {
-  const d = new Date(date);
-  const year = d.getFullYear();        // ✅ Use local year
-  const month = String(d.getMonth() + 1).padStart(2, "0");  // ✅ Use local month
-  const day = String(d.getDate()).padStart(2, "0");         // ✅ Use local day
-  return `${year}-${month}-${day}`;
-};
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   const applyAttendanceDefaults = (employeeId, dateStr, employee, attendanceCode = 'P') => {
     if (isStandardHoursCode(attendanceCode)) {
@@ -348,12 +665,45 @@ function Timesheet() {
   };
 
   useEffect(() => {
+    userManuallyChangedRef.current = false;
+    autoSyncPerformedRef.current = false;
+  }, [selectedJob]);
+
+  useEffect(() => {
+    if (autoSyncWithBilling && selectedJob && selectedJob !== '' && selectedJob !== 'no-job' && !userManuallyChangedRef.current && !autoSyncPerformedRef.current) {
+      const job = jobs.find(j => j.id === parseInt(selectedJob));
+      
+      if (job?.nextBillingDate) {
+        const nextBilling = new Date(job.nextBillingDate);
+        const lastBilling = getLastBillingDate(nextBilling, job.billingCycle);
+        
+        if (lastBilling && nextBilling && lastBilling <= nextBilling) {
+          const daysArray = getDaysBetween(lastBilling, nextBilling);
+          
+          if (daysArray.length > 0) {
+            autoSyncPerformedRef.current = true;
+            setCurrentDate(lastBilling);
+            setSelectedPeriod("custom");
+            setCustomDays(daysArray);
+            
+            setSaveMessage({
+              type: "info",
+              text: `📅 Auto-synced to billing period: ${lastBilling.toLocaleDateString()} - ${nextBilling.toLocaleDateString()}`
+            });
+            setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+          }
+        }
+      }
+    }
+  }, [selectedJob, jobs, autoSyncWithBilling]);
+
+  useEffect(() => {
     setFilters(prev => ({ ...prev, search: searchQuery }));
   }, [searchQuery]);
 
   useEffect(() => {
     setTablePage(1);
-  }, [selectedCategory, searchQuery, selectedJob, selectedPeriod, currentDate, customDays.length]);
+  }, [selectedCategory, searchQuery, selectedJob, selectedPeriod, currentDate, customDays.length, missingSourceFilter]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -582,16 +932,19 @@ function Timesheet() {
         const newEmployeeHours = { ...employeeHours };
         const newEmployeeOvertime = { ...employeeOvertime };
         const newEmployeeNormalHours = { ...employeeNormalHours };
+        const newMissingSourceEntries = { ...missingSourceEntries };
         
         if (newAttendanceData[empId]) delete newAttendanceData[empId][dateStr];
         if (newEmployeeHours[empId]) delete newEmployeeHours[empId][dateStr];
         if (newEmployeeOvertime[empId]) delete newEmployeeOvertime[empId][dateStr];
         if (newEmployeeNormalHours[empId]) delete newEmployeeNormalHours[empId][dateStr];
+        delete newMissingSourceEntries[`${empId}_${dateStr}`];
         
         setAttendanceData(newAttendanceData);
         setEmployeeHours(newEmployeeHours);
         setEmployeeOvertime(newEmployeeOvertime);
         setEmployeeNormalHours(newEmployeeNormalHours);
+        setMissingSourceEntries(newMissingSourceEntries);
         
       } else if (deleteModal.scope === "selected") {
         const idsToClear = deleteModal.employeeIds.size > 0 
@@ -602,6 +955,7 @@ function Timesheet() {
         const newEmployeeHours = { ...employeeHours };
         const newEmployeeOvertime = { ...employeeOvertime };
         const newEmployeeNormalHours = { ...employeeNormalHours };
+        const newMissingSourceEntries = { ...missingSourceEntries };
         
         idsToClear.forEach(empId => {
           if (deleteModal.date) {
@@ -609,6 +963,7 @@ function Timesheet() {
             if (newEmployeeHours[empId]) delete newEmployeeHours[empId][deleteModal.date];
             if (newEmployeeOvertime[empId]) delete newEmployeeOvertime[empId][deleteModal.date];
             if (newEmployeeNormalHours[empId]) delete newEmployeeNormalHours[empId][deleteModal.date];
+            delete newMissingSourceEntries[`${empId}_${deleteModal.date}`];
           } else if (deleteModal.startDate && deleteModal.endDate) {
             const start = new Date(deleteModal.startDate);
             const end = new Date(deleteModal.endDate);
@@ -620,6 +975,7 @@ function Timesheet() {
               if (newEmployeeHours[empId]) delete newEmployeeHours[empId][dateStr];
               if (newEmployeeOvertime[empId]) delete newEmployeeOvertime[empId][dateStr];
               if (newEmployeeNormalHours[empId]) delete newEmployeeNormalHours[empId][dateStr];
+              delete newMissingSourceEntries[`${empId}_${dateStr}`];
               cur.setDate(cur.getDate() + 1);
             }
           } else {
@@ -629,6 +985,7 @@ function Timesheet() {
               if (newEmployeeHours[empId]) delete newEmployeeHours[empId][dateStr];
               if (newEmployeeOvertime[empId]) delete newEmployeeOvertime[empId][dateStr];
               if (newEmployeeNormalHours[empId]) delete newEmployeeNormalHours[empId][dateStr];
+              delete newMissingSourceEntries[`${empId}_${dateStr}`];
             });
           }
         });
@@ -637,6 +994,7 @@ function Timesheet() {
         setEmployeeHours(newEmployeeHours);
         setEmployeeOvertime(newEmployeeOvertime);
         setEmployeeNormalHours(newEmployeeNormalHours);
+        setMissingSourceEntries(newMissingSourceEntries);
         
       } else {
         await fetchTimesheets();
@@ -695,44 +1053,40 @@ function Timesheet() {
     });
   };
 
- const parseBulkDateTokenToYMD = (token) => {
-  if (!token) return null;
-  const t = String(token).trim();
-  if (!t) return null;
+  const parseBulkDateTokenToYMD = (token) => {
+    if (!token) return null;
+    const t = String(token).trim();
+    if (!t) return null;
 
-  // Handle YYYY-MM-DD format
-  let m = t.match(/^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$/);
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-    // ✅ Use local date construction
-    const dt = new Date(y, mo - 1, d);
-    if (dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d) {
-      return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    let m = t.match(/^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$/);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]);
+      const d = Number(m[3]);
+      const dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d) {
+        return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      }
+      return null;
     }
+
+    m = t.match(/^([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{2}|[0-9]{4})$/);
+    if (m) {
+      const mo = Number(m[1]);
+      const d = Number(m[2]);
+      let y = Number(m[3]);
+      if (m[3].length === 2) {
+        y = 2000 + y;
+      }
+      const dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d) {
+        return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      }
+      return null;
+    }
+
     return null;
-  }
-
-  // Handle MM/DD/YYYY or M/D/YY format
-  m = t.match(/^([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{2}|[0-9]{4})$/);
-  if (m) {
-    const mo = Number(m[1]);
-    const d = Number(m[2]);
-    let y = Number(m[3]);
-    if (m[3].length === 2) {
-      y = 2000 + y;
-    }
-    // ✅ Use local date construction
-    const dt = new Date(y, mo - 1, d);
-    if (dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d) {
-      return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
-    return null;
-  }
-
-  return null;
-};
+  };
 
   const parseBulkDateList = (textValue) => {
     if (!textValue) return [];
@@ -816,109 +1170,92 @@ function Timesheet() {
     const nextNH = { ...prevNH };
 
     const shouldApplyConditionalLocal = (empId, dateStr) => {
-  // If conditional logic is disabled, always apply
-  if (!conditional.enabled) return true;
-  
-  const hasExistingData = prevAtt?.[empId]?.[dateStr] && prevAtt[empId][dateStr] !== "";
-  const currentStatus = (prevAtt?.[empId]?.[dateStr] || "").toUpperCase();
-  const total = parseFloat(prevHours?.[empId]?.[dateStr] || 0);
-  const ot = parseFloat(prevOT?.[empId]?.[dateStr] || 0);
-  const currentNH = Math.max(total - ot, 0);
-  const conditionValueRaw = String(conditional.conditionValue ?? "").trim();
-  const newCode = String(code).toUpperCase();
-  
-  // 🔥 CRITICAL FIX: For NH or Status conditions, we REQUIRE existing data
-  // You don't want to create new attendance entries when trying to modify existing ones
-  const conditionTypesThatRequireExistingData = ["nhEquals", "statusEquals", "both"];
-  
-  if (conditionTypesThatRequireExistingData.includes(conditional.conditionType)) {
-    // If no existing data, DO NOT apply the conditional operation
-    // This prevents adding "P" to empty dates when you're just trying to add OT
-    if (!hasExistingData) return false;
-  }
-  
-  // Parse condition value (could be a number for NH or a string for status)
-  let nhTarget = null;
-  let statusTarget = null;
-  
-  // Try to parse as number for NH conditions
-  const maybeNum = parseFloat(conditionValueRaw);
-  if (!isNaN(maybeNum)) {
-    nhTarget = maybeNum;
-  }
-  
-  // If it's not a number (or we're checking status), treat as status string
-  if (conditional.conditionType === "statusEquals" || 
-      (conditional.conditionType === "both" && isNaN(Number(conditionValueRaw)))) {
-    statusTarget = conditionValueRaw.toUpperCase();
-  }
-  
-  // Evaluate based on condition type
-  if (conditional.conditionType === "nhEquals") {
-    // Only apply if NH exactly matches target
-    // Since we already verified hasExistingData above, this is safe
-    return currentNH === nhTarget;
-  }
-  
-  if (conditional.conditionType === "statusEquals") {
-    // Only apply if status exactly matches target
-    return currentStatus === statusTarget;
-  }
-  
-  if (conditional.conditionType === "both") {
-    // Both conditions must match
-    const nhMatches = (nhTarget !== null) ? (currentNH === nhTarget) : true;
-    const statusMatches = (statusTarget !== null) ? (currentStatus === statusTarget) : true;
-    return nhMatches && statusMatches;
-  }
-  
-  // Default fallback - apply if there's existing data
-  return hasExistingData;
-};
+      if (!conditional.enabled) return true;
+      
+      const hasExistingData = prevAtt?.[empId]?.[dateStr] && prevAtt[empId][dateStr] !== "";
+      const currentStatus = (prevAtt?.[empId]?.[dateStr] || "").toUpperCase();
+      const total = parseFloat(prevHours?.[empId]?.[dateStr] || 0);
+      const ot = parseFloat(prevOT?.[empId]?.[dateStr] || 0);
+      const currentNH = Math.max(total - ot, 0);
+      const conditionValueRaw = String(conditional.conditionValue ?? "").trim();
+      
+      const conditionTypesThatRequireExistingData = ["nhEquals", "statusEquals", "both"];
+      
+      if (conditionTypesThatRequireExistingData.includes(conditional.conditionType)) {
+        if (!hasExistingData) return false;
+      }
+      
+      let nhTarget = null;
+      let statusTarget = null;
+      
+      const maybeNum = parseFloat(conditionValueRaw);
+      if (!isNaN(maybeNum)) {
+        nhTarget = maybeNum;
+      }
+      
+      if (conditional.conditionType === "statusEquals" || 
+          (conditional.conditionType === "both" && isNaN(Number(conditionValueRaw)))) {
+        statusTarget = conditionValueRaw.toUpperCase();
+      }
+      
+      if (conditional.conditionType === "nhEquals") {
+        return currentNH === nhTarget;
+      }
+      
+      if (conditional.conditionType === "statusEquals") {
+        return currentStatus === statusTarget;
+      }
+      
+      if (conditional.conditionType === "both") {
+        const nhMatches = (nhTarget !== null) ? (currentNH === nhTarget) : true;
+        const statusMatches = (statusTarget !== null) ? (currentStatus === statusTarget) : true;
+        return nhMatches && statusMatches;
+      }
+      
+      return hasExistingData;
+    };
 
-   const applyHoursWithConditional = (empId, dateStr) => {
-    const thenVal = parseFloat(conditional.thenValue || "0") || 0;
-    const prevTotal = parseFloat(prevHours?.[empId]?.[dateStr] || 0);
-    const prevOtVal = parseFloat(prevOT?.[empId]?.[dateStr] || 0);
-    const prevNhVal = Math.max(prevTotal - prevOtVal, 0);
-    const hasExistingData = prevAtt?.[empId]?.[dateStr] && prevAtt[empId][dateStr] !== "";
+    const applyHoursWithConditional = (empId, dateStr) => {
+      const thenVal = parseFloat(conditional.thenValue || "0") || 0;
+      const prevTotal = parseFloat(prevHours?.[empId]?.[dateStr] || 0);
+      const prevOtVal = parseFloat(prevOT?.[empId]?.[dateStr] || 0);
+      const prevNhVal = Math.max(prevTotal - prevOtVal, 0);
+      const hasExistingData = prevAtt?.[empId]?.[dateStr] && prevAtt[empId][dateStr] !== "";
 
-    // For empty dates, use base values instead of conditional logic
-    if (!hasExistingData) {
-        nextNH[empId][dateStr] = String(Math.max(baseTotal - baseOT, 0));
-        nextOT[empId][dateStr] = String(baseOT);
-        nextHours[empId][dateStr] = String(baseTotal);
-        return;
-    }
+      if (!hasExistingData) {
+          nextNH[empId][dateStr] = String(Math.max(baseTotal - baseOT, 0));
+          nextOT[empId][dateStr] = String(baseOT);
+          nextHours[empId][dateStr] = String(baseTotal);
+          return;
+      }
 
-    if (conditional.thenAction === "setOvertime") {
-        const currentNH = parseFloat(nextNH[empId]?.[dateStr] ?? prevNhVal);
-        nextOT[empId][dateStr] = String(thenVal);
-        nextHours[empId][dateStr] = String(currentNH + thenVal);
-        nextNH[empId][dateStr] = String(currentNH);
-        return;
-    }
+      if (conditional.thenAction === "setOvertime") {
+          const currentNH = parseFloat(nextNH[empId]?.[dateStr] ?? prevNhVal);
+          nextOT[empId][dateStr] = String(thenVal);
+          nextHours[empId][dateStr] = String(currentNH + thenVal);
+          nextNH[empId][dateStr] = String(currentNH);
+          return;
+      }
 
-    if (conditional.thenAction === "setHours") {
-        const currentOT = parseFloat(nextOT[empId]?.[dateStr] ?? prevOtVal);
-        nextNH[empId][dateStr] = String(thenVal);
-        nextOT[empId][dateStr] = String(currentOT);
-        nextHours[empId][dateStr] = String(thenVal + currentOT);
-        return;
-    }
+      if (conditional.thenAction === "setHours") {
+          const currentOT = parseFloat(nextOT[empId]?.[dateStr] ?? prevOtVal);
+          nextNH[empId][dateStr] = String(thenVal);
+          nextOT[empId][dateStr] = String(currentOT);
+          nextHours[empId][dateStr] = String(thenVal + currentOT);
+          return;
+      }
 
-    if (conditional.thenAction === "setBoth") {
-        nextNH[empId][dateStr] = String(thenVal);
-        nextOT[empId][dateStr] = String(thenVal);
-        nextHours[empId][dateStr] = String(thenVal + thenVal);
-        return;
-    }
+      if (conditional.thenAction === "setBoth") {
+          nextNH[empId][dateStr] = String(thenVal);
+          nextOT[empId][dateStr] = String(thenVal);
+          nextHours[empId][dateStr] = String(thenVal + thenVal);
+          return;
+      }
 
-    // Default: use base values from form
-    nextNH[empId][dateStr] = String(Math.max(baseTotal - baseOT, 0));
-    nextOT[empId][dateStr] = String(baseOT);
-    nextHours[empId][dateStr] = String(baseTotal);
-};
+      nextNH[empId][dateStr] = String(Math.max(baseTotal - baseOT, 0));
+      nextOT[empId][dateStr] = String(baseOT);
+      nextHours[empId][dateStr] = String(baseTotal);
+    };
 
     ids.forEach(empId => {
       nextAtt[empId] = { ...(nextAtt[empId] || {}) };
@@ -930,12 +1267,10 @@ function Timesheet() {
         const ok = shouldApplyConditionalLocal(empId, dateStr);
         if (!ok) return;
 
-       if (bulkAction.onlyUpdateExistingP && String(code).toUpperCase() === "P") {
-    const existing = String(attendanceData?.[empId]?.[dateStr] || "").toUpperCase();
-    // Only block if there's an existing code that is NOT "P"
-    // Allow if empty or already "P"
-    if (existing && existing !== "P") return;
-}
+        if (bulkAction.onlyUpdateExistingP && String(code).toUpperCase() === "P") {
+          const existing = String(attendanceData?.[empId]?.[dateStr] || "").toUpperCase();
+          if (existing && existing !== "P") return;
+        }
 
         nextAtt[empId][dateStr] = code;
 
@@ -962,93 +1297,108 @@ function Timesheet() {
 
   const saveSelectedAttendance = async () => {
     try {
-      const token = localStorage.getItem("jwtToken");
-      const ids = Array.from(selectedEmployeeIds);
-      if (ids.length === 0) {
-        setSaveMessage({ type: "error", text: "Select at least one employee to save." });
-        return;
-      }
+        const token = localStorage.getItem("jwtToken");
+        const ids = Array.from(selectedEmployeeIds);
+        if (ids.length === 0) {
+            setSaveMessage({ type: "error", text: "Select at least one employee to save." });
+            return;
+        }
 
-      const selectedEmployees = filteredEmployees.filter(e => ids.includes(e.id));
-      const scopeDays = selectedPeriod === "custom" ? customDays : getDaysArray();
+        const selectedEmployees = filteredEmployees.filter(e => ids.includes(e.id));
+        const scopeDays = selectedPeriod === "custom" ? customDays : getDaysArray();
 
-      const timesheetData = [];
-      let hasData = false;
+        const timesheetData = [];
+        let hasData = false;
 
-      selectedEmployees.forEach(employee => {
-        scopeDays.forEach(day => {
-          const dateStr = toYMD(day);
-          const attendanceStatus = attendanceData[employee.id]?.[dateStr];
+        selectedEmployees.forEach(employee => {
+            scopeDays.forEach(day => {
+                const dateStr = toYMD(day);
+                const attendanceStatus = attendanceData[employee.id]?.[dateStr];
 
-          if (attendanceStatus && attendanceStatus !== "") {
-            hasData = true;
+                if (attendanceStatus && attendanceStatus !== "") {
+                    hasData = true;
 
-            if (isPresentCode(attendanceStatus)) {
-              const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
-              const nh = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
-              const ot = parseFloat(employeeOvertime?.[employee.id]?.[dateStr] || 0);
-              const earnings = calculateEarnings(employee, day, nh, ot);
+                    const key = `${employee.id}_${dateStr}`;
+                    const sourceMissing = missingSourceEntries[key]?.flagged || false;
 
-              timesheetData.push({
-                employeeId: employee.id,
-                date: dateStr,
-                regularHours: nh,
-                overtimeHours: ot,
-                breakHours: 0,
-                totalHours: totalHours,
-                earnings: earnings.totalPay,
-                attendanceCode: attendanceStatus
-              });
-            } else {
-              timesheetData.push({
-                employeeId: employee.id,
-                date: dateStr,
-                regularHours: 0,
-                overtimeHours: 0,
-                breakHours: 0,
-                totalHours: 0,
-                earnings: 0,
-                attendanceCode: attendanceStatus
-              });
-            }
-          }
+                    if (isPresentCode(attendanceStatus)) {
+                        const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
+                        const nh = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
+                        const ot = parseFloat(employeeOvertime?.[employee.id]?.[dateStr] || 0);
+                        const earnings = calculateEarnings(employee, day, nh, ot);
+                        
+                        const employeeJob = employees.find(e => e.id === employee.id)?.job;
+                        const jobId = employeeJob?.id;
+
+                        timesheetData.push({
+                            employeeId: employee.id,
+                            date: dateStr,
+                            regularHours: nh,
+                            overtimeHours: ot,
+                            breakHours: 0,
+                            totalHours: totalHours,
+                            earnings: earnings.totalPay,
+                            attendanceCode: attendanceStatus,
+                            sourceDocumentMissing: sourceMissing,
+                            sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                            sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                            jobId: jobId
+                        });
+                    } else {
+                        timesheetData.push({
+                            employeeId: employee.id,
+                            date: dateStr,
+                            regularHours: 0,
+                            overtimeHours: 0,
+                            breakHours: 0,
+                            totalHours: 0,
+                            earnings: 0,
+                            attendanceCode: attendanceStatus,
+                            sourceDocumentMissing: sourceMissing,
+                            sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                            sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                            jobId: jobId
+                        });
+                    }
+                }
+            });
         });
-      });
 
-      if (!hasData) {
-        setSaveMessage({ type: "error", text: "No data to save for selected employees." });
-        return;
-      }
+        if (!hasData) {
+            setSaveMessage({ type: "error", text: "No data to save for selected employees." });
+            return;
+        }
 
-      setIsGenerating(true);
-      setSaveMessage({ type: "info", text: "Saving selected employees..." });
+        setIsGenerating(true);
+        setSaveMessage({ type: "info", text: "Saving selected employees..." });
 
-      const response = await fetch(`${API_BASE_URL}/api/timesheets/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          timesheets: timesheetData,
-          saveMode: "override"
-        })
-      });
+        const response = await fetch(`${API_BASE_URL}/api/timesheets/generate`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                timesheets: timesheetData,
+                saveMode: "override"
+            })
+        });
 
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json();
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
 
-      setSaveMessage({
-        type: "success",
-        text: `Saved selected employees. Created: ${result.createdCount}, Updated: ${result.updatedCount}, Skipped: ${result.skippedCount}`
-      });
+        setSaveMessage({
+            type: "success",
+            text: `Saved selected employees. Created: ${result.createdCount}, Updated: ${result.updatedCount}, Skipped: ${result.skippedCount}`
+        });
 
-      await fetchTimesheets();
+        await fetchTimesheets();
     } catch (err) {
-      setSaveMessage({ type: "error", text: `Save failed: ${err.message}` });
+        console.error("Save error - Full details:", err);
+        setSaveMessage({ type: "error", text: `Save failed: ${err.message}` });
     } finally {
-      setIsGenerating(false);
-      setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
+        setIsGenerating(false);
+        setTimeout(() => setSaveMessage({ type: "", text: "" }), 3000);
     }
   };
 
@@ -1106,6 +1456,8 @@ function Timesheet() {
 
       setTimesheets(fixed);
 
+      const newMissingEntries = { ...missingSourceEntries };
+      
       fixed.forEach((ts) => {
         const empId = ts.employeeId ?? ts.employee?.id;
         const dateStr = String(ts.date || "").slice(0, 10);
@@ -1128,8 +1480,19 @@ function Timesheet() {
         hrs[empId][dateStr] = String(total);
         ot[empId][dateStr] = String(otHours);
         nhMap[empId][dateStr] = String(nhHours);
+        
+        if (ts.sourceDocumentMissing) {
+          const key = `${empId}_${dateStr}`;
+          newMissingEntries[key] = {
+            flagged: true,
+            reason: ts.sourceDocumentMissingReason || "No source document",
+            flaggedAt: ts.sourceDocumentMissingFlaggedAt,
+            flaggedBy: ts.sourceDocumentMissingFlaggedBy
+          };
+        }
       });
-
+      
+      setMissingSourceEntries(newMissingEntries);
       setAttendanceData(prev => ({ ...prev, ...att }));
       setEmployeeHours(prev => ({ ...prev, ...hrs }));
       setEmployeeOvertime(prev => ({ ...prev, ...ot }));
@@ -1359,26 +1722,26 @@ function Timesheet() {
     return { start, end };
   };
 
- const getDaysArray = () => {
-  if (selectedPeriod === "custom" && customDays.length > 0) {
-    return customDays.map(d => {
-      const x = new Date(d);
-      x.setHours(0, 0, 0, 0);  // Normalize to midnight local
-      return x;
-    });
-  }
+  const getDaysArray = () => {
+    if (selectedPeriod === "custom" && customDays.length > 0) {
+      return customDays.map(d => {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        return x;
+      });
+    }
 
-  const { start, end } = getDateRange();
-  const days = [];
-  const cur = new Date(start);
-  cur.setHours(0, 0, 0, 0);  // ✅ Normalize to midnight local
+    const { start, end } = getDateRange();
+    const days = [];
+    const cur = new Date(start);
+    cur.setHours(0, 0, 0, 0);
 
-  while (cur <= end) {
-    days.push(new Date(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return days;
-};
+    while (cur <= end) {
+      days.push(new Date(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return days;
+  };
 
   const days = getDaysArray();
 
@@ -1538,7 +1901,7 @@ function Timesheet() {
     return filtered;
   };
 
-  const filteredEmployees = getFilteredEmployees();
+  const filteredEmployees = getFilteredEmployeesWithSourceFilter();
   const totalRows = filteredEmployees.length;
   const effectivePageSize = useMemo(() => {
     if (tablePageSize === 0) return totalRows || 1;
@@ -1610,6 +1973,8 @@ function Timesheet() {
   };
 
   const handleHoursChange = (employeeId, date, value) => {
+    userManuallyChangedRef.current = true;
+    autoSyncPerformedRef.current = true;
     const totalHours = parseFloat(value) || 0;
     const employee = employees.find(emp => emp.id === employeeId);
     const jobStandardHours = employee?.job?.standardWorkHours || systemSettings.standardWorkHours;
@@ -1634,6 +1999,8 @@ function Timesheet() {
   };
 
   const handleOvertimeChange = (employeeId, date, value) => {
+    userManuallyChangedRef.current = true;
+    autoSyncPerformedRef.current = true;
     const overtimeHours = parseFloat(value) || 0;
     const employee = employees.find(emp => emp.id === employeeId);
     const jobStandardHours = employee?.job?.standardWorkHours || systemSettings.standardWorkHours;
@@ -1658,6 +2025,8 @@ function Timesheet() {
   };
 
   const handleAttendanceStatusChange = (employeeId, dateStr, newStatus) => {
+    userManuallyChangedRef.current = true;
+    autoSyncPerformedRef.current = true;
     const employee = employees.find(e => e.id === employeeId);
     setAttendanceData(prev => ({
       ...prev,
@@ -1670,16 +2039,23 @@ function Timesheet() {
     try {
       const token = localStorage.getItem("jwtToken");
       const timesheetData = [];
-      const days = selectedPeriod === "custom" ? customDays : getDaysArray();
+      const daysArray = selectedPeriod === "custom" ? customDays : getDaysArray();
       let hasData = false;
       
       filteredEmployees.forEach(employee => {
-        days.forEach(day => {
+        daysArray.forEach(day => {
           const dateStr = toYMD(day);
           const attendanceStatus = attendanceData[employee.id]?.[dateStr];
+
+          const employeeJob = employees.find(e => e.id === employee.id)?.job;
+          const jobId = employeeJob?.id;
           
           if (attendanceStatus && attendanceStatus !== '') {
             hasData = true;
+            
+            const key = `${employee.id}_${dateStr}`;
+            const sourceMissing = missingSourceEntries[key]?.flagged || false;
+            
             if (isPresentCode(attendanceStatus)) {
               const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
               const nh = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
@@ -1694,7 +2070,11 @@ function Timesheet() {
                 breakHours: 0,
                 totalHours: totalHours,
                 earnings: earnings.totalPay,
-                attendanceCode: attendanceStatus
+                attendanceCode: attendanceStatus,
+                sourceDocumentMissing: sourceMissing,
+                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                jobId: jobId
               });
             } else {
               timesheetData.push({
@@ -1705,7 +2085,11 @@ function Timesheet() {
                 breakHours: 0,
                 totalHours: 0,
                 earnings: 0,
-                attendanceCode: attendanceStatus
+                attendanceCode: attendanceStatus,
+                sourceDocumentMissing: sourceMissing,
+                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
+                jobId: jobId
               });
             }
           }
@@ -1816,7 +2200,7 @@ function Timesheet() {
       const exportData = [];
       const headers = ['Employee ID', 'Name', 'Position', 'Staff ID'];
       days.forEach(day => headers.push(`${day.getDate()}/${day.getMonth() + 1}`));
-      headers.push('Total Hours', 'Total Earnings');
+      headers.push('Total Hours', 'Total Earnings', 'Source Verified');
       exportData.push(headers);
       
       pagedEmployees.forEach((employee) => {
@@ -1829,6 +2213,7 @@ function Timesheet() {
         
         let totalHours = 0;
         let totalEarnings = 0;
+        let hasUnverified = false;
         
         days.forEach(day => {
           const dateStr = toYMD(day);
@@ -1841,9 +2226,11 @@ function Timesheet() {
             const earnings = calculateEarnings(employee, day, hours, 0);
             totalEarnings += earnings.totalPay;
           }
+          
+          if (isMissingSource(employee.id, dateStr)) hasUnverified = true;
         });
         
-        row.push(totalHours.toFixed(1), formatCurrency(totalEarnings));
+        row.push(totalHours.toFixed(1), formatCurrency(totalEarnings), hasUnverified ? 'NO' : 'YES');
         exportData.push(row);
       });
       
@@ -1870,10 +2257,11 @@ function Timesheet() {
           `${day.toLocaleDateString('en-US', { weekday: 'short' })} ${day.getDate()}`,
           'Hours',
           'Overtime',
-          'Earnings'
+          'Earnings',
+          'Verified'
         );
       });
-      headers.push('Total Hours', 'Total Overtime', 'Total Earnings');
+      headers.push('Total Hours', 'Total Overtime', 'Total Earnings', 'Has Unverified');
       exportData.push(headers);
       
       pagedEmployees.forEach((employee, index) => {
@@ -1889,12 +2277,14 @@ function Timesheet() {
         let totalHours = 0;
         let totalOvertime = 0;
         let totalEarnings = 0;
+        let hasUnverified = false;
         
         days.forEach(day => {
           const dateStr = toYMD(day);
           const status = attendanceData[employee.id]?.[dateStr] || '';
           const hours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
           const overtime = parseFloat(employeeOvertime[employee.id]?.[dateStr] || 0);
+          const verified = !isMissingSource(employee.id, dateStr);
           
           row.push(status, hours.toFixed(1), overtime.toFixed(1));
           totalHours += hours;
@@ -1907,12 +2297,16 @@ function Timesheet() {
           } else {
             row.push('₵0.00');
           }
+          
+          row.push(verified ? '✓' : '⚠️');
+          if (!verified) hasUnverified = true;
         });
         
         row.push(
           totalHours.toFixed(1),
           totalOvertime.toFixed(1),
-          formatCurrency(totalEarnings)
+          formatCurrency(totalEarnings),
+          hasUnverified ? 'Yes' : 'No'
         );
         exportData.push(row);
       });
@@ -1934,24 +2328,48 @@ function Timesheet() {
     try {
       const token = localStorage.getItem("jwtToken");
       const { start, end } = getDateRange();
+      
+      setExportLoading(true);
+      setSaveMessage({ type: "info", text: "Generating report with attachments... This may take a moment." });
+      
       const response = await fetch(
-        `${API_BASE_URL}/api/reports/individual?employeeId=${employeeId}&startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}`,
+        `${API_BASE_URL}/api/reports/individual?employeeId=${employeeId}&startDate=${toYMD(start)}&endDate=${toYMD(end)}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `timesheet-report-${employeeId}-${new Date().toISOString().split('T')[0]}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to generate report");
       }
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `timesheet-report-${employeeId}-${new Date().toISOString().split('T')[0]}.zip`;
+      if (contentDisposition && contentDisposition.includes('filename=')) {
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, '');
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      setSaveMessage({ type: "success", text: "Report downloaded successfully! Check your Downloads folder." });
+      
     } catch (err) {
       console.error("Error generating report:", err);
-      alert('Error generating report');
+      setSaveMessage({ type: "error", text: `Error generating report: ${err.message}` });
+    } finally {
+      setExportLoading(false);
+      setTimeout(() => setSaveMessage({ type: "", text: "" }), 5000);
     }
   };
 
@@ -1959,24 +2377,49 @@ function Timesheet() {
     try {
       const token = localStorage.getItem("jwtToken");
       const { start, end } = getDateRange();
-      const response = await fetch(
-        `${API_BASE_URL}/api/reports/general?startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}&jobId=${selectedJob}`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `general-timesheet-report-${new Date().toISOString().split('T')[0]}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+      
+      setExportLoading(true);
+      setSaveMessage({ type: "info", text: "Generating general report with attachments... This may take a moment." });
+      
+      const url = `${API_BASE_URL}/api/reports/general?startDate=${toYMD(start)}&endDate=${toYMD(end)}${selectedJob && selectedJob !== '' && selectedJob !== 'no-job' ? `&jobId=${selectedJob}` : ''}`;
+      
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to generate general report");
       }
+      
+      const blob = await response.blob();
+      const urlBlob = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = urlBlob;
+      
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `general-report-${toYMD(start)}-to-${toYMD(end)}.zip`;
+      if (contentDisposition && contentDisposition.includes('filename=')) {
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, '');
+        }
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(urlBlob);
+      
+      setSaveMessage({ type: "success", text: "General report downloaded successfully! Check your Downloads folder." });
+      
     } catch (err) {
-      console.error("Error generating report:", err);
-      alert('Error generating report');
+      console.error("Error generating general report:", err);
+      setSaveMessage({ type: "error", text: `Error: ${err.message}` });
+    } finally {
+      setExportLoading(false);
+      setTimeout(() => setSaveMessage({ type: "", text: "" }), 5000);
     }
   };
 
@@ -2052,6 +2495,8 @@ function Timesheet() {
   };
 
   const handleDurationFilter = () => {
+    userManuallyChangedRef.current = true;
+    autoSyncPerformedRef.current = true;
     if (durationFilter.startDate && durationFilter.endDate) {
       const start = new Date(durationFilter.startDate);
       const end = new Date(durationFilter.endDate);
@@ -2351,7 +2796,7 @@ function Timesheet() {
             continue;
           }
 
-          const attendanceData = {};
+          const attendanceDataImport = {};
 
           for (let col = 0; col < row.length; col++) {
             if (col === nameColumn) continue;
@@ -2371,7 +2816,7 @@ function Timesheet() {
 
               let finalCode = attendanceCode;
 
-              attendanceData[dateStr] = {
+              attendanceDataImport[dateStr] = {
                 code: finalCode,
                 original: String(cellValue).trim(),
                 day: headerDate.getDate(),
@@ -2382,14 +2827,14 @@ function Timesheet() {
             }
           }
 
-          if (Object.keys(attendanceData).length > 0) {
+          if (Object.keys(attendanceDataImport).length > 0) {
             importedEmployees.push({
               employee: matchedEmployee,
               name: excelName,
               originalName: excelName,
-              attendance: attendanceData,
+              attendance: attendanceDataImport,
               rowNumber: i + 1,
-              daysCount: Object.keys(attendanceData).length,
+              daysCount: Object.keys(attendanceDataImport).length,
             });
           }
         }
@@ -2447,6 +2892,19 @@ function Timesheet() {
     }
   };
 
+  const unverifiedCount = useMemo(() => {
+    let count = 0;
+    filteredEmployees.forEach(emp => {
+      days.forEach(day => {
+        const dateStr = toYMD(day);
+        if (attendanceData[emp.id]?.[dateStr] && isMissingSource(emp.id, dateStr)) {
+          count++;
+        }
+      });
+    });
+    return count;
+  }, [filteredEmployees, days, attendanceData, missingSourceEntries]);
+
   return (
     <div className="relative min-h-screen bg-gray-50">
       <div 
@@ -2497,6 +2955,38 @@ function Timesheet() {
             </div>
             
             <div className="flex items-center gap-3">
+              <select 
+                value={missingSourceFilter} 
+                onChange={(e) => setMissingSourceFilter(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="all">All Entries</option>
+                <option value="verified">Verified Only (Has Source)</option>
+                <option value="unverified">Unverified Only (No Source)</option>
+              </select>
+
+              <button 
+                onClick={() => setShowMissingSourceModal(true)}
+                disabled={selectedEmployeeIds.size === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
+              >
+                <Flag size={16} />
+                Mark Missing Source ({selectedEmployeeIds.size})
+              </button>
+
+              <label className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors">
+                <input 
+                  type="checkbox" 
+                  checked={autoSyncWithBilling}
+                  onChange={(e) => setAutoSyncWithBilling(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700 whitespace-nowrap">
+                  <Calendar size={14} className="inline mr-1" />
+                  Auto-sync with billing period
+                </span>
+              </label>
+
               <div className="relative group">
                 <button 
                   disabled={exportLoading}
@@ -2529,9 +3019,13 @@ function Timesheet() {
               </div>
 
               {selectedJob && selectedJob !== 'no-job' && (
-                <button onClick={generateQuickInvoice} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-200 shadow hover:shadow-md">
+                <button 
+                  onClick={handleExportInvoice} 
+                  disabled={isGenerating}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-200 shadow hover:shadow-md"
+                >
                   <Receipt size={16} />
-                  Invoice
+                  Export Invoice
                 </button>
               )}
 
@@ -2569,18 +3063,21 @@ function Timesheet() {
                 Save Selected ({selectedEmployeeIds.size})
               </button>
 
-              <button 
-                onClick={() => setSaveSpecificDate({ 
-                  open: true, 
-                  date: days.length > 0 ? toYMD(days[0]) : "", 
-                  employeeIds: new Set(selectedEmployeeIds) 
-                })} 
-                disabled={isGenerating || selectedEmployeeIds.size === 0} 
-                className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
-              >
-                <Calendar size={16} />
-                Save Date ({selectedEmployeeIds.size})
-              </button>
+             <button 
+  onClick={() => setSaveSpecificDate({ 
+    open: true, 
+    date: days.length > 0 ? toYMD(days[0]) : "",
+    endDate: days.length > 0 ? toYMD(days[days.length - 1]) : "",
+    rangeMode: false,
+    employeeIds: new Set(selectedEmployeeIds),
+    isSaving: false
+  })} 
+  disabled={isGenerating || selectedEmployeeIds.size === 0} 
+  className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
+>
+  <Calendar size={16} />
+  Save Date ({selectedEmployeeIds.size})
+</button>
 
               <button 
                 onClick={() => navigate('/excel-comparator')} 
@@ -2671,7 +3168,7 @@ function Timesheet() {
           <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow border border-gray-100">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <button onClick={() => { const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() - 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() - 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <ChevronLeft size={20} />
                 </button>
                 
@@ -2695,7 +3192,7 @@ function Timesheet() {
                   </p>
                 </div>
                 
-                <button onClick={() => { const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() + 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() + 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <ChevronRight size={20} />
                 </button>
               </div>
@@ -2858,6 +3355,11 @@ function Timesheet() {
                     }, 0), 0).toFixed(1)}h
                   </div>
                 </div>
+                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                  <div className="text-sm text-gray-500 mb-1">Unverified Entries</div>
+                  <div className="text-2xl font-bold text-amber-600">{unverifiedCount}</div>
+                  <div className="text-xs text-gray-500 mt-1">No source document</div>
+                </div>
               </div>
             </div>
           )}
@@ -2901,6 +3403,11 @@ function Timesheet() {
                 {searchQuery && (
                   <span className="ml-2 text-gray-500">
                     (filtered by "{searchQuery}")
+                  </span>
+                )}
+                {missingSourceFilter !== "all" && (
+                  <span className="ml-2 text-amber-600">
+                    • Filtered: {missingSourceFilter === "verified" ? "Verified only" : "Unverified only"}
                   </span>
                 )}
               </div>
@@ -2949,12 +3456,10 @@ function Timesheet() {
                 <table className="min-w-full">
                   <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                     <tr>
-                      {/* Fixed checkbox column */}
                       <th className="sticky left-0 z-10 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 w-12">
                         <input type="checkbox" checked={pagedEmployees.length > 0 && pagedEmployees.every(e => selectedEmployeeIds.has(e.id))} onChange={(e) => { if (e.target.checked) selectAllOnPage(); else clearAllSelection(); }} className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500" />
                       </th>
                       
-                      {/* Fixed employee details column */}
                       <th className="sticky left-12 z-10 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[250px]">
                         <div className="flex items-center gap-2">
                           <User size={14} />
@@ -2965,7 +3470,7 @@ function Timesheet() {
                       {days.map((day, index) => {
                         const dateType = getDateTypeBadge(day);
                         return (
-                          <th key={index} className="px-2 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[100px]">
+                          <th key={index} className="px-2 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[120px]">
                             <div className="font-bold">{day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                             <div className="text-lg font-bold text-gray-800">{day.getDate()}</div>
                             <div className={`text-xs px-2 py-1 rounded-full ${dateType.class} font-medium mt-1`}>
@@ -3017,12 +3522,10 @@ function Timesheet() {
                         return (
                           <React.Fragment key={employee.id}>
                             <tr className="hover:bg-gray-50 transition-colors duration-150">
-                              {/* Fixed checkbox column */}
                               <td className="sticky left-0 z-10 bg-white px-4 py-3 border-r border-gray-100 text-center align-top" rowSpan="2">
                                 <input type="checkbox" checked={selectedEmployeeIds.has(employee.id)} onChange={() => toggleSelectEmployee(employee.id)} className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500" />
                               </td>
                               
-                              {/* Fixed employee details column */}
                               <td className="sticky left-12 z-10 bg-white px-3 py-3 border-r border-gray-100 w-[250px] align-top" rowSpan="2">
                                 <div className="font-semibold text-gray-900 text-sm leading-tight">
                                   {employee.firstName} {employee.lastName}
@@ -3073,22 +3576,44 @@ function Timesheet() {
                                 const dateStr = toYMD(day);
                                 const attendanceStatus = attendanceData[employee.id]?.[dateStr] || '';
                                 const dateType = getDateTypeBadge(day);
+                                const missingSource = isMissingSource(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="px-2 py-3 text-center border-r border-gray-100 align-top relative">
-                                    <select value={attendanceStatus} onChange={(e) => handleAttendanceStatusChange(employee.id, dateStr, e.target.value)} className={`w-14 h-9 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 ${getAttendanceCodeColor(attendanceStatus)} focus:ring-opacity-50`}>
-                                      <option value="">-</option>
-                                      <option value="P">P</option>
-                                      <option value="A">A</option>
-                                      <option value="L">L</option>
-                                      <option value="H">H</option>
-                                      <option value="S">S</option>
-                                      <option value="WP">WP</option>
-                                      <option value="HP">HP</option>
-                                      <option value="PL">PL</option>
-                                      <option value="ML">ML</option>
-                                      <option value="OFF">OFF</option>
-                                    </select>
+                                  <td key={dayIndex} className="px-2 py-3 text-center border-r border-gray-100 align-top relative" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
+                                    <div className="flex items-center justify-center gap-1">
+                                      <select 
+                                        value={attendanceStatus} 
+                                        onChange={(e) => handleAttendanceStatusChange(employee.id, dateStr, e.target.value)} 
+                                        className={`w-14 h-9 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 ${getAttendanceCodeColor(attendanceStatus)} focus:ring-opacity-50`}
+                                      >
+                                        <option value="">-</option>
+                                        <option value="P">P</option>
+                                        <option value="A">A</option>
+                                        <option value="L">L</option>
+                                        <option value="H">H</option>
+                                        <option value="S">S</option>
+                                        <option value="WP">WP</option>
+                                        <option value="HP">HP</option>
+                                        <option value="PL">PL</option>
+                                        <option value="ML">ML</option>
+                                        <option value="OFF">OFF</option>
+                                      </select>
+                                      
+                                      <div className="relative group">
+                                        <button
+                                          onClick={() => toggleMissingSourceFlag(employee.id, dateStr, missingSource)}
+                                          className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${missingSource ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-amber-100'}`}
+                                          title={missingSource ? "Mark as has source document" : "Mark as missing source document"}
+                                        >
+                                          {missingSource ? <AlertTriangle size={12} /> : <Flag size={12} />}
+                                        </button>
+                                        {missingSource && (
+                                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20">
+                                            {getMissingSourceReason(employee.id, dateStr)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
 
                                     {attendanceStatus && attendanceStatus !== '' && (
                                       <button
@@ -3134,9 +3659,10 @@ function Timesheet() {
                                 const totalHours = parseFloat(employeeHours[employee.id]?.[dateStr] || 0);
                                 const overtimeHours = parseFloat(employeeOvertime[employee.id]?.[dateStr] || 0);
                                 const normalHours = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
+                                const missingSource = isMissingSource(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="border-r border-gray-100 px-2 py-3">
+                                  <td key={dayIndex} className="border-r border-gray-100 px-2 py-3" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
                                     {isPresent ? (
                                       <div className="space-y-3">
                                         <div className="flex items-center justify-between">
@@ -3146,6 +3672,8 @@ function Timesheet() {
                                             placeholder="0" 
                                             value={normalHours || ''} 
                                             onChange={(e) => {
+                                              userManuallyChangedRef.current = true;
+                                              autoSyncPerformedRef.current = true;
                                               const newNH = parseFloat(e.target.value) || 0;
                                               const currentOT = parseFloat(employeeOvertime[employee.id]?.[dateStr] || 0);
                                               
@@ -3173,7 +3701,11 @@ function Timesheet() {
                                         </div>
                                         <div className="flex items-center justify-between">
                                           <label className="text-xs font-medium text-orange-600">OT:</label>
-                                          <input type="number" placeholder="0" value={overtimeHours || ''} onChange={(e) => handleOvertimeChange(employee.id, dateStr, e.target.value)} className="w-16 p-2 border border-orange-300 rounded-lg text-sm text-center bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500" min="0" max="24" step="0.5" />
+                                          <input type="number" placeholder="0" value={overtimeHours || ''} onChange={(e) => {
+                                            userManuallyChangedRef.current = true;
+                                            autoSyncPerformedRef.current = true;
+                                            handleOvertimeChange(employee.id, dateStr, e.target.value);
+                                          }} className="w-16 p-2 border border-orange-300 rounded-lg text-sm text-center bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500" min="0" max="24" step="0.5" />
                                         </div>
                                         
                                         <div className="text-center text-xs font-medium text-gray-700 bg-gray-100 py-1 rounded">
@@ -3235,7 +3767,7 @@ function Timesheet() {
               </div>
               
               <div className="border-t border-gray-200 p-6 bg-gradient-to-r from-gray-50 to-gray-100">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
                   <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                     <div className="text-sm text-gray-500 mb-2">Total Employees</div>
                     <div className="text-2xl font-bold text-gray-800">{filteredEmployees.length}</div>
@@ -3261,6 +3793,11 @@ function Timesheet() {
                     </div>
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="text-sm text-gray-500 mb-2">Unverified Entries</div>
+                    <div className="text-2xl font-bold text-amber-600">{unverifiedCount}</div>
+                    <div className="text-xs text-gray-500 mt-1">No source document</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                     <div className="text-sm text-gray-500 mb-2">Selected Job</div>
                     <div className="text-lg font-bold text-gray-800">
                       {selectedJob ? (selectedJobData?.name || 'Unknown Job') : 'All Jobs'}
@@ -3279,38 +3816,253 @@ function Timesheet() {
         </main>
       </div>
 
-      {/* Modals remain the same as before */}
-      {saveSpecificDate.open && (
+      {showMissingSourceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-teal-50 to-emerald-50">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-amber-50 to-orange-50">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">Save Specific Date</h2>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <Flag size={20} className="text-amber-600" />
+                  Mark as "No Source Document"
+                </h2>
                 <p className="text-gray-600 mt-1">
-                  Save attendance for <span className="font-bold text-teal-700">{saveSpecificDate.employeeIds.size || selectedEmployeeIds.size}</span> selected employees
+                  Apply to <span className="font-bold text-amber-700">{missingSourceModalData.employeeIds.size || selectedEmployeeIds.size}</span> selected employees
                 </p>
               </div>
-              <button onClick={() => setSaveSpecificDate({ open: false, date: "", employeeIds: new Set() })} className="p-2 hover:bg-white rounded-full transition-colors">
+              <button onClick={() => setShowMissingSourceModal(false)} className="p-2 hover:bg-white rounded-full transition-colors">
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
             
             <div className="p-6">
               <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                    <input 
+                      type="date" 
+                      value={missingSourceModalData.startDate} 
+                      onChange={(e) => setMissingSourceModalData(prev => ({ ...prev, startDate: e.target.value }))} 
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                    <input 
+                      type="date" 
+                      value={missingSourceModalData.endDate} 
+                      onChange={(e) => setMissingSourceModalData(prev => ({ ...prev, endDate: e.target.value }))} 
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
-                  <input 
-                    type="date" 
-                    value={saveSpecificDate.date} 
-                    onChange={(e) => setSaveSpecificDate(prev => ({ ...prev, date: e.target.value }))} 
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    min={days.length > 0 ? toYMD(days[0]) : undefined}
-                    max={days.length > 0 ? toYMD(days[days.length - 1]) : undefined}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Reason (Optional)</label>
+                  <textarea 
+                    value={missingSourceModalData.reason} 
+                    onChange={(e) => setMissingSourceModalData(prev => ({ ...prev, reason: e.target.value }))} 
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    placeholder="e.g., Hard copy timesheet not received for these dates..."
                   />
-                  <p className="text-xs text-gray-500 mt-2">
-                    {days.length > 0 ? `Current period: ${toYMD(days[0])} to ${toYMD(days[days.length - 1])}` : 'No dates available'}
+                </div>
+                
+                <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                  <h4 className="font-medium text-amber-800 mb-2 flex items-center gap-2">
+                    <AlertCircle size={16} />
+                    Summary
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employees:</span>
+                      <span className="font-bold text-amber-700">{missingSourceModalData.employeeIds.size || selectedEmployeeIds.size}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Date Range:</span>
+                      <span className="font-bold text-amber-700">
+                        {missingSourceModalData.startDate || '?'} to {missingSourceModalData.endDate || '?'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <Info size={18} className="text-blue-600 flex-shrink-0" />
+                  <p className="text-xs text-blue-700">
+                    This will mark these entries as having NO source document. Payroll will see these as UNVERIFIED.
                   </p>
                 </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button 
+                onClick={() => setShowMissingSourceModal(false)} 
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={bulkMarkMissingSource} 
+                disabled={!missingSourceModalData.startDate || !missingSourceModalData.endDate} 
+                className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 font-medium transition-all duration-200 shadow disabled:opacity-50 flex items-center gap-2"
+              >
+                <Flag size={16} />
+                Mark as No Source
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saveSpecificDate.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-teal-50 to-emerald-50">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <Calendar size={20} className="text-teal-600" />
+                  {saveSpecificDate.rangeMode ? 'Save Date Range' : 'Save Single Date'}
+                </h2>
+                <p className="text-gray-600 mt-1">
+                  Save for <span className="font-bold text-teal-700">{saveSpecificDate.employeeIds.size || selectedEmployeeIds.size}</span> selected employees
+                </p>
+              </div>
+              <button onClick={() => setSaveSpecificDate({ open: false, date: "", endDate: "", rangeMode: false, employeeIds: new Set(), isSaving: false })} className="p-2 hover:bg-white rounded-full transition-colors">
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="space-y-4">
+                <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
+                  <button
+                    onClick={() => setSaveSpecificDate(prev => ({ ...prev, rangeMode: false, endDate: "" }))}
+                    className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                      !saveSpecificDate.rangeMode 
+                        ? 'bg-teal-500 text-white shadow' 
+                        : 'text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    Single Date
+                  </button>
+                  <button
+                    onClick={() => setSaveSpecificDate(prev => ({ ...prev, rangeMode: true }))}
+                    className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                      saveSpecificDate.rangeMode 
+                        ? 'bg-teal-500 text-white shadow' 
+                        : 'text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    Date Range
+                  </button>
+                </div>
+
+                {!saveSpecificDate.rangeMode && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
+                    <input 
+                      type="date" 
+                      value={saveSpecificDate.date} 
+                      onChange={(e) => setSaveSpecificDate(prev => ({ ...prev, date: e.target.value }))} 
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                    />
+                  </div>
+                )}
+
+                {saveSpecificDate.rangeMode && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                      <input 
+                        type="date" 
+                        value={saveSpecificDate.date} 
+                        onChange={(e) => setSaveSpecificDate(prev => ({ ...prev, date: e.target.value }))} 
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                      <input 
+                        type="date" 
+                        value={saveSpecificDate.endDate} 
+                        onChange={(e) => setSaveSpecificDate(prev => ({ ...prev, endDate: e.target.value }))} 
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {saveSpecificDate.rangeMode && (
+                  <div className="pt-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Quick Select</label>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => {
+                          const end = new Date();
+                          const start = new Date();
+                          start.setDate(end.getDate() - 7);
+                          setSaveSpecificDate(prev => ({ 
+                            ...prev, 
+                            date: toYMD(start), 
+                            endDate: toYMD(end) 
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        Last 7 Days
+                      </button>
+                      <button
+                        onClick={() => {
+                          const end = new Date();
+                          const start = new Date();
+                          start.setDate(end.getDate() - 30);
+                          setSaveSpecificDate(prev => ({ 
+                            ...prev, 
+                            date: toYMD(start), 
+                            endDate: toYMD(end) 
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        Last 30 Days
+                      </button>
+                      <button
+                        onClick={() => {
+                          const today = new Date();
+                          const start = new Date(today.getFullYear(), today.getMonth(), 1);
+                          const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                          setSaveSpecificDate(prev => ({ 
+                            ...prev, 
+                            date: toYMD(start), 
+                            endDate: toYMD(end) 
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        Current Month
+                      </button>
+                      <button
+                        onClick={() => {
+                          const today = new Date();
+                          const start = new Date(today);
+                          start.setDate(today.getDate() - today.getDay());
+                          const end = new Date(start);
+                          end.setDate(start.getDate() + 6);
+                          setSaveSpecificDate(prev => ({ 
+                            ...prev, 
+                            date: toYMD(start), 
+                            endDate: toYMD(end) 
+                          }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      >
+                        Current Week
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="bg-teal-50 p-4 rounded-lg border border-teal-200">
                   <h4 className="font-medium text-teal-800 mb-2 flex items-center gap-2">
@@ -3322,10 +4074,29 @@ function Timesheet() {
                       <span className="text-gray-600">Employees:</span>
                       <span className="font-bold text-teal-700">{saveSpecificDate.employeeIds.size || selectedEmployeeIds.size}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Date:</span>
-                      <span className="font-bold text-teal-700">{saveSpecificDate.date || 'Not selected'}</span>
-                    </div>
+                    {!saveSpecificDate.rangeMode ? (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Date:</span>
+                        <span className="font-bold text-teal-700">{saveSpecificDate.date || 'Not selected'}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Date Range:</span>
+                          <span className="font-bold text-teal-700">
+                            {saveSpecificDate.date || '?'} to {saveSpecificDate.endDate || '?'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Total Days:</span>
+                          <span className="font-bold text-teal-700">
+                            {saveSpecificDate.date && saveSpecificDate.endDate 
+                              ? Math.ceil((new Date(saveSpecificDate.endDate) - new Date(saveSpecificDate.date)) / (1000 * 60 * 60 * 24)) + 1 
+                              : 0}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Action:</span>
                       <span className="font-bold text-teal-700">Override existing data</span>
@@ -3336,7 +4107,10 @@ function Timesheet() {
                 <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-lg border border-amber-200">
                   <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
                   <p className="text-xs text-amber-700">
-                    This will save attendance data for the selected date only. Existing data for this date will be overwritten.
+                    {!saveSpecificDate.rangeMode 
+                      ? "This will save attendance data for the selected date only. Existing data for this date will be overwritten."
+                      : "This will save attendance data for all dates in the selected range. Existing data within this range will be overwritten."
+                    }
                   </p>
                 </div>
               </div>
@@ -3344,17 +4118,21 @@ function Timesheet() {
             
             <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
               <button 
-                onClick={() => setSaveSpecificDate({ open: false, date: "", employeeIds: new Set() })} 
+                onClick={() => setSaveSpecificDate({ open: false, date: "", endDate: "", rangeMode: false, employeeIds: new Set(), isSaving: false })} 
                 className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
               >
                 Cancel
               </button>
               <button 
                 onClick={saveSpecificDateAttendance} 
-                disabled={!saveSpecificDate.date || isGenerating} 
+                disabled={
+                  saveSpecificDate.isSaving || 
+                  (!saveSpecificDate.rangeMode && !saveSpecificDate.date) ||
+                  (saveSpecificDate.rangeMode && (!saveSpecificDate.date || !saveSpecificDate.endDate))
+                } 
                 className="px-6 py-2 bg-gradient-to-r from-teal-500 to-emerald-500 text-white rounded-lg hover:from-teal-600 hover:to-emerald-600 font-medium transition-all duration-200 shadow disabled:opacity-50 flex items-center gap-2"
               >
-                {isGenerating ? (
+                {saveSpecificDate.isSaving ? (
                   <>
                     <RefreshCw size={16} className="animate-spin" />
                     <span>Saving...</span>
@@ -3362,7 +4140,7 @@ function Timesheet() {
                 ) : (
                   <>
                     <Save size={16} />
-                    <span>Save Date</span>
+                    <span>{saveSpecificDate.rangeMode ? 'Save Date Range' : 'Save Date'}</span>
                   </>
                 )}
               </button>
@@ -3457,12 +4235,7 @@ function Timesheet() {
                           date: e.target.value
                         }))} 
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                        min={days.length > 0 ? toYMD(days[0]) : undefined}
-                        max={days.length > 0 ? toYMD(days[days.length - 1]) : undefined}
                       />
-                      <p className="text-xs text-gray-500 mt-2">
-                        Current period: {days.length > 0 ? `${toYMD(days[0])} to ${toYMD(days[days.length - 1])}` : 'No dates available'}
-                      </p>
                     </div>
                   </div>
                 )}
@@ -3475,8 +4248,6 @@ function Timesheet() {
                       value={deleteModal.date} 
                       onChange={(e) => setDeleteModal(prev => ({ ...prev, date: e.target.value }))} 
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                      min={days.length > 0 ? toYMD(days[0]) : undefined}
-                      max={days.length > 0 ? toYMD(days[days.length - 1]) : undefined}
                     />
                   </div>
                 )}
@@ -4189,7 +4960,13 @@ function Timesheet() {
                 })} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition-colors">
                   Reset to Defaults
                 </button>
-                <button onClick={() => setShowCodeSettings(false)} className="px-8 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 font-medium transition-all duration-200 shadow">
+                <button 
+                  onClick={() => { 
+                    saveAttendanceCodeSettings(); 
+                    setShowCodeSettings(false); 
+                  }} 
+                  className="px-8 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 font-medium transition-all duration-200 shadow"
+                >
                   Save & Close
                 </button>
               </div>

@@ -52,6 +52,8 @@ function Leave() {
   const [bulkActionType, setBulkActionType] = useState(null);
   const [bulkFeedback, setBulkFeedback] = useState('');
   const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+  const [isProcessingSingle, setIsProcessingSingle] = useState(false);
+  const [processingLeaveId, setProcessingLeaveId] = useState(null);
   
   // Category filter state
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
@@ -87,6 +89,12 @@ function Leave() {
   });
 
   const [categories, setCategories] = useState([]);
+  const [toastMessage, setToastMessage] = useState({ type: '', text: '', visible: false });
+
+  const showToast = (type, text) => {
+    setToastMessage({ type, text, visible: true });
+    setTimeout(() => setToastMessage({ type: '', text: '', visible: false }), 3000);
+  };
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
@@ -113,7 +121,6 @@ function Leave() {
     return localStorage.getItem('jwtToken');
   };
 
-  // Get unique categories from leaves data
   const getUniqueCategoriesFromLeaves = () => {
     const categoriesSet = new Set();
     leaves.forEach(leave => {
@@ -124,12 +131,10 @@ function Leave() {
     return Array.from(categoriesSet).sort();
   };
 
-  // Check if leave type is deductible
   const isLeaveDeductible = (leaveType) => {
     return !leaveSettings.nonDeductibleLeaveTypes?.includes(leaveType);
   };
 
-  // Calculate leave days based on employee category
   const calculateLeaveDays = (startDate, endDate, leaveType, employeeCategory) => {
     if (!startDate || !endDate) return 0;
     
@@ -165,7 +170,6 @@ function Leave() {
     return days;
   };
 
-  // Get employee's remaining leave balance
   const getEmployeeRemainingLeave = (employee) => {
     if (!employee) return 0;
     
@@ -189,7 +193,6 @@ function Leave() {
     return Math.max(0, annualLeaveDays - usedLeaveDays);
   };
 
-  // Check if employee has sufficient leave balance
   const hasSufficientLeaveBalance = (employee, leaveType, startDate, endDate) => {
     if (!isLeaveDeductible(leaveType)) {
       return true;
@@ -265,7 +268,7 @@ function Leave() {
 
   const handleBulkApprove = () => {
     if (selectedLeaves.size === 0) {
-      alert('Please select at least one leave request to approve');
+      showToast('error', 'Please select at least one leave request to approve');
       return;
     }
     setBulkActionType('approve');
@@ -274,7 +277,7 @@ function Leave() {
 
   const handleBulkReject = () => {
     if (selectedLeaves.size === 0) {
-      alert('Please select at least one leave request to reject');
+      showToast('error', 'Please select at least one leave request to reject');
       return;
     }
     setBulkActionType('reject');
@@ -283,6 +286,7 @@ function Leave() {
 
   const executeBulkAction = async () => {
     setIsProcessingBulk(true);
+    setBulkFeedback('');
     const leaveIds = Array.from(selectedLeaves);
     
     try {
@@ -290,6 +294,8 @@ function Leave() {
       const endpoint = bulkActionType === 'approve' 
         ? `${API_BASE_URL}/api/leave/bulk/approve`
         : `${API_BASE_URL}/api/leave/bulk/reject`;
+      
+      showToast('info', `Processing ${bulkActionType} for ${leaveIds.length} leave request(s)...`);
       
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -299,7 +305,7 @@ function Leave() {
         },
         body: JSON.stringify({
           leaveIds: leaveIds,
-          feedback: bulkFeedback || (bulkActionType === 'approve' ? 'Bulk approved' : 'Bulk rejected')
+          feedback: bulkFeedback || (bulkActionType === 'approve' ? 'Bulk approved by supervisor' : 'Bulk rejected by supervisor')
         })
       });
 
@@ -309,15 +315,15 @@ function Leave() {
       }
 
       const result = await response.json();
-      alert(`Successfully ${bulkActionType === 'approve' ? 'approved' : 'rejected'} ${result.processedCount} leave requests`);
+      showToast('success', `Successfully ${bulkActionType === 'approve' ? 'approved' : 'rejected'} ${result.processedCount} leave requests`);
       
       setSelectedLeaves(new Set());
       setIsBulkActionModalOpen(false);
       setBulkFeedback('');
-      fetchLeaves();
+      await fetchLeaves();
       
     } catch (err) {
-      alert('Error processing bulk action: ' + err.message);
+      showToast('error', 'Error processing bulk action: ' + err.message);
     } finally {
       setIsProcessingBulk(false);
     }
@@ -328,8 +334,12 @@ function Leave() {
       return;
     }
 
+    setProcessingLeaveId(leaveId);
+    
     try {
       const token = getToken();
+      showToast('info', 'Deleting leave request...');
+      
       const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}`, {
         method: 'DELETE',
         headers: {
@@ -342,8 +352,8 @@ function Leave() {
         throw new Error(error.message || 'Failed to delete leave request');
       }
 
-      alert('Leave request deleted successfully');
-      fetchLeaves();
+      showToast('success', 'Leave request deleted successfully');
+      await fetchLeaves();
       
       if (selectedLeaves.has(leaveId)) {
         const newSelected = new Set(selectedLeaves);
@@ -351,54 +361,58 @@ function Leave() {
         setSelectedLeaves(newSelected);
       }
     } catch (err) {
-      alert('Error deleting leave request: ' + err.message);
+      showToast('error', 'Error deleting leave request: ' + err.message);
+    } finally {
+      setProcessingLeaveId(null);
     }
   };
 
   const handleBulkDelete = async () => {
     if (selectedLeaves.size === 0) {
-        alert('Please select at least one leave request to delete');
-        return;
+      showToast('error', 'Please select at least one leave request to delete');
+      return;
     }
 
     if (!window.confirm(`Are you sure you want to delete ${selectedLeaves.size} leave request(s)? This action cannot be undone.`)) {
-        return;
+      return;
     }
 
     setIsProcessingBulk(true);
     const leaveIds = Array.from(selectedLeaves);
 
     try {
-        const token = getToken();
-        const response = await fetch(`${API_BASE_URL}/api/leave/bulk/delete`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({ leaveIds: leaveIds })
-        });
+      const token = getToken();
+      showToast('info', `Deleting ${leaveIds.length} leave request(s)...`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/leave/bulk/delete`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ leaveIds: leaveIds })
+      });
 
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || 'Bulk delete failed');
-        }
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Bulk delete failed');
+      }
 
-        const result = await response.json();
-        
-        if (result.errors && result.errors.length > 0) {
-            alert(`Deleted ${result.deletedCount} leave requests.\n\nErrors:\n${result.errors.join('\n')}`);
-        } else {
-            alert(`Successfully deleted ${result.deletedCount} leave requests`);
-        }
-        
-        setSelectedLeaves(new Set());
-        fetchLeaves();
-        
+      const result = await response.json();
+      
+      if (result.errors && result.errors.length > 0) {
+        showToast('warning', `Deleted ${result.deletedCount} leave requests. Some had errors: ${result.errors.length}`);
+      } else {
+        showToast('success', `Successfully deleted ${result.deletedCount} leave requests`);
+      }
+      
+      setSelectedLeaves(new Set());
+      await fetchLeaves();
+      
     } catch (err) {
-        alert('Error deleting leave requests: ' + err.message);
+      showToast('error', 'Error deleting leave requests: ' + err.message);
     } finally {
-        setIsProcessingBulk(false);
+      setIsProcessingBulk(false);
     }
   };
 
@@ -477,7 +491,7 @@ function Leave() {
     const { value } = e.target;
     
     if (value && isWeekend(value)) {
-      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+      showToast('error', 'Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
       return;
     }
 
@@ -497,12 +511,12 @@ function Leave() {
     const { value } = e.target;
     
     if (value && isWeekend(value)) {
-      alert('Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+      showToast('error', 'Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
       return;
     }
 
     if (value && newLeave.startDate && new Date(value) < new Date(newLeave.startDate)) {
-      alert('End date cannot be before start date.');
+      showToast('error', 'End date cannot be before start date.');
       return;
     }
 
@@ -526,7 +540,6 @@ function Leave() {
     fetchUser();
   }, []);
 
-  // FIXED: fetchEmployees with full category object
   const fetchEmployees = async () => {
     try {
       const token = getToken();
@@ -595,12 +608,12 @@ function Leave() {
       setLeaves(data);
     } catch (err) {
       setError(err.message);
+      showToast('error', 'Failed to load leave requests: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle URL parameters for auto-opening leave request
   useEffect(() => {
     const leaveId = searchParams.get('leaveId');
     const employeeId = searchParams.get('employeeId');
@@ -635,48 +648,48 @@ function Leave() {
     setPendingAction(null);
   };
 
-const handleInputChange = (e) => {
-  const { name, value } = e.target;
-  
-  if (name === "employeeId") {
-    const selectedEmployee = employees.find(emp => emp.id === parseInt(value));
-    if (selectedEmployee) {
-      // Debug logging to see what data is available
-      console.log("Selected employee category:", selectedEmployee.category);
-      console.log("Stored category:", {
-        id: selectedEmployee.category?.id,
-        name: selectedEmployee.category?.name,
-        annualLeaveDays: selectedEmployee.category?.annualLeaveDays,
-        excludeWeekendsFromLeave: selectedEmployee.category?.excludeWeekendsFromLeave
-      });
-      
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUpIcon className="w-4 h-4 opacity-30" />;
+    }
+    return sortConfig.direction === 'asc' 
+      ? <ChevronUpIcon className="w-4 h-4" />
+      : <ChevronDownIcon className="w-4 h-4" />;
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    
+    if (name === "employeeId") {
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(value));
+      if (selectedEmployee) {
+        setNewLeave({
+          ...newLeave,
+          employee: {
+            id: selectedEmployee.id,
+            firstName: selectedEmployee.firstName,
+            lastName: selectedEmployee.lastName,
+            employeeId: selectedEmployee.employeeId,
+            category: selectedEmployee.category ? { 
+              id: selectedEmployee.category.id,
+              name: selectedEmployee.category.name,
+              annualLeaveDays: selectedEmployee.category.annualLeaveDays || 20,
+              excludeWeekendsFromLeave: selectedEmployee.category.excludeWeekendsFromLeave !== undefined 
+                ? selectedEmployee.category.excludeWeekendsFromLeave 
+                : true,
+              workStartTime: selectedEmployee.category.workStartTime || '08:00',
+              standardRateHours: selectedEmployee.category.standardRateHours || 8
+            } : null
+          }
+        });
+      }
+    } else {
       setNewLeave({
         ...newLeave,
-        employee: {
-          id: selectedEmployee.id,
-          firstName: selectedEmployee.firstName,
-          lastName: selectedEmployee.lastName,
-          employeeId: selectedEmployee.employeeId,
-          category: selectedEmployee.category ? { 
-            id: selectedEmployee.category.id,
-            name: selectedEmployee.category.name,
-            annualLeaveDays: selectedEmployee.category.annualLeaveDays || 20,
-            excludeWeekendsFromLeave: selectedEmployee.category.excludeWeekendsFromLeave !== undefined 
-              ? selectedEmployee.category.excludeWeekendsFromLeave 
-              : true,
-            workStartTime: selectedEmployee.category.workStartTime || '08:00',
-            standardRateHours: selectedEmployee.category.standardRateHours || 8
-          } : null
-        }
+        [name]: value
       });
     }
-  } else {
-    setNewLeave({
-      ...newLeave,
-      [name]: value
-    });
-  }
-};
+  };
 
   const uploadAttachment = async (leaveId, file, token) => {
     try {
@@ -703,21 +716,26 @@ const handleInputChange = (e) => {
   };
 
   const createLeave = async () => {
+    if (isProcessingSingle) {
+      showToast('warning', 'Please wait, previous request is still processing');
+      return;
+    }
+    
     try {
       if (!['Maternity', 'Paternity'].includes(newLeave.leaveType)) {
         if (newLeave.startDate && isWeekend(newLeave.startDate)) {
-          alert('Start date must be a weekday (Monday to Friday).');
+          showToast('error', 'Start date must be a weekday (Monday to Friday).');
           return;
         }
         
         if (newLeave.endDate && isWeekend(newLeave.endDate)) {
-          alert('End date must be a weekday (Monday to Friday).');
+          showToast('error', 'End date must be a weekday (Monday to Friday).');
           return;
         }
       }
 
       if (!newLeave.employee.id || !newLeave.leaveType || !newLeave.startDate || !newLeave.reason) {
-        alert('Please fill in all required fields.');
+        showToast('error', 'Please fill in all required fields.');
         return;
       }
 
@@ -725,7 +743,7 @@ const handleInputChange = (e) => {
       
       if (!hasSufficientLeaveBalance(selectedEmployee, newLeave.leaveType, newLeave.startDate, newLeave.endDate)) {
         const remainingBalance = getEmployeeRemainingLeave(selectedEmployee);
-        alert(`Insufficient leave balance. You have ${remainingBalance} days remaining.`);
+        showToast('error', `Insufficient leave balance. You have ${remainingBalance} days remaining.`);
         return;
       }
 
@@ -754,6 +772,9 @@ const handleInputChange = (e) => {
         status: 'Pending'
       };
       
+      setIsProcessingSingle(true);
+      showToast('info', 'Creating leave request...');
+      
       const response = await fetch(`${API_BASE_URL}/api/leave`, {
         method: 'POST',
         headers: { 
@@ -769,16 +790,21 @@ const handleInputChange = (e) => {
       }
 
       const savedLeave = await response.json();
+      showToast('success', 'Leave request created successfully!');
 
       if (newLeave.leaveType === 'Sick' && file) {
+        showToast('info', 'Uploading attachment...');
         try {
           await uploadAttachment(savedLeave.id, file, token);
+          showToast('success', 'Leave request submitted with attachment!');
         } catch (uploadError) {
-          console.error('Attachment upload failed:', uploadError);
+          showToast('warning', 'Leave request created but attachment upload failed. You can upload it later.');
         }
+      } else {
+        showToast('success', 'Leave request submitted successfully!');
       }
 
-      fetchLeaves();
+      await fetchLeaves();
       setIsCreateMenuOpen(false);
       setNewLeave({
         employee: { id: '' },
@@ -790,11 +816,10 @@ const handleInputChange = (e) => {
       });
       setFile(null);
       
-      alert('Leave request submitted successfully!');
-      
     } catch (err) {
-      setError(err.message);
-      alert(err.message);
+      showToast('error', err.message);
+    } finally {
+      setIsProcessingSingle(false);
     }
   };
 
@@ -807,6 +832,9 @@ const handleInputChange = (e) => {
         return;
       }
     }
+    
+    setProcessingLeaveId(leaveId);
+    showToast('info', 'Approving leave request...');
     
     try {
       const token = getToken();
@@ -830,16 +858,19 @@ const handleInputChange = (e) => {
         leave.id === approvedLeave.id ? approvedLeave : leave
       ));
       
-      alert('Leave approved successfully');
+      showToast('success', 'Leave approved successfully');
       
       setSearchParams({});
       setHighlightedLeaveId(null);
       setSelectedLeave(null);
       setPendingAction(null);
       
+      await fetchLeaves();
+      
     } catch (err) {
-      setError(err.message);
-      alert(err.message);
+      showToast('error', err.message);
+    } finally {
+      setProcessingLeaveId(null);
     }
   };
 
@@ -852,6 +883,9 @@ const handleInputChange = (e) => {
         return;
       }
     }
+    
+    setProcessingLeaveId(leaveId);
+    showToast('info', 'Rejecting leave request...');
     
     try {
       const token = getToken();
@@ -878,16 +912,19 @@ const handleInputChange = (e) => {
         leave.id === rejectedLeave.id ? rejectedLeave : leave
       ));
       
-      alert('Leave rejected successfully');
+      showToast('success', 'Leave rejected successfully');
       
       setSearchParams({});
       setHighlightedLeaveId(null);
       setSelectedLeave(null);
       setPendingAction(null);
       
+      await fetchLeaves();
+      
     } catch (err) {
-      setError(err.message);
-      alert(err.message);
+      showToast('error', err.message);
+    } finally {
+      setProcessingLeaveId(null);
     }
   };
 
@@ -918,6 +955,9 @@ const handleInputChange = (e) => {
   };
 
   const downloadAttachment = async (leaveId) => {
+    setProcessingLeaveId(leaveId);
+    showToast('info', 'Downloading attachment...');
+    
     try {
       const token = getToken();
       const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}/attachment`, {
@@ -934,12 +974,15 @@ const handleInputChange = (e) => {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        showToast('success', 'Attachment downloaded successfully!');
       } else {
         throw new Error('Failed to download attachment');
       }
     } catch (error) {
       console.error('Error downloading attachment:', error);
-      alert('Error downloading attachment: ' + error.message);
+      showToast('error', 'Error downloading attachment: ' + error.message);
+    } finally {
+      setProcessingLeaveId(null);
     }
   };
 
@@ -948,12 +991,12 @@ const handleInputChange = (e) => {
     if (selectedFile) {
       const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
       if (!validTypes.includes(selectedFile.type)) {
-        alert('Please select a PDF, JPG, or PNG file');
+        showToast('error', 'Please select a PDF, JPG, or PNG file');
         return;
       }
       
       if (selectedFile.size > 5 * 1024 * 1024) {
-        alert('File size must be less than 5MB');
+        showToast('error', 'File size must be less than 5MB');
         return;
       }
       
@@ -1016,14 +1059,12 @@ const handleInputChange = (e) => {
       });
     }
 
-    // Apply category filter
     if (selectedCategoryFilter) {
       filtered = filtered.filter(leave => 
         leave.employee?.category?.name === selectedCategoryFilter
       );
     }
 
-    // Date range filtering - based on submittedDate (when request was created)
     if (filters.dateRange === 'Today') {
       const today = new Date().toISOString().split('T')[0];
       filtered = filtered.filter(leave => {
@@ -1082,15 +1123,6 @@ const handleInputChange = (e) => {
     });
   };
 
-  const SortIcon = ({ columnKey }) => {
-    if (sortConfig.key !== columnKey) {
-      return <ChevronUpIcon className="w-4 h-4 opacity-30" />;
-    }
-    return sortConfig.direction === 'asc' 
-      ? <ChevronUpIcon className="w-4 h-4" />
-      : <ChevronDownIcon className="w-4 h-4" />;
-  };
-
   const resetFilters = () => {
     setFilters({
       status: 'All',
@@ -1102,12 +1134,13 @@ const handleInputChange = (e) => {
     });
     setQuery('');
     setSelectedCategoryFilter('');
+    showToast('info', 'Filters reset');
   };
 
   const getSelectedEmployeeCategory = () => {
-  const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
-  return selectedEmployee?.category;
-};
+    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+    return selectedEmployee?.category;
+  };
 
   const getSelectedEmployeeBalance = () => {
     const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
@@ -1115,10 +1148,33 @@ const handleInputChange = (e) => {
     return getEmployeeRemainingLeave(selectedEmployee);
   };
 
- const getSelectedEmployeeAnnualDays = () => {
-  const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
-  return selectedEmployee?.category?.annualLeaveDays || 20;
-};
+  const getSelectedEmployeeAnnualDays = () => {
+    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+    return selectedEmployee?.category?.annualLeaveDays || 20;
+  };
+
+  // Toast Notification Component
+  const ToastNotification = () => {
+    if (!toastMessage.visible) return null;
+    
+    const bgColor = toastMessage.type === 'success' ? 'bg-green-500' :
+                    toastMessage.type === 'error' ? 'bg-red-500' :
+                    toastMessage.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500';
+    
+    const Icon = toastMessage.type === 'success' ? CheckCircleIcon :
+                 toastMessage.type === 'error' ? XCircleIcon :
+                 toastMessage.type === 'warning' ? ExclamationTriangleIcon : InformationCircleIcon;
+    
+    return (
+      <div className="fixed bottom-4 right-4 z-50 animate-slide-up">
+        <div className={`${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2`}>
+          <Icon className="w-5 h-5" />
+          <span className="font-medium">{toastMessage.text}</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
       <div 
@@ -1148,6 +1204,9 @@ const handleInputChange = (e) => {
         <Header toggleSidebar={toggleSidebar} user={user} onLogout={handleLogout} />
 
         <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+          {/* Toast Notification */}
+          <ToastNotification />
+
           <div className="mb-6">
             <section className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -1173,10 +1232,15 @@ const handleInputChange = (e) => {
                   <button
                     onClick={() => setIsCreateMenuOpen(true)}
                     className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg transition-colors shadow-sm"
+                    disabled={isProcessingSingle}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
+                    {isProcessingSingle ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                    )}
                     Request Leave
                   </button>
                 </div>
@@ -1339,302 +1403,380 @@ const handleInputChange = (e) => {
           {viewMode === 'requests' ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               {filteredLeaves.length > 0 && (
-                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-                  <p className="text-sm text-gray-600">
-                    Showing <span className="font-medium text-gray-900">{filteredLeaves.length}</span> of <span className="font-medium text-gray-900">{leaves.length}</span> leave requests
-                  </p>
-                  {selectedLeaves.size > 0 && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleBulkApprove}
-                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors"
-                      >
-                        Approve ({selectedLeaves.size})
-                      </button>
-                      <button
-                        onClick={handleBulkReject}
-                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors"
-                      >
-                        Reject ({selectedLeaves.size})
-                      </button>
-                      <button
-                        onClick={handleBulkDelete}
-                        className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm transition-colors"
-                      >
-                        Delete ({selectedLeaves.size})
-                      </button>
+                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                  <div className="mb-3 pb-3 border-b border-gray-200">
+                    <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 p-2 rounded-lg">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>
+                        <strong>⚠️ Multi-Level Approval Chain:</strong> Leave requests require approval from <strong>Supervisor → Planner → HR</strong> in sequence. 
+                        Check the boxes below and click <strong className="text-green-700">Approve</strong> to approve for ALL required roles at once. 
+                        The request will automatically move through the entire approval chain.
+                      </span>
                     </div>
-                  )}
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm text-gray-600">
+                      Showing <span className="font-medium text-gray-900">{filteredLeaves.length}</span> of <span className="font-medium text-gray-900">{leaves.length}</span> leave requests
+                    </p>
+                    {selectedLeaves.size > 0 && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleBulkApprove}
+                          disabled={isProcessingBulk}
+                          className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+                        >
+                          {isProcessingBulk && bulkActionType === 'approve' ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          ) : (
+                            `✅ Approve (${selectedLeaves.size})`
+                          )}
+                        </button>
+                        <button
+                          onClick={handleBulkReject}
+                          disabled={isProcessingBulk}
+                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+                        >
+                          {isProcessingBulk && bulkActionType === 'reject' ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          ) : (
+                            `❌ Reject (${selectedLeaves.size})`
+                          )}
+                        </button>
+                        <button
+                          onClick={handleBulkDelete}
+                          disabled={isProcessingBulk}
+                          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+                        >
+                          {isProcessingBulk && bulkActionType === 'delete' ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          ) : (
+                            `🗑️ Delete (${selectedLeaves.size})`
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <input
-                          type="checkbox"
-                          checked={selectedLeaves.size === filteredLeaves.length && filteredLeaves.length > 0}
-                          onChange={handleSelectAll}
-                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <button onClick={() => requestSort('employee')} className="flex items-center gap-1 hover:text-gray-900">
-                          Employee <SortIcon columnKey="employee" />
-                        </button>
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <button onClick={() => requestSort('leaveType')} className="flex items-center gap-1 hover:text-gray-900">
-                          Leave Type <SortIcon columnKey="leaveType" />
-                        </button>
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <button onClick={() => requestSort('startDate')} className="flex items-center gap-1 hover:text-gray-900">
-                          Start Date <SortIcon columnKey="startDate" />
-                        </button>
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <button onClick={() => requestSort('endDate')} className="flex items-center gap-1 hover:text-gray-900">
-                          End Date <SortIcon columnKey="endDate" />
-                        </button>
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        <button onClick={() => requestSort('submittedDate')} className="flex items-center gap-1 hover:text-gray-900">
-                          Submitted <SortIcon columnKey="submittedDate" />
-                        </button>
-                      </th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Duration</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Reason</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Category</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Annual Leave</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Remaining</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Weekend Policy</th>
-                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Supervisor</th>
-                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Planner</th>
-                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">HR</th>
-                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Attachment</th>
-                      <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredLeaves.length > 0 ? (
-                      filteredLeaves.map((leave) => {
-                        const remainingBalance = getEmployeeRemainingLeave(leave.employee);
-                        const annualDays = leave.employee?.category?.annualLeaveDays || 20;
-                        return (
-                          <tr 
-                            key={leave.id} 
-                            className={`hover:bg-gray-50 transition-colors ${
-                              highlightedLeaveId === leave.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
-                            }`}
-                          >
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <input
-                                type="checkbox"
-                                checked={selectedLeaves.has(leave.id)}
-                                onChange={() => handleSelectLeave(leave.id)}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center shadow-sm">
-                                  <span className="text-blue-700 font-medium">
-                                    {leave?.employee?.firstName?.charAt(0)}{leave?.employee?.lastName?.charAt(0)}
-                                  </span>
-                                </div>
-                                <div className="ml-3">
-                                  <div className="text-sm font-semibold text-gray-900">
-                                    {leave?.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : "N/A"}
-                                  </div>
-                                  <div className="text-xs text-gray-500">{leave?.employee?.employeeId || 'N/A'}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className="text-sm font-medium text-gray-900">{leave.leaveType}</span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                              {formatDate(leave.startDate)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                              {formatDate(leave.endDate)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                              {formatDateTime(leave.submittedDate)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm font-medium text-gray-900">
-                                {calculateLeaveDays(leave.startDate, leave.endDate, leave.leaveType, leave.employee?.category)} days
-                              </div>
-                              {!isLeaveDeductible(leave.leaveType) && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                  Non-deductible
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm text-gray-600 max-w-xs truncate" title={leave.reason}>
-                                {leave.reason}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className="text-sm text-gray-600">
-                                {leave.employee?.category?.name || 'General'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className="text-sm font-medium text-gray-900">{annualDays} days</span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`text-sm font-medium ${remainingBalance < 5 ? 'text-red-600' : 'text-green-600'}`}>
-                                {remainingBalance} days
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              {leave.employee?.category?.excludeWeekendsFromLeave !== false ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                  Weekends Excluded
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                                  Weekends Included
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
-                                {getStatusIcon(leave.supervisorStatus)}
-                                {leave.supervisorStatus || "Pending"}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
-                                {getStatusIcon(leave.plannerStatus)}
-                                {leave.plannerStatus || "Pending"}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
-                                {getStatusIcon(leave.hrStatus)}
-                                {leave.hrStatus || "Pending"}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              {leave.leaveType === 'Sick' && (
-                                <div className="flex items-center justify-center">
-                                  {hasAttachment(leave) ? (
-                                    <div className="flex items-center gap-1">
-                                      <PaperClipIcon className="h-4 w-4 text-green-600" />
-                                      <span className="text-xs text-green-600 font-medium">Available</span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-gray-400">None</span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                              <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
-                                {getStatusIcon(leave.status)}
-                                {leave.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right">
-                              <div className="flex gap-2 justify-end">
-                                {leave.status === "Pending" && (
-                                  <>
-                                    <button
-                                      onClick={() => approveLeave(leave.id)}
-                                      className="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                                    >
-                                      <CheckBadgeIcon className="w-4 h-4 mr-1" />
-                                      Approve
-                                    </button>
-                                    <button
-                                      onClick={() => deleteLeave(leave.id)}
-                                      className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                                    >
-                                      <TrashIcon className="w-4 h-4 mr-1" />
-                                      Delete
-                                    </button>
-                                  </>
-                                )}
-
-                                {leave.status === "Rejected" && (
-                                  <button
-                                    onClick={() => {
-                                      const feedback = leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
-                                      setSelectedReason(feedback || "No feedback provided.");
-                                      setIsReasonModalOpen(true);
-                                    }}
-                                    className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                                  >
-                                    <EyeIcon className="w-4 h-4 mr-1" />
-                                    Reason
-                                  </button>
-                                )}
-
-                                {leave.leaveType === 'Sick' && hasAttachment(leave) && (
-                                  <button
-                                    onClick={() => downloadAttachment(leave.id)}
-                                    className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                                  >
-                                    <ArrowDownTrayIcon className="w-4 h-4 mr-1" />
-                                    Download
-                                  </button>
-                                )}
-
-                                <button
-                                  onClick={() => setSelectedLeave(leave)}
-                                  className="inline-flex items-center px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                                >
-                                  <DocumentIcon className="w-4 h-4 mr-1" />
-                                  Details
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan="18" className="px-6 py-12 text-center">
-                          <div className="flex flex-col items-center justify-center">
-                            <CalendarDaysIcon className="w-12 h-12 text-gray-300 mb-3" />
-                            <h3 className="text-lg font-medium text-gray-900 mb-1">No leave requests found</h3>
-                            <p className="text-sm text-gray-500 mb-4">
-                              {query || Object.values(filters).some(v => v !== 'All' && v !== '') || selectedCategoryFilter
-                                ? 'Try adjusting your search or filters' 
-                                : 'Get started by creating a new leave request'}
-                            </p>
-                            {!query && Object.values(filters).every(v => v === 'All' || v === '') && !selectedCategoryFilter && (
-                              <button
-                                onClick={() => setIsCreateMenuOpen(true)}
-                                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                </svg>
-                                New Leave Request
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {loading && (
+              {loading ? (
                 <div className="text-center py-12">
                   <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto"></div>
                   <p className="mt-4 text-sm text-gray-500">Loading leave requests...</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <input
+                            type="checkbox"
+                            checked={selectedLeaves.size === filteredLeaves.length && filteredLeaves.length > 0}
+                            onChange={handleSelectAll}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('employeeName')} className="flex items-center gap-1 hover:text-gray-900">
+                            Employee <SortIcon columnKey="employeeName" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('leaveType')} className="flex items-center gap-1 hover:text-gray-900">
+                            Leave Type <SortIcon columnKey="leaveType" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('startDate')} className="flex items-center gap-1 hover:text-gray-900">
+                            Start Date <SortIcon columnKey="startDate" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('endDate')} className="flex items-center gap-1 hover:text-gray-900">
+                            End Date <SortIcon columnKey="endDate" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('submittedDate')} className="flex items-center gap-1 hover:text-gray-900">
+                            Submitted <SortIcon columnKey="submittedDate" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('duration')} className="flex items-center gap-1 hover:text-gray-900">
+                            Duration <SortIcon columnKey="duration" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Reason</th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('categoryName')} className="flex items-center gap-1 hover:text-gray-900">
+                            Category <SortIcon columnKey="categoryName" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('annualLeave')} className="flex items-center gap-1 hover:text-gray-900">
+                            Annual Leave <SortIcon columnKey="annualLeave" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('remainingLeave')} className="flex items-center gap-1 hover:text-gray-900">
+                            Remaining <SortIcon columnKey="remainingLeave" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('weekendPolicy')} className="flex items-center gap-1 hover:text-gray-900">
+                            Weekend Policy <SortIcon columnKey="weekendPolicy" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('supervisorStatus')} className="flex items-center gap-1 hover:text-gray-900">
+                            Supervisor <SortIcon columnKey="supervisorStatus" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('plannerStatus')} className="flex items-center gap-1 hover:text-gray-900">
+                            Planner <SortIcon columnKey="plannerStatus" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('hrStatus')} className="flex items-center gap-1 hover:text-gray-900">
+                            HR <SortIcon columnKey="hrStatus" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Attachment</th>
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <button onClick={() => requestSort('status')} className="flex items-center gap-1 hover:text-gray-900">
+                            Status <SortIcon columnKey="status" />
+                          </button>
+                        </th>
+                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredLeaves.length > 0 ? (
+                        filteredLeaves.map((leave) => {
+                          const remainingBalance = getEmployeeRemainingLeave(leave.employee);
+                          const annualDays = leave.employee?.category?.annualLeaveDays || 20;
+                          const isProcessingThis = processingLeaveId === leave.id;
+                          return (
+                            <tr 
+                              key={leave.id} 
+                              className={`hover:bg-gray-50 transition-colors ${
+                                highlightedLeaveId === leave.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                              }`}
+                            >
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLeaves.has(leave.id)}
+                                  onChange={() => handleSelectLeave(leave.id)}
+                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                  disabled={false}
+                                />
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center shadow-sm">
+                                    <span className="text-blue-700 font-medium">
+                                      {leave?.employee?.firstName?.charAt(0)}{leave?.employee?.lastName?.charAt(0)}
+                                    </span>
+                                  </div>
+                                  <div className="ml-3">
+                                    <div className="text-sm font-semibold text-gray-900">
+                                      {leave?.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : "N/A"}
+                                    </div>
+                                    <div className="text-xs text-gray-500">{leave?.employee?.employeeId || 'N/A'}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className="text-sm font-medium text-gray-900">{leave.leaveType}</span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                {formatDate(leave.startDate)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                {formatDate(leave.endDate)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                {formatDateTime(leave.submittedDate)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {calculateLeaveDays(leave.startDate, leave.endDate, leave.leaveType, leave.employee?.category)} days
+                                </div>
+                                {!isLeaveDeductible(leave.leaveType) && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                    Non-deductible
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm text-gray-600 max-w-xs truncate" title={leave.reason}>
+                                  {leave.reason}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className="text-sm text-gray-600">
+                                  {leave.employee?.category?.name || 'General'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className="text-sm font-medium text-gray-900">{annualDays} days</span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`text-sm font-medium ${remainingBalance < 5 ? 'text-red-600' : 'text-green-600'}`}>
+                                  {remainingBalance} days
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {leave.employee?.category?.excludeWeekendsFromLeave !== false ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                    Weekends Excluded
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    Weekends Included
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.supervisorStatus)}`}>
+                                  {getStatusIcon(leave.supervisorStatus)}
+                                  {leave.supervisorStatus || "Pending"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.plannerStatus)}`}>
+                                  {getStatusIcon(leave.plannerStatus)}
+                                  {leave.plannerStatus || "Pending"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.hrStatus)}`}>
+                                  {getStatusIcon(leave.hrStatus)}
+                                  {leave.hrStatus || "Pending"}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                {leave.leaveType === 'Sick' && (
+                                  <div className="flex items-center justify-center">
+                                    {hasAttachment(leave) ? (
+                                      <div className="flex items-center gap-1">
+                                        <PaperClipIcon className="h-4 w-4 text-green-600" />
+                                        <span className="text-xs text-green-600 font-medium">Available</span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-400">None</span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-center">
+                                <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${getStatusBadgeClass(leave.status)}`}>
+                                  {getStatusIcon(leave.status)}
+                                  {leave.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right">
+                                <div className="flex gap-2 justify-end">
+                                  {leave.status === "Pending" && (
+                                    <>
+                                      <button
+                                        onClick={() => approveLeave(leave.id)}
+                                        disabled={isProcessingThis}
+                                        className="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+                                      >
+                                        {isProcessingThis ? (
+                                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-1"></div>
+                                        ) : (
+                                          <CheckBadgeIcon className="w-4 h-4 mr-1" />
+                                        )}
+                                        Approve
+                                      </button>
+                                      <button
+                                        onClick={() => deleteLeave(leave.id)}
+                                        disabled={isProcessingThis}
+                                        className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+                                      >
+                                        <TrashIcon className="w-4 h-4 mr-1" />
+                                        Delete
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {leave.status === "Rejected" && (
+                                    <button
+                                      onClick={() => {
+                                        const feedback = leave.supervisorFeedback || leave.plannerFeedback || leave.hrFeedback;
+                                        setSelectedReason(feedback || "No feedback provided.");
+                                        setIsReasonModalOpen(true);
+                                      }}
+                                      className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                    >
+                                      <EyeIcon className="w-4 h-4 mr-1" />
+                                      Reason
+                                    </button>
+                                  )}
+
+                                  {leave.leaveType === 'Sick' && hasAttachment(leave) && (
+                                    <button
+                                      onClick={() => downloadAttachment(leave.id)}
+                                      disabled={isProcessingThis}
+                                      className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+                                    >
+                                      {isProcessingThis ? (
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-1"></div>
+                                      ) : (
+                                        <ArrowDownTrayIcon className="w-4 h-4 mr-1" />
+                                      )}
+                                      Download
+                                    </button>
+                                  )}
+
+                                  <button
+                                    onClick={() => setSelectedLeave(leave)}
+                                    className="inline-flex items-center px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                  >
+                                    <DocumentIcon className="w-4 h-4 mr-1" />
+                                    Details
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan="18" className="px-6 py-12 text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <CalendarDaysIcon className="w-12 h-12 text-gray-300 mb-3" />
+                              <h3 className="text-lg font-medium text-gray-900 mb-1">No leave requests found</h3>
+                              <p className="text-sm text-gray-500 mb-4">
+                                {query || Object.values(filters).some(v => v !== 'All' && v !== '') || selectedCategoryFilter
+                                  ? 'Try adjusting your search or filters' 
+                                  : 'Get started by creating a new leave request'}
+                              </p>
+                              {!query && Object.values(filters).every(v => v === 'All' || v === '') && !selectedCategoryFilter && (
+                                <button
+                                  onClick={() => setIsCreateMenuOpen(true)}
+                                  className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                  </svg>
+                                  New Leave Request
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -1645,6 +1787,7 @@ const handleInputChange = (e) => {
             />
           )}
 
+          {/* Create Leave Modal */}
           {isCreateMenuOpen && (
             <div className="fixed inset-0 flex items-center justify-center z-50">
               <div className="absolute inset-0 bg-black/60" onClick={() => setIsCreateMenuOpen(false)}></div>
@@ -1773,7 +1916,6 @@ const handleInputChange = (e) => {
                       </div>
                     )}
 
-                    {/* Weekend Policy Section - Only shows when employee is selected */}
                     {newLeave.employee.id && (
                       <div>
                         <div className="flex items-center gap-2 mb-2">
@@ -1829,7 +1971,6 @@ const handleInputChange = (e) => {
                                   : 'All calendar days including weekends will be counted towards your leave balance.'}
                               </div>
                               
-                              {/* Show example calculation if dates are selected */}
                               {newLeave.startDate && newLeave.endDate && (
                                 <div className="mt-2 pt-2 border-t border-gray-200">
                                   <div className="text-xs text-gray-500">
@@ -1914,9 +2055,17 @@ const handleInputChange = (e) => {
                     </button>
                     <button
                       onClick={createLeave}
-                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium shadow-sm"
+                      disabled={isProcessingSingle}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium shadow-sm disabled:opacity-50 flex items-center gap-2"
                     >
-                      Submit Request
+                      {isProcessingSingle ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Submitting...
+                        </>
+                      ) : (
+                        'Submit Request'
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1924,6 +2073,7 @@ const handleInputChange = (e) => {
             </div>
           )}
 
+          {/* Reason Modal */}
           {isReasonModalOpen && (
             <div className="fixed inset-0 flex items-center justify-center z-50">
               <div className="absolute inset-0 bg-black/60" onClick={() => setIsReasonModalOpen(false)}></div>
@@ -1948,6 +2098,7 @@ const handleInputChange = (e) => {
             </div>
           )}
 
+          {/* Leave Details Modal */}
           {selectedLeave && (
             <LeaveDetailsModal 
               leave={selectedLeave}
@@ -1957,6 +2108,80 @@ const handleInputChange = (e) => {
               onReject={rejectLeave}
               autoAction={pendingAction}
             />
+          )}
+
+          {/* Bulk Action Modal */}
+          {isBulkActionModalOpen && (
+            <div className="fixed inset-0 flex items-center justify-center z-50">
+              <div className="absolute inset-0 bg-black/60" onClick={() => {
+                setIsBulkActionModalOpen(false);
+                setBulkFeedback('');
+              }}></div>
+              <div className="relative bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    {bulkActionType === 'approve' ? 'Approve' : 'Reject'} {selectedLeaves.size} Leave Request{selectedLeaves.size !== 1 ? 's' : ''}
+                  </h3>
+                  <button 
+                    onClick={() => {
+                      setIsBulkActionModalOpen(false);
+                      setBulkFeedback('');
+                    }} 
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <XMarkIcon className="w-5 h-5 text-gray-500" />
+                  </button>
+                </div>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Feedback (Optional)
+                  </label>
+                  <textarea
+                    value={bulkFeedback}
+                    onChange={(e) => setBulkFeedback(e.target.value)}
+                    rows={4}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow resize-none"
+                    placeholder={`Enter ${bulkActionType === 'approve' ? 'approval' : 'rejection'} feedback for all selected leave requests...`}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {bulkActionType === 'approve' 
+                      ? 'This feedback will be applied to all selected leave requests' 
+                      : 'Please provide a reason for rejecting these leave requests'}
+                  </p>
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setIsBulkActionModalOpen(false);
+                      setBulkFeedback('');
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={executeBulkAction}
+                    disabled={isProcessingBulk}
+                    className={`px-4 py-2 rounded-lg text-white font-medium transition-colors ${
+                      bulkActionType === 'approve'
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-red-600 hover:bg-red-700'
+                    } disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
+                  >
+                    {isProcessingBulk ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      `${bulkActionType === 'approve' ? 'Approve' : 'Reject'} (${selectedLeaves.size})`
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </main>
       </div>

@@ -21,6 +21,7 @@
     "axios": "^1.11.0",
     "chart.js": "^4.5.1",
     "docx": "^9.5.1",
+    "esbuild": "^0.28.1",
     "file-saver": "^2.0.5",
     "framer-motion": "^12.23.12",
     "html-docx-js": "^0.3.1",

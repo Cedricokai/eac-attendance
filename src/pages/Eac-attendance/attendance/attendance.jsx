@@ -50,6 +50,13 @@ function Attendance() {
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [selectedAttendanceIds, setSelectedAttendanceIds] = useState(new Set());
+  const [attendanceFilter, setAttendanceFilter] = useState('all');
+  
+  // Search state for employee selection in create modal
+  const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
+  
+  // Edit state
+  const [editingAttendanceId, setEditingAttendanceId] = useState(null);
 
   const getSelectedEmployeeIdsFromAttendances = () => {
     const employeeIds = new Set();
@@ -97,7 +104,7 @@ function Attendance() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
   
   // IMPROVED: Single source of truth for date filtering
-  const [dateFilterMode, setDateFilterMode] = useState("single"); // "single" | "range" | "none"
+  const [dateFilterMode, setDateFilterMode] = useState("single");
   const [singleDate, setSingleDate] = useState(new Date().toISOString().split('T')[0]);
   const [rangeStart, setRangeStart] = useState(new Date().toISOString().split('T')[0]);
   const [rangeEnd, setRangeEnd] = useState(new Date().toISOString().split('T')[0]);
@@ -189,15 +196,15 @@ function Attendance() {
     }
   };
 
-const getUniqueCategories = () => {
-  const categories = new Set();
-  attendances.forEach(attendance => {
-    if (attendance.employee?.category?.name) {
-      categories.add(attendance.employee.category.name);
-    }
-  });
-  return Array.from(categories).sort();
-};
+  const getUniqueCategories = () => {
+    const categories = new Set();
+    attendances.forEach(attendance => {
+      if (attendance.employee?.category?.name) {
+        categories.add(attendance.employee.category.name);
+      }
+    });
+    return Array.from(categories).sort();
+  };
 
   const loadHolidays = async () => {
     try {
@@ -374,7 +381,6 @@ const getUniqueCategories = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // IMPROVED: Fetch attendance when filter changes
   useEffect(() => {
     fetchAttendance();
   }, [dateFilterMode, singleDate, rangeStart, rangeEnd, showHidden, clearedDates]);
@@ -628,7 +634,6 @@ const getUniqueCategories = () => {
     }
   };
 
-
   const fetchAttendanceData = async () => {
     setLoading(true);
     try {
@@ -656,19 +661,16 @@ const getUniqueCategories = () => {
     }
   };
 
-  // IMPROVED: Get the active date range based on filter mode
   const getActiveDateRange = () => {
     if (dateFilterMode === 'range' && rangeStart && rangeEnd) {
       return { start: rangeStart, end: rangeEnd };
     } else if (dateFilterMode === 'single' && singleDate) {
       return { start: singleDate, end: singleDate };
     } else {
-      // Show all dates (no filter)
       return { start: '2000-01-01', end: '2099-12-31' };
     }
   };
 
-  // IMPROVED: Get display text for the current filter
   const getFilterDisplayText = () => {
     if (dateFilterMode === 'range' && rangeStart && rangeEnd) {
       return `📅 ${rangeStart} to ${rangeEnd}`;
@@ -703,11 +705,8 @@ const getUniqueCategories = () => {
       if (!attendanceRes.ok) throw new Error('Failed to fetch attendance');
       
       let data = await attendanceRes.json();
-      console.log('Attendance record sample:', data[0]);
-    console.log('Employee in attendance:', data[0]?.employee);
       const leavesData = leavesRes.ok ? await leavesRes.json() : [];
 
-      // IMPROVED: Apply date filter based on active mode
       const { start, end } = getActiveDateRange();
       data = data.filter(att => {
         const attDate = new Date(att.date);
@@ -731,7 +730,6 @@ const getUniqueCategories = () => {
     }
   };
 
-  // IMPROVED: Reset all date filters
   const resetDateFilters = () => {
     setDateFilterMode('none');
     setSingleDate(new Date().toISOString().split('T')[0]);
@@ -739,13 +737,11 @@ const getUniqueCategories = () => {
     setRangeEnd(new Date().toISOString().split('T')[0]);
   };
 
-  // IMPROVED: Apply single date filter
   const applySingleDateFilter = () => {
     setDateFilterMode('single');
     fetchAttendance();
   };
 
-  // IMPROVED: Apply range filter
   const applyRangeFilter = () => {
     if (rangeStart && rangeEnd) {
       if (new Date(rangeStart) > new Date(rangeEnd)) {
@@ -759,101 +755,113 @@ const getUniqueCategories = () => {
     }
   };
 
-  // Replace the existing generateLeaveAttendanceRecords function with this:
-
-const generateLeaveAttendanceRecords = (leavesData, existingAttendance) => {
-  const leaveRecords = [];
-  
-  // Get the active date range
-  const { start, end } = getActiveDateRange();
-  const filterStartDate = new Date(start);
-  const filterEndDate = new Date(end);
-  
-  leavesData.forEach(leave => {
-    if (leave.status !== 'Approved') return;
+  const generateLeaveAttendanceRecords = (leavesData, existingAttendance) => {
+    const leaveRecords = [];
     
-    const leaveStartDate = new Date(leave.startDate);
-    const leaveEndDate = new Date(leave.endDate);
-    const employeeId = leave.employee?.id;
+    const { start, end } = getActiveDateRange();
+    const filterStartDate = new Date(start);
+    const filterEndDate = new Date(end);
     
-    if (!employeeId) return;
-    
-    // Calculate the intersection between leave period and filter period
-    const effectiveStart = new Date(Math.max(leaveStartDate, filterStartDate));
-    const effectiveEnd = new Date(Math.min(leaveEndDate, filterEndDate));
-    
-    // Skip if no overlap with filter period
-    if (effectiveStart > effectiveEnd) return;
-    
-    const currentDate = new Date(effectiveStart);
-    while (currentDate <= effectiveEnd) {
-      const dayOfWeek = currentDate.getDay();
+    leavesData.forEach(leave => {
+      if (leave.status !== 'Approved') return;
       
-      // Only create attendance records for weekdays (Monday-Friday)
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        const dateStr = currentDate.toISOString().split('T')[0];
+      const leaveStartDate = new Date(leave.startDate);
+      const leaveEndDate = new Date(leave.endDate);
+      const employeeId = leave.employee?.id;
+      
+      if (!employeeId) return;
+      
+      const effectiveStart = new Date(Math.max(leaveStartDate, filterStartDate));
+      const effectiveEnd = new Date(Math.min(leaveEndDate, filterEndDate));
+      
+      if (effectiveStart > effectiveEnd) return;
+      
+      const currentDate = new Date(effectiveStart);
+      while (currentDate <= effectiveEnd) {
+        const dayOfWeek = currentDate.getDay();
         
-        const existingRecord = existingAttendance.find(att => 
-          att.employee?.id === employeeId && att.date === dateStr
-        );
-        
-        if (!existingRecord) {
-          const employee = employees.find(emp => emp.id === employeeId);
-          const standardHours = getEmployeeStandardHours(employee);
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          const dateStr = currentDate.toISOString().split('T')[0];
           
-          leaveRecords.push({
-            id: `leave-${leave.id}-${dateStr}`,
-            employee: leave.employee,
-            date: dateStr,
-            checkIn: '--:--',
-            checkOut: '--:--',
-            minimumHour: standardHours,
-            shift: 'Day',
-            workType: 'Regular',
-            status: 'On Leave',
-            leaveBased: true,
-            leaveType: leave.leaveType
-          });
+          const existingRecord = existingAttendance.find(att => 
+            att.employee?.id === employeeId && att.date === dateStr
+          );
+          
+          if (!existingRecord) {
+            const employee = employees.find(emp => emp.id === employeeId);
+            const standardHours = getEmployeeStandardHours(employee);
+            
+            leaveRecords.push({
+              id: `leave-${leave.id}-${dateStr}`,
+              employee: leave.employee,
+              date: dateStr,
+              checkIn: '--:--',
+              checkOut: '--:--',
+              minimumHour: standardHours,
+              shift: 'Day',
+              workType: 'Regular',
+              status: 'On Leave',
+              leaveBased: true,
+              leaveType: leave.leaveType
+            });
+          }
         }
+        
+        currentDate.setDate(currentDate.getDate() + 1);
       }
-      
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-  });
-  
-  return leaveRecords;
-};
+    });
+    
+    return leaveRecords;
+  };
 
-const filteredAttendancesBySearch = useMemo(() => {
-  let filtered = attendances;
-  
-  // Apply search query filter
-  if (searchQuery.trim()) {
-    const query = searchQuery.toLowerCase().trim();
+  const filteredAttendancesBySearch = useMemo(() => {
+    let filtered = attendances;
+    
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(attendance => {
+        const fullName = `${attendance.employee?.firstName || ''} ${attendance.employee?.lastName || ''}`.toLowerCase();
+        const employeeId = (attendance.employee?.employeeId || '').toLowerCase();
+        const date = attendance.date;
+        const status = (attendance.status || '').toLowerCase();
+        const category = (attendance.employee?.category?.name || '').toLowerCase();
+        
+        return fullName.includes(query) || 
+               employeeId.includes(query) || 
+               date.includes(query) ||
+               status.includes(query) ||
+               category.includes(query);
+      });
+    }
+    
+    if (selectedCategoryFilter) {
+      filtered = filtered.filter(attendance => 
+        attendance.employee?.category?.name === selectedCategoryFilter
+      );
+    }
+
+    if (attendanceFilter !== 'all') {
     filtered = filtered.filter(attendance => {
-      const fullName = `${attendance.employee?.firstName || ''} ${attendance.employee?.lastName || ''}`.toLowerCase();
-      const employeeId = (attendance.employee?.employeeId || '').toLowerCase();
-      const date = attendance.date;
-      const status = (attendance.status || '').toLowerCase();
-      const category = (attendance.employee?.category?.name || '').toLowerCase();
-      
-      return fullName.includes(query) || 
-             employeeId.includes(query) || 
-             date.includes(query) ||
-             status.includes(query) ||
-             category.includes(query);
+      const hasCheckIn = attendance.checkIn && attendance.checkIn !== '--:--' && attendance.checkIn.trim() !== '';
+      const hasCheckOut = attendance.checkOut && attendance.checkOut !== '--:--' && attendance.checkOut.trim() !== '';
+
+      switch (attendanceFilter) {
+        case 'checked_in_only':
+          return hasCheckIn;
+        case 'checked_out_only':
+          return hasCheckOut;
+        case 'checked_in_no_checkout':
+          return hasCheckIn && !hasCheckOut;
+        case 'checked_out_no_checkin':
+          return hasCheckOut && !hasCheckIn;
+        default:
+          return true;
+      }
     });
   }
-  
-  // Apply category filter
-  if (selectedCategoryFilter) {
-    filtered = filtered.filter(attendance => 
-      attendance.employee?.category?.name === selectedCategoryFilter
-    );
-  }
-  
-  return filtered;
-}, [attendances, searchQuery, selectedCategoryFilter]);
+    
+    return filtered;
+  }, [attendances, searchQuery, selectedCategoryFilter, attendanceFilter]);
 
   const handleInputChange = (e) => {
     const { name, value, options } = e.target;
@@ -872,17 +880,17 @@ const filteredAttendancesBySearch = useMemo(() => {
     }
   };
 
-const handleHeaderCheckboxChange = (e) => {
-  const isChecked = e.target.checked;
-  setIsAllSelected(isChecked);
-  
-  if (isChecked) {
-    const newSelected = new Set(filteredAttendancesBySearch.map(a => a.id));
-    setSelectedAttendanceIds(newSelected);
-  } else {
-    setSelectedAttendanceIds(new Set());
-  }
-};
+  const handleHeaderCheckboxChange = (e) => {
+    const isChecked = e.target.checked;
+    setIsAllSelected(isChecked);
+    
+    if (isChecked) {
+      const newSelected = new Set(filteredAttendancesBySearch.map(a => a.id));
+      setSelectedAttendanceIds(newSelected);
+    } else {
+      setSelectedAttendanceIds(new Set());
+    }
+  };
 
   const handleAttendanceCheckboxChange = (attendanceId, isChecked) => {
     setSelectedAttendanceIds(prev => {
@@ -900,22 +908,107 @@ const handleHeaderCheckboxChange = (e) => {
     setIsAllSelected(allChecked);
   };
 
+  const formatTimeToHHMMSS = (time) => {
+    if (!time) return null;
+    if (time.length === 5) return `${time}:00`;
+    if (time.length === 8) return time;
+    const [h, m] = time.split(':');
+    return `${h}:${m}:00`;
+  };
+
+  const handleEditAttendance = (id) => {
+    const attendance = attendances.find(a => a.id === id);
+    if (attendance) {
+      setIsEditing(true);
+      setEditingAttendanceId(id);
+      setCreateDateMode("single");
+      setCreateRangeStart(attendance.date);
+      setCreateRangeEnd(attendance.date);
+      
+      setNewAttendance({
+        employee: { id: attendance.employee?.id || '' },
+        shift: attendance.shift || '',
+        workType: attendance.workType || '',
+        category: attendance.employee?.category?.name || '',
+        date: attendance.date,
+        status: attendance.status || '',
+        minimumHour: attendance.minimumHour || '',
+        checkIn: attendance.checkIn || '',
+        checkOut: attendance.checkOut || '',
+      });
+      
+      if (attendance.employee?.id) {
+        setSelectedEmployees([attendance.employee.id.toString()]);
+        setSelectAllEmployees(false);
+      }
+      
+      setIsCreateMenuOpen(true);
+    }
+    handleClosePopupMenu();
+  };
+
   const createAttendance = async () => {
     try {
-      const formatTimeToHHMMSS = (time) => {
-        if (!time) return '00:00:00';
-        if (time.length === 5) return `${time}:00`;
-        if (time.length === 8) return time;
-        const [h, m] = time.split(':');
-        return `${h}:${m}:00`;
-      };
-
-      const singleDate = newAttendance.date || singleDate;
+      const token = getToken();
+      
+      // ========== EDIT MODE - Update single record ==========
+      if (isEditing && editingAttendanceId) {
+        const updateData = {
+          shift: newAttendance.shift || 'Day',
+          workType: newAttendance.workType || 'Regular',
+          date: newAttendance.date,
+          status: newAttendance.status,
+          checkIn: newAttendance.checkIn ? formatTimeToHHMMSS(newAttendance.checkIn) : null,
+          checkOut: newAttendance.checkOut ? formatTimeToHHMMSS(newAttendance.checkOut) : null,
+        };
+        
+        const response = await fetch(`${API_BASE_URL}/api/attendance/${editingAttendanceId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(updateData)
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Server error: ${response.status} - ${errorText}`);
+        }
+        
+        alert('Attendance record updated successfully!');
+        
+        setNewAttendance({
+          employee: { id: '' },
+          shift: '',
+          workType: '',
+          category: '',
+          date: singleDate,
+          status: '',
+          minimumHour: '',
+          checkIn: '',
+          checkOut: '',
+        });
+        setSelectedEmployees([]);
+        setSelectAllEmployees(false);
+        setIsEditing(false);
+        setEditingAttendanceId(null);
+        setCreateDateMode("single");
+        setEmployeeSearchQuery('');
+        
+        fetchAttendance();
+        fetchEmployees();
+        setIsCreateMenuOpen(false);
+        return;
+      }
+      
+      // ========== CREATE MODE - Batch create new records ==========
+      const currentSingleDate = newAttendance.date || singleDate;
 
       const datesToProcess =
-        !isEditing && createDateMode === "range"
+        createDateMode === "range" && !isEditing
           ? getDatesInRange(createRangeStart, createRangeEnd)
-          : [singleDate];
+          : [currentSingleDate];
 
       if (!datesToProcess.length) {
         alert("Please select a valid date or date range");
@@ -935,14 +1028,14 @@ const handleHeaderCheckboxChange = (e) => {
         return;
       }
 
-      const token = getToken();
       const overtimeRecords = [];
-
       const attendancePayload = [];
 
       for (const dateStr of datesToProcess) {
         for (const employeeId of employeeIdsToProcess) {
           const employee = employees.find(emp => emp.id === employeeId);
+          
+          if (!employee) continue;
           
           const workStartTime = getEmployeeWorkStartTime(employee);
           
@@ -955,9 +1048,13 @@ const handleHeaderCheckboxChange = (e) => {
             
             const checkInMinutes = inH * 60 + inM;
             const workStartMinutes = startH * 60 + startM;
-            const checkOutMinutes = outH * 60 + outM;
+            let checkOutMinutes = outH * 60 + outM;
             
             const effectiveStartMinutes = Math.max(checkInMinutes, workStartMinutes);
+            
+            if (checkOutMinutes < effectiveStartMinutes) {
+              checkOutMinutes += 24 * 60;
+            }
             
             return Math.max(0, checkOutMinutes - effectiveStartMinutes);
           };
@@ -968,14 +1065,13 @@ const handleHeaderCheckboxChange = (e) => {
             workStartTime
           );
 
-          if (totalWorkedMinutes <= 0) {
+          if (totalWorkedMinutes <= 0 && newAttendance.checkIn && newAttendance.checkOut) {
             alert(`Check-out time must be after work start time for ${employee.firstName} ${employee.lastName}`);
             return;
           }
 
           const standardHours = getEmployeeStandardHours(employee);
           const standardMinutes = standardHours * 60;
-
           const overtimeMinutes = Math.max(0, totalWorkedMinutes - standardMinutes);
 
           if (overtimeMinutes > 0) {
@@ -1020,8 +1116,8 @@ const handleHeaderCheckboxChange = (e) => {
             workType: newAttendance.workType || 'Regular',
             date: dateStr,
             status: determinedStatus,
-            checkIn: newAttendance.checkIn,
-            checkOut: newAttendance.checkOut,
+            checkIn: newAttendance.checkIn ? formatTimeToHHMMSS(newAttendance.checkIn) : null,
+            checkOut: newAttendance.checkOut ? formatTimeToHHMMSS(newAttendance.checkOut) : null,
             minimumHour: totalWorkedMinutes / 60,
             overtime: overtimeMinutes / 60,
             standardHours: standardHours
@@ -1063,17 +1159,12 @@ const handleHeaderCheckboxChange = (e) => {
         const date = new Date(overtimeRecord.date);
         const dayOfWeek = date.getDay();
 
-        let multiplier = settings.defaultOvertimeMultiplier || 1.5;
-        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
-          multiplier = settings.sundayOvertimeMultiplier || 2.0;
-        }
-        if (settings.enableTimeAndHalfAfter8Hours && overtimeRecord.overtimeMinutes > 480) {
-          multiplier = settings.timeAndHalfMultiplier || 1.5;
+        let multiplier = 1.5;
+        if (dayOfWeek === 0) {
+          multiplier = 2.0;
         }
 
-        const employeeRate =
-          employees.find(emp => emp.id === overtimeRecord.employeeId)?.minimumRate ||
-          settings.hourlyRate;
+        const employeeRate = employees.find(emp => emp.id === overtimeRecord.employeeId)?.minimumRate || settings.hourlyRate;
 
         const overtimeHours = Number((overtimeRecord.overtimeMinutes / 60).toFixed(2));
         const calculatedPay = Number((employeeRate * multiplier * overtimeHours).toFixed(2));
@@ -1100,8 +1191,7 @@ const handleHeaderCheckboxChange = (e) => {
         });
 
         if (!overtimeResponse.ok) {
-          const errorText = await overtimeResponse.text();
-          console.error('Failed to create overtime:', errorText);
+          console.error('Failed to create overtime:', await overtimeResponse.text());
         }
       }
 
@@ -1115,26 +1205,29 @@ const handleHeaderCheckboxChange = (e) => {
         employee: { id: '' },
         shift: '',
         workType: '',
+        category: '',
         date: singleDate,
         status: '',
         minimumHour: '',
         checkIn: '',
-        checkOut: ''
+        checkOut: '',
       });
-
       setSelectedEmployees([]);
       setSelectAllEmployees(false);
       setIsEditing(false);
+      setEditingAttendanceId(null);
       setCreateDateMode("single");
       setCreateRangeStart(singleDate);
       setCreateRangeEnd(singleDate);
+      setEmployeeSearchQuery('');
 
       fetchAttendance();
       fetchEmployees();
       setIsCreateMenuOpen(false);
+      
     } catch (err) {
-      console.error('Error creating attendance:', err);
-      alert(`Failed to create attendance: ${err.message}`);
+      console.error('Error creating/updating attendance:', err);
+      alert(`Failed: ${err.message}`);
       setError(err.message);
     }
   };
@@ -1329,23 +1422,6 @@ const handleHeaderCheckboxChange = (e) => {
     setPopupMenu({ ...popupMenu, isOpen: false });
   };
 
-  const handleEditAttendance = (id) => {
-    const attendance = attendances.find(a => a.id === id);
-    if (attendance) {
-      setIsEditing(true);
-      setCreateDateMode("single");
-      setCreateRangeStart(attendance.date);
-      setCreateRangeEnd(attendance.date);
-
-      setNewAttendance({
-        ...attendance,
-        employee: { id: attendance.employee?.id || '' }
-      });
-      setIsCreateMenuOpen(true);
-    }
-    handleClosePopupMenu();
-  };
-
   const handleDeleteAttendance = async (id) => {
     if (!window.confirm('Are you sure you want to delete this attendance record?')) {
       handleClosePopupMenu();
@@ -1490,6 +1566,23 @@ const handleHeaderCheckboxChange = (e) => {
     return employee.category === newAttendance.category;
   });
 
+  const filteredEmployeesBySearch = useMemo(() => {
+    if (!employeeSearchQuery.trim()) return filteredEmployees;
+    
+    const query = employeeSearchQuery.toLowerCase().trim();
+    return filteredEmployees.filter(employee => {
+      const fullName = `${employee.firstName || ''} ${employee.lastName || ''}`.toLowerCase();
+      const employeeId = (employee.employeeId || '').toLowerCase();
+      const category = (employee.category?.name || employee.category || '').toLowerCase();
+      const jobPosition = (employee.jobPosition || '').toLowerCase();
+      
+      return fullName.includes(query) || 
+             employeeId.includes(query) || 
+             category.includes(query) ||
+             jobPosition.includes(query);
+    });
+  }, [filteredEmployees, employeeSearchQuery]);
+
   useEffect(() => {
     const date = newAttendance.date || singleDate;
     if (!date) return;
@@ -1531,6 +1624,7 @@ const handleHeaderCheckboxChange = (e) => {
     const handleClickOutside = (event) => {
       if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
         setIsCreateMenuOpen(false);
+        setEmployeeSearchQuery('');
       }
     };
 
@@ -2987,8 +3081,12 @@ const handleHeaderCheckboxChange = (e) => {
           const [inHour, inMinute] = checkIn.split(':').map(Number);
           const [outHour, outMinute] = checkOut.split(':').map(Number);
           
-          const totalInMinutes = inHour * 60 + inMinute;
-          const totalOutMinutes = outHour * 60 + outMinute;
+          let totalInMinutes = inHour * 60 + inMinute;
+          let totalOutMinutes = outHour * 60 + outMinute;
+          
+          if (totalOutMinutes < totalInMinutes) {
+            totalOutMinutes += 24 * 60;
+          }
           
           const diffMinutes = totalOutMinutes - totalInMinutes;
           return (diffMinutes / 60).toFixed(2);
@@ -3350,7 +3448,12 @@ const handleHeaderCheckboxChange = (e) => {
         }`}
       >
         {isCreateMenuOpen && (
-          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsCreateMenuOpen(false)}></div>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => {
+            setIsCreateMenuOpen(false);
+            setIsEditing(false);
+            setEditingAttendanceId(null);
+            setEmployeeSearchQuery('');
+          }}></div>
         )}
 
         <main className="flex-1 mx-auto px-4 md:px-6 py-6">
@@ -3367,61 +3470,78 @@ const handleHeaderCheckboxChange = (e) => {
                 <p className="text-gray-600">Track and manage employee attendance records</p>
               </div>
 
-           <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-  <div className="relative flex-1 min-w-[200px]">
-    <input
-      type="text"
-      placeholder="Search by name, ID, date, or status..."
-      value={searchQuery}
-      onChange={(e) => setSearchQuery(e.target.value)}
-      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-    />
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" 
-      fill="none" 
-      viewBox="0 0 24 24" 
-      stroke="currentColor"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-    {searchQuery && (
-      <button
-        onClick={() => setSearchQuery('')}
-        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    )}
-  </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                <div className="relative flex-1 min-w-[200px]">
+                  <input
+                    type="text"
+                    placeholder="Search by name, ID, date, or status..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" 
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
 
-  {/* Category Filter Dropdown */}
-  <div className="relative min-w-[180px]">
-    <select
-      value={selectedCategoryFilter}
-      onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700"
-    >
-      <option value="">All Categories</option>
-      {getUniqueCategories().map(category => (
-        <option key={category} value={category}>{category}</option>
-      ))}
-    </select>
-  </div>
+                <div className="relative min-w-[180px]">
+                  <select
+                    value={selectedCategoryFilter}
+                    onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700"
+                  >
+                    <option value="">All Categories</option>
+                    {getUniqueCategories().map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
 
-  <button
-    onClick={() => setIsCreateMenuOpen(true)}
-    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                               <div className="relative min-w-[180px]">
+  <select
+    value={attendanceFilter}
+    onChange={(e) => setAttendanceFilter(e.target.value)}
+    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700"
   >
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-    </svg>
-    Add Attendance
-  </button>
+    <option value="all">All Attendance</option>
+    <option value="checked_in_only">Has Check In</option>
+    <option value="checked_out_only">Has Check Out</option>
+    <option value="checked_in_no_checkout">Checked In, No Check Out</option>
+    <option value="checked_out_no_checkin">Checked Out, No Check In</option>
+  </select>
 </div>
 
+                <button
+                  onClick={() => {
+                    setIsCreateMenuOpen(true);
+                    setEmployeeSearchQuery('');
+                    setIsEditing(false);
+                    setEditingAttendanceId(null);
+                  }}
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Attendance
+                </button>
+              </div>
             </section>
 
             {searchResults.length > 0 && (
@@ -3527,7 +3647,7 @@ const handleHeaderCheckboxChange = (e) => {
             )}
           </div>
 
-          {/* IMPROVED: Date Filters Panel - Clean and clear */}
+          {/* Date Filters Panel */}
           <div className="mb-6">
             <button
               onClick={() => setShowDatePanel(!showDatePanel)}
@@ -3575,7 +3695,6 @@ const handleHeaderCheckboxChange = (e) => {
                       <h3 className="text-lg font-semibold text-gray-800">Filter by Date</h3>
                     </div>
 
-                    {/* Mode Selection */}
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         onClick={() => setDateFilterMode('single')}
@@ -3609,7 +3728,6 @@ const handleHeaderCheckboxChange = (e) => {
                       </button>
                     </div>
 
-                    {/* Single Date Picker */}
                     {dateFilterMode === 'single' && (
                       <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
@@ -3630,7 +3748,6 @@ const handleHeaderCheckboxChange = (e) => {
                       </div>
                     )}
 
-                    {/* Date Range Picker */}
                     {dateFilterMode === 'range' && (
                       <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Select Date Range</label>
@@ -3663,7 +3780,6 @@ const handleHeaderCheckboxChange = (e) => {
                       </div>
                     )}
 
-                    {/* All Dates Info */}
                     {dateFilterMode === 'none' && (
                       <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 text-center">
                         <p className="text-gray-600">Showing all attendance records</p>
@@ -3797,7 +3913,7 @@ const handleHeaderCheckboxChange = (e) => {
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Employee
                     </th>
-                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Category
                     </th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -3828,7 +3944,7 @@ const handleHeaderCheckboxChange = (e) => {
                 </thead>
 
                 <tbody className="bg-white divide-y divide-gray-200">
-                 {filteredAttendancesBySearch.map((attendance) => (
+                  {filteredAttendancesBySearch.map((attendance) => (
                     <tr key={attendance.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <input 
@@ -3856,11 +3972,11 @@ const handleHeaderCheckboxChange = (e) => {
                           </div>
                         </div>
                       </td>
-                       <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">
-  {attendance?.employee?.category?.name || 'No Category'}
-</div>
-</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-500">
+                          {attendance?.employee?.category?.name || 'No Category'}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(attendance.date).toLocaleDateString('en-US', {
                           year: 'numeric',
@@ -3875,7 +3991,7 @@ const handleHeaderCheckboxChange = (e) => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {attendance.checkOut || '--:--'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.minimumHour.toFixed(2)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.minimumHour?.toFixed(2)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.standardHours}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -3889,7 +4005,6 @@ const handleHeaderCheckboxChange = (e) => {
                           <StatusBadge attendance={attendance} />
                         </div>
                       </td>
-                      
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end items-center gap-2">
                           <button
@@ -3915,26 +4030,25 @@ const handleHeaderCheckboxChange = (e) => {
                       </td>
                     </tr>
                   ))}
-
                 </tbody>
               </table>
             </div>
 
-           {filteredAttendancesBySearch.length === 0 && (
-  <div className="text-center py-8">
-    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-    <h3 className="mt-2 text-sm font-medium text-gray-900">
-      {searchQuery ? 'No matching attendance records' : 'No attendance records'}
-    </h3>
-    <p className="mt-1 text-sm text-gray-500">
-      {searchQuery 
-        ? `No results found for "${searchQuery}". Try a different search term.`
-        : 'Get started by creating a new attendance record.'}
-    </p>
-  </div>
-)}
+            {filteredAttendancesBySearch.length === 0 && (
+              <div className="text-center py-8">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 className="mt-2 text-sm font-medium text-gray-900">
+                  {searchQuery ? 'No matching attendance records' : 'No attendance records'}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {searchQuery 
+                    ? `No results found for "${searchQuery}". Try a different search term.`
+                    : 'Get started by creating a new attendance record.'}
+                </p>
+              </div>
+            )}
           </div>
 
           {isCreateMenuOpen && (
@@ -3943,9 +4057,16 @@ const handleHeaderCheckboxChange = (e) => {
               className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 z-50 w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-800">Add Attendance</h1>
+                <h1 className="text-2xl font-bold text-gray-800">
+                  {isEditing ? 'Edit Attendance' : 'Add Attendance'}
+                </h1>
                 <button 
-                  onClick={() => setIsCreateMenuOpen(false)}
+                  onClick={() => {
+                    setIsCreateMenuOpen(false);
+                    setIsEditing(false);
+                    setEditingAttendanceId(null);
+                    setEmployeeSearchQuery('');
+                  }}
                   className="text-gray-500 hover:text-gray-700"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -4024,10 +4145,11 @@ const handleHeaderCheckboxChange = (e) => {
                       <option value="Ahafo North">Ahafo North</option>
                     </select>
                   </div>
+
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
                     <h3 className="text-lg font-medium text-gray-800">Employee Selection</h3>
                     <div className="flex items-center space-x-4">
                       <label className="flex items-center space-x-2 text-sm text-gray-700">
@@ -4048,28 +4170,68 @@ const handleHeaderCheckboxChange = (e) => {
                     </div>
                   </div>
 
+                  {!showExcludedEmployees && !isEditing && (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search employees by name, ID, or category..."
+                        value={employeeSearchQuery}
+                        onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" 
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      {employeeSearchQuery && (
+                        <button
+                          onClick={() => setEmployeeSearchQuery('')}
+                          className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {!showExcludedEmployees ? (
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
                       <select
                         name="employeeId"
                         value={selectedEmployees}
                         onChange={handleInputChange}
-                        disabled={selectAllEmployees}
-                        multiple
-                        className="w-full h-64 px-3 py-2 border-none focus:ring-2 focus:ring-blue-500"
+                        disabled={selectAllEmployees || isEditing}
+                        multiple={!isEditing}
+                        className={`w-full ${isEditing ? 'h-16' : 'h-64'} px-3 py-2 border-none focus:ring-2 focus:ring-blue-500`}
                       >
-                        {filteredEmployees.length > 0 ? (
-                          filteredEmployees.map((employee) => (
+                        {isEditing ? (
+                          <option value={newAttendance.employee?.id} className="px-3 py-2">
+                            {employees.find(e => e.id === newAttendance.employee?.id)?.firstName} {employees.find(e => e.id === newAttendance.employee?.id)?.lastName} ({newAttendance.employee?.id})
+                          </option>
+                        ) : filteredEmployeesBySearch.length > 0 ? (
+                          filteredEmployeesBySearch.map((employee) => (
                             <option key={employee.id} value={employee.id} className="px-3 py-2">
-                             {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'}) - {employee.category?.name || 'No Category'}
+                              {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'}) - {employee.category?.name || 'No Category'}
                             </option>
                           ))
                         ) : (
                           <option disabled className="px-3 py-2 text-gray-500">
-                            No employees available for the selected date
+                            {employeeSearchQuery ? `No employees match "${employeeSearchQuery}"` : 'No employees available for the selected date'}
                           </option>
                         )}
                       </select>
+                      {!isEditing && filteredEmployeesBySearch.length > 0 && employeeSearchQuery && (
+                        <div className="px-3 py-2 bg-gray-50 text-xs text-gray-500 border-t">
+                          Found {filteredEmployeesBySearch.length} employee(s)
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -4224,6 +4386,11 @@ const handleHeaderCheckboxChange = (e) => {
                       });
                       setSelectedEmployees([]);
                       setSelectAllEmployees(false);
+                      setEmployeeSearchQuery('');
+                      if (isEditing) {
+                        setIsEditing(false);
+                        setEditingAttendanceId(null);
+                      }
                     }}
                     className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
                   >
@@ -4233,13 +4400,12 @@ const handleHeaderCheckboxChange = (e) => {
                     onClick={createAttendance}
                     className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                   >
-                    Submit Attendance
+                    {isEditing ? 'Update Attendance' : 'Submit Attendance'}
                   </button>
                 </div>
               </div>
             </div>
           )}
-
 
           {popupMenu.isOpen && (
             <>
@@ -4274,7 +4440,7 @@ const handleHeaderCheckboxChange = (e) => {
           )}
         </main>
       </div>
-         <BiometricStatus />
+      <BiometricStatus />
     </div>
   );
 }

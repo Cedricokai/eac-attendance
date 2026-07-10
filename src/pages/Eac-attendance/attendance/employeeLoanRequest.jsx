@@ -277,9 +277,7 @@ function EmployeeLoanRequest() {
   useEffect(() => {
     fetchSettings();
     fetchCategories(); // Fetch categories for filtering
-    if (user?.role === 'admin' || user?.role === 'manager') {
-      fetchEmployees();
-    }
+   fetchEmployees();
   }, [user]);
 
   useEffect(() => {
@@ -560,7 +558,7 @@ function EmployeeLoanRequest() {
 
           <div className="p-6 space-y-6">
             {/* Employee Selection Section - Only for admins/managers */}
-            {(user?.role === 'admin' || user?.role === 'manager') && (
+           
               <div className="space-y-4">
                 {/* Category Filter Dropdown */}
                 <div>
@@ -669,7 +667,7 @@ function EmployeeLoanRequest() {
                   )}
                 </div>
               </div>
-            )}
+          
 
             {/* Existing Loans Warning */}
             {existingLoans.length > 0 && (

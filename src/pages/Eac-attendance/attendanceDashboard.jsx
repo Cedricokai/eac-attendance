@@ -944,7 +944,7 @@ function AttendanceDashboard() {
                 <p className="text-sm text-gray-500 mt-1">Latest system updates</p>
               </div>
               <Link 
-                to="/activities" 
+                to="/ActivityLogs" 
                 className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
               >
                 View all <ChevronRight size={16} />

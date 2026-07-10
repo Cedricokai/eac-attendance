@@ -297,10 +297,34 @@ function Profile() {
     setIsMessageModalOpen(false);
   };
 
-  const handleSendSMS = () => {
-    alert(`SMS sent to ${employee.phone}`);
+  const handleSendSMS = async () => {
+  try {
+    const token = getToken();
+    const message = `Hello ${employee.firstName}, this is a test SMS from the HR system.`;
+
+    const response = await fetch(`${API_BASE_URL}/api/employee/${id}/send-sms`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      alert(`SMS sent successfully to ${employee.phone}`);
+    } else {
+      alert(`Failed to send SMS: ${data.error || 'Unknown error'}`);
+    }
+  } catch (error) {
+    console.error('Error sending SMS:', error);
+    alert('Error sending SMS: ' + error.message);
+  } finally {
     setIsMessageModalOpen(false);
-  };
+  }
+};
 
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";

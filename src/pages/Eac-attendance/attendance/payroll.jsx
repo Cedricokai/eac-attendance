@@ -15,6 +15,9 @@ function Payroll() {
     category: "",
     convertExcessToOvertime: true 
   });
+  const [activeTab, setActiveTab] = useState('credits');
+  const [activeLoansList, setActiveLoansList] = useState([]);
+const [hasActiveLoans, setHasActiveLoans] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -27,6 +30,44 @@ function Payroll() {
   const [creditDescription, setCreditDescription] = useState("");
   const [categories, setCategories] = useState([]);
   const [expandedMonths, setExpandedMonths] = useState({});
+  
+  // NEW: Month Export Modal State
+  const [showMonthExportModal, setShowMonthExportModal] = useState(false);
+  const [selectedExportMonth, setSelectedExportMonth] = useState("");
+  const [selectedExportYear, setSelectedExportYear] = useState(new Date().getFullYear());
+  const [exportingMonthData, setExportingMonthData] = useState(false);
+  
+  // NEW: Edit Period Modal State
+  const [showEditPeriodModal, setShowEditPeriodModal] = useState(false);
+  const [editingPeriod, setEditingPeriod] = useState(null);
+  const [editPeriodData, setEditPeriodData] = useState({
+    name: "",
+    startDate: "",
+    endDate: "",
+    category: "",
+    convertExcessToOvertime: true
+  });
+const [showBankExportModal, setShowBankExportModal] = useState(false);
+const [selectedBankExportMonth, setSelectedBankExportMonth] = useState("");
+const [selectedBankExportYear, setSelectedBankExportYear] = useState(new Date().getFullYear());
+const [exportingBankData, setExportingBankData] = useState(false);
+  // NEW: Clear Records Modal State
+  const [showClearRecordsModal, setShowClearRecordsModal] = useState(false);
+  const [periodToClear, setPeriodToClear] = useState(null);
+  const [isClearingRecords, setIsClearingRecords] = useState(false);
+  
+  // Pending Credits State
+  const [showCreditSelectionModal, setShowCreditSelectionModal] = useState(false);
+  const [pendingCreditsList, setPendingCreditsList] = useState([]);
+  const [selectedCreditIds, setSelectedCreditIds] = useState(new Set());
+  const [isCheckingCredits, setIsCheckingCredits] = useState(false);
+  const [totalSelectedCreditAmount, setTotalSelectedCreditAmount] = useState(0);
+  const [showAddPendingCreditModal, setShowAddPendingCreditModal] = useState(false);
+  const [newPendingCredit, setNewPendingCredit] = useState({
+    employeeId: "",
+    amount: "",
+    reason: ""
+  });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
@@ -88,88 +129,86 @@ function Payroll() {
 
   const API_BASE_URL = getApiBaseUrl();
 
-  
-      // Add toggleSidebar function
-    const toggleSidebar = () => {
-      setSidebarOpen(!sidebarOpen);
-    };
-  
-    // Add responsive sidebar handling
-    useEffect(() => {
-      const handleResize = () => {
-        if (window.innerWidth >= 768) {
-          setSidebarOpen(true);
-        } else {
-          setSidebarOpen(false);
-        }
-      };
-  
-      window.addEventListener('resize', handleResize);
-      handleResize();
-      return () => window.removeEventListener('resize', handleResize);
-    }, []);
-  
-     useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (sidebarOpen && window.innerWidth < 768) {
-          const sidebar = document.querySelector('.sidebar-container');
-          if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
-            setSidebarOpen(false);
-          }
-        }
-      };
-  
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }, [sidebarOpen]);
-  
-      useEffect(() => {
-      const fetchUser = async () => {
-        try {
-          const token = localStorage.getItem("jwtToken");
-          const res = await fetch(`${API_BASE_URL}/auth/me`, {
-            headers: {
-              "Authorization": `Bearer ${token}`
-            },
-            credentials: "include"
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setUser({
-              name: data.username,
-              role: data.role.replace("ROLE_", "").toLowerCase(), 
-              email: data.email
-            });
-          }
-        } catch (err) {
-          console.error("Failed to fetch user", err);
-        }
-      };
-      fetchUser();
-    }, []);
-  
-    const handleLogout = async () => {
-      try {
-        const token = localStorage.getItem("jwtToken");
-        await fetch(`${API_BASE_URL}/auth/logout`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-        });
-  
-        localStorage.removeItem("jwtToken");
-        localStorage.removeItem("userRole");
-        window.location.href = "/";
-      } catch (error) {
-        console.error("Logout failed:", error);
+  // Add toggleSidebar function
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  // Add responsive sidebar handling
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
       }
     };
-  
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sidebarOpen && window.innerWidth < 768) {
+        const sidebar = document.querySelector('.sidebar-container');
+        if (sidebar && !sidebar.contains(event.target) && !event.target.closest('.hamburger-button')) {
+          setSidebarOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const res = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          },
+          credentials: "include"
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUser({
+            name: data.username,
+            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            email: data.email
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch user", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = localStorage.getItem("jwtToken");
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   const [filters, setFilters] = useState({
     grade: "",
@@ -229,6 +268,546 @@ function Payroll() {
       setPayrollPeriods(data);
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const exportBankByMonth = async () => {
+  if (!selectedBankExportMonth) {
+    setError("Please select a month");
+    setTimeout(() => setError(""), 3000);
+    return;
+  }
+
+  setExportingBankData(true);
+  setError("");
+  
+  try {
+    const token = getToken();
+    
+    // Get all periods for the selected month/year
+    const periodsInMonth = payrollPeriods.filter(period => {
+      if (!period.endDate) return false;
+      const endDate = new Date(period.endDate);
+      return endDate.getMonth() === parseInt(selectedBankExportMonth) && 
+             endDate.getFullYear() === selectedBankExportYear;
+    });
+    
+    if (periodsInMonth.length === 0) {
+      setError(`No payroll periods found for ${getMonthName(parseInt(selectedBankExportMonth))} ${selectedBankExportYear}`);
+      setTimeout(() => setError(""), 5000);
+      setShowBankExportModal(false);
+      setExportingBankData(false);
+      return;
+    }
+    
+    // Fetch all payroll records for all periods in this month
+    const allRecords = [];
+    
+    for (const period of periodsInMonth) {
+      const res = await fetch(`${API_BASE_URL}/api/payroll?periodId=${period.id}`, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      
+      if (res.ok) {
+        const records = await res.json();
+        allRecords.push(...records);
+      }
+    }
+    
+    if (allRecords.length === 0) {
+      setError(`No payroll records found for ${getMonthName(parseInt(selectedBankExportMonth))} ${selectedBankExportYear}`);
+      setTimeout(() => setError(""), 5000);
+      setShowBankExportModal(false);
+      setExportingBankData(false);
+      return;
+    }
+    
+    // Format records for bank export (same format as exportBankSpreadsheet)
+    const rows = allRecords.map((record) => {
+      const employee = record.employee || {};
+      const accountName = employee.accountName || "";
+      const bankName = employee.bank || "";
+      const bankLocation = employee.bankBranch || "";
+      const beneficiaryAccount = employee.accountNumber || "";
+      const beneficiaryBank = bankName === "Ecobank Ghana Limited" ? "Ecobank Ghana Limited" : `${bankName} - ${bankLocation}`;
+
+      return {
+        "BENEFICIARY NAME": accountName,
+        "BENEFICIARY BANK": beneficiaryBank,
+        "BENEFICIARY ACCOUNT": beneficiaryAccount,
+        AMOUNT: record.netSalary || 0,
+        NARRATION: `Payroll ${getMonthName(parseInt(selectedBankExportMonth))} ${selectedBankExportYear}`,
+        PURPOSE: "Salary Payment",
+      };
+    });
+    
+    // Create and download Excel file
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Bank Payroll");
+    const fileName = `Bank-Export-${getMonthName(parseInt(selectedBankExportMonth))}_${selectedBankExportYear}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+    
+    setSuccess(`Successfully exported ${allRecords.length} bank records for ${getMonthName(parseInt(selectedBankExportMonth))} ${selectedBankExportYear}`);
+    setTimeout(() => setSuccess(""), 5000);
+    setShowBankExportModal(false);
+    
+  } catch (err) {
+    console.error("Bank export error:", err);
+    setError(`Failed to export bank data: ${err.message}`);
+    setTimeout(() => setError(""), 5000);
+  } finally {
+    setExportingBankData(false);
+  }
+};
+
+// Add this function to open the bank export modal
+const openBankExportModal = () => {
+  setShowBankExportModal(true);
+};
+
+  // ==================== NEW: EXPORT MONTHLY DATA BY CATEGORY ====================
+  const openMonthExportModal = () => {
+    setShowMonthExportModal(true);
+  };
+
+  const exportMonthByCategory = async () => {
+    if (!selectedExportMonth) {
+      setError("Please select a month");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+
+    setExportingMonthData(true);
+    setError("");
+    
+    try {
+      const token = getToken();
+      
+      // Get all periods for the selected month/year
+      const periodsInMonth = payrollPeriods.filter(period => {
+        if (!period.endDate) return false;
+        const endDate = new Date(period.endDate);
+        return endDate.getMonth() === parseInt(selectedExportMonth) && 
+               endDate.getFullYear() === selectedExportYear;
+      });
+      
+      if (periodsInMonth.length === 0) {
+        setError(`No payroll periods found for ${getMonthName(parseInt(selectedExportMonth))} ${selectedExportYear}`);
+        setTimeout(() => setError(""), 5000);
+        setShowMonthExportModal(false);
+        setExportingMonthData(false);
+        return;
+      }
+      
+      // Fetch all payroll records for all periods in this month
+      const allRecords = [];
+      
+      for (const period of periodsInMonth) {
+        const res = await fetch(`${API_BASE_URL}/api/payroll?periodId=${period.id}`, {
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        });
+        
+        if (res.ok) {
+          const records = await res.json();
+          allRecords.push(...records.map(record => ({ ...record, periodName: period.name, periodCategory: period.category })));
+        }
+      }
+      
+      if (allRecords.length === 0) {
+        setError(`No payroll records found for ${getMonthName(parseInt(selectedExportMonth))} ${selectedExportYear}`);
+        setTimeout(() => setError(""), 5000);
+        setShowMonthExportModal(false);
+        setExportingMonthData(false);
+        return;
+      }
+      
+      // Group records by category
+      const recordsByCategory = {};
+      allRecords.forEach(record => {
+        const category = record.employee?.category || record.category || "Uncategorized";
+        if (!recordsByCategory[category]) {
+          recordsByCategory[category] = [];
+        }
+        recordsByCategory[category].push(record);
+      });
+      
+      // Create Excel workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Create summary sheet
+      const summaryData = [
+        [`Payroll Summary - ${getMonthName(parseInt(selectedExportMonth))} ${selectedExportYear}`],
+        [`Generated: ${new Date().toLocaleString()}`],
+        [],
+        ["Category", "Employee Count", "Total Gross Salary", "Total Net Salary", "Total Tax", "Total SSNIT", "Total Overtime Pay", "Total Allowances"]
+      ];
+      
+      let grandTotalGross = 0;
+      let grandTotalNet = 0;
+      let grandTotalTax = 0;
+      let grandTotalSsnit = 0;
+      let grandTotalOvertime = 0;
+      let grandTotalAllowances = 0;
+      let grandTotalEmployees = 0;
+      
+      for (const [category, records] of Object.entries(recordsByCategory)) {
+        const categoryGross = records.reduce((sum, r) => sum + (r.grossSalary || 0), 0);
+        const categoryNet = records.reduce((sum, r) => sum + (r.netSalary || 0), 0);
+        const categoryTax = records.reduce((sum, r) => sum + (r.payeTax || 0), 0);
+        const categorySsnit = records.reduce((sum, r) => sum + (r.ssnitEmployee || 0) + (r.ssnitEmployer || 0), 0);
+        const categoryOvertime = records.reduce((sum, r) => sum + (r.overtimePay || 0), 0);
+        const categoryAllowances = records.reduce((sum, r) => sum + 
+          (r.rentAllowance || 0) + (r.transportAllowance || 0) + 
+          (r.clothingAllowance || 0) + (r.otherAllowance || 0) + (r.nssAllowance || 0), 0);
+        const categoryCount = records.length;
+        
+        summaryData.push([
+          category,
+          categoryCount,
+          formatCurrency(categoryGross),
+          formatCurrency(categoryNet),
+          formatCurrency(categoryTax),
+          formatCurrency(categorySsnit),
+          formatCurrency(categoryOvertime),
+          formatCurrency(categoryAllowances)
+        ]);
+        
+        grandTotalGross += categoryGross;
+        grandTotalNet += categoryNet;
+        grandTotalTax += categoryTax;
+        grandTotalSsnit += categorySsnit;
+        grandTotalOvertime += categoryOvertime;
+        grandTotalAllowances += categoryAllowances;
+        grandTotalEmployees += categoryCount;
+      }
+      
+      summaryData.push([], ["GRAND TOTAL", grandTotalEmployees, formatCurrency(grandTotalGross), formatCurrency(grandTotalNet), formatCurrency(grandTotalTax), formatCurrency(grandTotalSsnit), formatCurrency(grandTotalOvertime), formatCurrency(grandTotalAllowances)]);
+      
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+      
+      // Create individual category sheets
+      for (const [category, records] of Object.entries(recordsByCategory)) {
+        const sheetData = records.map(record => {
+          const employee = record.employee || {};
+          const employeeName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
+          const totalAllowances = (record.rentAllowance || 0) + (record.transportAllowance || 0) + 
+                                  (record.clothingAllowance || 0) + (record.otherAllowance || 0) + 
+                                  (record.nssAllowance || 0);
+          
+          return {
+            'Period': record.periodName || '',
+            'Employee ID': employee.id || record.employeeId || '',
+            'Employee Name': employeeName,
+            'Department': employee.department || '',
+            'Grade': employee.grade || '',
+            'Work Type': employee.workType || '',
+            'Total Days': record.totalDaysInPeriod || 0,
+            'Leave Days': record.leaveDays || 0,
+            'Working Days': record.workingDays || 0,
+            'Total Hours': (record.totalHours || 0).toFixed(2),
+            'Overtime Hours': (record.overtimeHours || 0).toFixed(2),
+            'Basic Salary': formatCurrency(record.basicSalary || 0),
+            'Overtime Pay': formatCurrency(record.overtimePay || 0),
+            'Housing Allowance': formatCurrency(record.rentAllowance || 0),
+            'Transport Allowance': formatCurrency(record.transportAllowance || 0),
+            'Clothing Allowance': formatCurrency(record.clothingAllowance || 0),
+            'Other Allowances': formatCurrency(record.otherAllowance || 0),
+            'NSS Allowance': formatCurrency(record.nssAllowance || 0),
+            'Total Allowances': formatCurrency(totalAllowances),
+            'Gross Salary': formatCurrency(record.grossSalary || 0),
+            'Employee SSNIT': formatCurrency(record.ssnitEmployee || 0),
+            'Employer SSNIT': formatCurrency(record.ssnitEmployer || 0),
+            'PAYE Tax': formatCurrency(record.payeTax || 0),
+            'Credit Amount': formatCurrency(record.creditAmount || 0),
+            'Net Salary': formatCurrency(record.netSalary || 0),
+            'Employer Cost': formatCurrency((record.grossSalary || 0) + (record.ssnitEmployer || 0)),
+            'Bank': employee.bank || '',
+            'Account Number': employee.accountNumber || '',
+            'Status': record.status || ''
+          };
+        });
+        
+        // Add category summary row
+        const categoryGross = records.reduce((sum, r) => sum + (r.grossSalary || 0), 0);
+        const categoryNet = records.reduce((sum, r) => sum + (r.netSalary || 0), 0);
+        const categoryTax = records.reduce((sum, r) => sum + (r.payeTax || 0), 0);
+        
+        sheetData.push({
+          'Period': '',
+          'Employee ID': '',
+          'Employee Name': '',
+          'Department': '',
+          'Grade': '',
+          'Work Type': '',
+          'Total Days': '',
+          'Leave Days': '',
+          'Working Days': '',
+          'Total Hours': '',
+          'Overtime Hours': '',
+          'Basic Salary': '',
+          'Overtime Pay': '',
+          'Housing Allowance': '',
+          'Transport Allowance': '',
+          'Clothing Allowance': '',
+          'Other Allowances': '',
+          'NSS Allowance': '',
+          'Total Allowances': '',
+          'Gross Salary': `CATEGORY TOTAL: ${formatCurrency(categoryGross)}`,
+          'Employee SSNIT': '',
+          'Employer SSNIT': '',
+          'PAYE Tax': `TAX TOTAL: ${formatCurrency(categoryTax)}`,
+          'Credit Amount': '',
+          'Net Salary': `NET TOTAL: ${formatCurrency(categoryNet)}`,
+          'Employer Cost': '',
+          'Bank': '',
+          'Account Number': '',
+          'Status': ''
+        });
+        
+        const sheet = XLSX.utils.json_to_sheet(sheetData);
+        // Sanitize sheet name (Excel max 31 chars, no special chars)
+        const sheetName = category.replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
+        XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+      }
+      
+      // Create all records combined sheet
+      const allRecordsData = allRecords.map(record => {
+        const employee = record.employee || {};
+        const employeeName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
+        const totalAllowances = (record.rentAllowance || 0) + (record.transportAllowance || 0) + 
+                                (record.clothingAllowance || 0) + (record.otherAllowance || 0) + 
+                                (record.nssAllowance || 0);
+        
+        return {
+          'Period': record.periodName || '',
+          'Category': record.periodCategory || employee.category || '',
+          'Employee ID': employee.id || record.employeeId || '',
+          'Employee Name': employeeName,
+          'Department': employee.department || '',
+          'Grade': employee.grade || '',
+          'Work Type': employee.workType || '',
+          'Total Days': record.totalDaysInPeriod || 0,
+          'Leave Days': record.leaveDays || 0,
+          'Working Days': record.workingDays || 0,
+          'Total Hours': (record.totalHours || 0).toFixed(2),
+          'Overtime Hours': (record.overtimeHours || 0).toFixed(2),
+          'Basic Salary': formatCurrency(record.basicSalary || 0),
+          'Overtime Pay': formatCurrency(record.overtimePay || 0),
+          'Housing Allowance': formatCurrency(record.rentAllowance || 0),
+          'Transport Allowance': formatCurrency(record.transportAllowance || 0),
+          'Clothing Allowance': formatCurrency(record.clothingAllowance || 0),
+          'Other Allowances': formatCurrency(record.otherAllowance || 0),
+          'NSS Allowance': formatCurrency(record.nssAllowance || 0),
+          'Total Allowances': formatCurrency(totalAllowances),
+          'Gross Salary': formatCurrency(record.grossSalary || 0),
+          'Employee SSNIT': formatCurrency(record.ssnitEmployee || 0),
+          'Employer SSNIT': formatCurrency(record.ssnitEmployer || 0),
+          'PAYE Tax': formatCurrency(record.payeTax || 0),
+          'Credit Amount': formatCurrency(record.creditAmount || 0),
+          'Net Salary': formatCurrency(record.netSalary || 0),
+          'Employer Cost': formatCurrency((record.grossSalary || 0) + (record.ssnitEmployer || 0)),
+          'Bank': employee.bank || '',
+          'Account Number': employee.accountNumber || '',
+          'Status': record.status || ''
+        };
+      });
+      
+      const allRecordsSheet = XLSX.utils.json_to_sheet(allRecordsData);
+      XLSX.utils.book_append_sheet(workbook, allRecordsSheet, "All Records");
+      
+      // Save file
+      const fileName = `Payroll_${getMonthName(parseInt(selectedExportMonth))}_${selectedExportYear}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+      
+      setSuccess(`Successfully exported ${allRecords.length} payroll records for ${getMonthName(parseInt(selectedExportMonth))} ${selectedExportYear}`);
+      setTimeout(() => setSuccess(""), 5000);
+      setShowMonthExportModal(false);
+      
+    } catch (err) {
+      console.error("Export error:", err);
+      setError(`Failed to export monthly data: ${err.message}`);
+      setTimeout(() => setError(""), 5000);
+    } finally {
+      setExportingMonthData(false);
+    }
+  };
+
+  const getMonthName = (monthIndex) => {
+    const months = ["January", "February", "March", "April", "May", "June", 
+                    "July", "August", "September", "October", "November", "December"];
+    return months[monthIndex];
+  };
+
+  const getAvailableYears = () => {
+    const years = new Set();
+    payrollPeriods.forEach(period => {
+      if (period.endDate) {
+        years.add(new Date(period.endDate).getFullYear());
+      }
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  };
+
+  // ==================== NEW: EDIT PAYROLL PERIOD ====================
+  const openEditPeriodModal = (period) => {
+    setEditingPeriod(period);
+    setEditPeriodData({
+      name: period.name || "",
+      startDate: period.startDate || "",
+      endDate: period.endDate || "",
+      category: period.category || "",
+      convertExcessToOvertime: period.convertExcessToOvertime !== false
+    });
+    setShowEditPeriodModal(true);
+  };
+
+  const updatePayrollPeriod = async () => {
+    if (!editPeriodData.category) {
+      setError("Please select a category");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const token = getToken();
+      const res = await fetch(`${API_BASE_URL}/api/payroll/periods/${editingPeriod.id}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(editPeriodData),
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to update payroll period");
+      }
+      
+      const updatedPeriod = await res.json();
+      
+      // Update the periods list
+      setPayrollPeriods(prevPeriods => 
+        prevPeriods.map(p => p.id === updatedPeriod.id ? updatedPeriod : p)
+      );
+      
+      // If the selected period was edited, update selectedPeriod
+      if (selectedPeriod === editingPeriod.id) {
+        setSelectedPeriod(updatedPeriod.id);
+        // Refresh records if needed
+        fetchPayrollRecords(updatedPeriod.id);
+        fetchPayrollSummary(updatedPeriod.id);
+      }
+      
+      setSuccess("Payroll period updated successfully");
+      setTimeout(() => setSuccess(""), 3000);
+      setShowEditPeriodModal(false);
+      setEditingPeriod(null);
+      
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(""), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== NEW: CLEAR PAYROLL RECORDS ====================
+  const openClearRecordsModal = (period) => {
+    setPeriodToClear(period);
+    setShowClearRecordsModal(true);
+  };
+
+  const checkPayrollPreviewBeforeGenerate = async (periodId) => {
+    try {
+        setIsCheckingCredits(true);
+        const token = getToken();
+
+        const res = await fetch(`${API_BASE_URL}/api/payroll/preview/${periodId}`, {
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+        });
+
+        if (!res.ok) throw new Error("Failed to fetch payroll preview");
+
+        const data = await res.json();
+
+        // Set credit data
+        if (data.hasPendingCredits && data.pendingCredits.length > 0) {
+            setPendingCreditsList(data.pendingCredits);
+            const allCreditIds = new Set(data.pendingCredits.map(credit => credit.id));
+            setSelectedCreditIds(allCreditIds);
+            const total = data.pendingCredits
+                .filter(credit => allCreditIds.has(credit.id))
+                .reduce((sum, credit) => sum + credit.amount, 0);
+            setTotalSelectedCreditAmount(total);
+        } else {
+            setPendingCreditsList([]);
+            setSelectedCreditIds(new Set());
+            setTotalSelectedCreditAmount(0);
+        }
+
+        // Set loan data
+        if (data.hasActiveLoans && data.activeLoans.length > 0) {
+            setActiveLoansList(data.activeLoans);
+            setHasActiveLoans(true);
+        } else {
+            setActiveLoansList([]);
+            setHasActiveLoans(false);
+        }
+
+        // Show modal if either credits or loans exist
+        if (data.hasPendingCredits || data.hasActiveLoans) {
+            setShowCreditSelectionModal(true);
+            return false;
+        } else {
+            await callOriginalGeneratePayroll(periodId);
+            return true;
+        }
+    } catch (err) {
+        console.warn("Preview check failed, proceeding with normal payroll:", err.message);
+        await callOriginalGeneratePayroll(periodId);
+        return true;
+    } finally {
+        setIsCheckingCredits(false);
+    }
+};
+
+  const clearPayrollRecords = async () => {
+    if (!periodToClear) return;
+    
+    try {
+      setIsClearingRecords(true);
+      const token = getToken();
+      const res = await fetch(`${API_BASE_URL}/api/payroll/periods/${periodToClear.id}/records`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to clear payroll records");
+      }
+      
+      const result = await res.json();
+      
+      setSuccess(`Successfully cleared ${result.deletedCount || 0} payroll record(s) for period "${periodToClear.name}"`);
+      setTimeout(() => setSuccess(""), 3000);
+      
+      // If the cleared period was selected, refresh the records view
+      if (selectedPeriod === periodToClear.id) {
+        setPayrollRecords([]);
+        setNoRecordsMessage("No payroll records found for this period");
+        setSummary(null);
+      }
+      
+      setShowClearRecordsModal(false);
+      setPeriodToClear(null);
+      
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(""), 5000);
+    } finally {
+      setIsClearingRecords(false);
     }
   };
 
@@ -307,6 +886,305 @@ function Payroll() {
     }
   };
 
+  // ==================== PENDING CREDITS FUNCTIONS ====================
+
+  const checkPendingCreditsBeforeGenerate = async (periodId) => {
+    try {
+        setIsCheckingCredits(true);
+        const token = getToken();
+        
+        const res = await fetch(`${API_BASE_URL}/api/payroll/pending-credits/check/${periodId}`, {
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+        });
+        
+        if (!res.ok) throw new Error("Failed to check pending credits");
+        
+        const data = await res.json();
+        
+        if (data.hasPendingCredits && data.pendingCredits.length > 0) {
+            setPendingCreditsList(data.pendingCredits);
+            const allCreditIds = new Set(data.pendingCredits.map(credit => credit.id));
+            setSelectedCreditIds(allCreditIds);
+            const total = data.pendingCredits
+                .filter(credit => allCreditIds.has(credit.id))
+                .reduce((sum, credit) => sum + credit.amount, 0);
+            setTotalSelectedCreditAmount(total);
+            setShowCreditSelectionModal(true);
+            return false;
+        } else {
+            await callOriginalGeneratePayroll(periodId);
+            return true;
+        }
+    } catch (err) {
+        console.warn("Pending credits check failed, proceeding with normal payroll:", err.message);
+        await callOriginalGeneratePayroll(periodId);
+        return true;
+    } finally {
+        setIsCheckingCredits(false);
+    }
+  };
+
+  const callOriginalGeneratePayroll = async (periodId) => {
+    try {
+      setLoading(true);
+      const token = getToken();
+
+      const formattedTemporaryAllowances = {};
+      Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
+        formattedTemporaryAllowances[employeeId] = {
+          housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
+          tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
+          clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
+          otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
+          nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
+        };
+      });
+
+      const payload = {
+        periodId,
+        temporaryAllowances: formattedTemporaryAllowances,
+        creditAmounts: creditAmounts,
+        settings: {
+          hourlyRate: settings.hourlyRate || 15.0,
+          overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
+          weekendRate: settings.weekendRate || 1.25,
+          holidayRate: settings.holidayRate || 1.5,
+          weekendDays: settings.weekendDays || [0, 6],
+          holidays: settings.holidays || [],
+          standardWorkHours: settings.standardWorkHours || 8,
+        },
+        includeBasicSalary,
+      };
+
+      console.log("Sending payroll generation payload:", payload);
+
+      const res = await fetch(`${API_BASE_URL}/api/payroll/generate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to generate payroll");
+      }
+
+      setSuccess("Payroll generated successfully");
+      setTimeout(() => setSuccess(""), 3000);
+      setCreditAmounts({});
+
+      setTimeout(() => {
+        fetchPayrollRecords(periodId);
+        fetchPayrollSummary(periodId);
+      }, 1000);
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(""), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplySelectedCredits = async () => {
+    try {
+        setLoading(true);
+        const token = getToken();
+
+        const formattedTemporaryAllowances = {};
+        Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
+            formattedTemporaryAllowances[employeeId] = {
+                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
+                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
+                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
+                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
+                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
+            };
+        });
+
+        const payload = {
+            periodId: selectedPeriod,
+            selectedCreditIds: Array.from(selectedCreditIds),
+            temporaryAllowances: formattedTemporaryAllowances,
+            directCreditAmounts: creditAmounts,
+            settings: {
+                hourlyRate: settings.hourlyRate || 15.0,
+                overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
+                weekendRate: settings.weekendRate || 1.25,
+                holidayRate: settings.holidayRate || 1.5,
+                weekendDays: settings.weekendDays || [0, 6],
+                holidays: settings.holidays || [],
+                standardWorkHours: settings.standardWorkHours || 8,
+            },
+            includeBasicSalary: includeBasicSalary,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Failed to generate payroll with credits");
+        }
+
+        setSuccess(`Payroll generated successfully with ${selectedCreditIds.size} credit(s) applied`);
+        setTimeout(() => setSuccess(""), 3000);
+        
+        setCreditAmounts({});
+        setSelectedCreditIds(new Set());
+        setShowCreditSelectionModal(false);
+        
+        setTimeout(() => {
+            fetchPayrollRecords(selectedPeriod);
+            fetchPayrollSummary(selectedPeriod);
+        }, 1000);
+        
+    } catch (err) {
+        setError(err.message);
+        setTimeout(() => setError(""), 5000);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const handleSkipAllCredits = async () => {
+    try {
+        setLoading(true);
+        const token = getToken();
+
+        const formattedTemporaryAllowances = {};
+        Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
+            formattedTemporaryAllowances[employeeId] = {
+                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
+                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
+                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
+                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
+                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
+            };
+        });
+
+        const payload = {
+            periodId: selectedPeriod,
+            selectedCreditIds: [],
+            temporaryAllowances: formattedTemporaryAllowances,
+            directCreditAmounts: creditAmounts,
+            settings: {
+                hourlyRate: settings.hourlyRate || 15.0,
+                overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
+                weekendRate: settings.weekendRate || 1.25,
+                holidayRate: settings.holidayRate || 1.5,
+                weekendDays: settings.weekendDays || [0, 6],
+                holidays: settings.holidays || [],
+                standardWorkHours: settings.standardWorkHours || 8,
+            },
+            includeBasicSalary: includeBasicSalary,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Failed to generate payroll");
+        }
+
+        setSuccess("Payroll generated successfully (credits skipped)");
+        setTimeout(() => setSuccess(""), 3000);
+        
+        setCreditAmounts({});
+        setSelectedCreditIds(new Set());
+        setShowCreditSelectionModal(false);
+        
+        setTimeout(() => {
+            fetchPayrollRecords(selectedPeriod);
+            fetchPayrollSummary(selectedPeriod);
+        }, 1000);
+        
+    } catch (err) {
+        setError(err.message);
+        setTimeout(() => setError(""), 5000);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const toggleCreditSelection = (creditId) => {
+    const newSelected = new Set(selectedCreditIds);
+    if (newSelected.has(creditId)) {
+      newSelected.delete(creditId);
+    } else {
+      newSelected.add(creditId);
+    }
+    setSelectedCreditIds(newSelected);
+    
+    const total = pendingCreditsList
+      .filter(credit => newSelected.has(credit.id))
+      .reduce((sum, credit) => sum + credit.amount, 0);
+    setTotalSelectedCreditAmount(total);
+  };
+
+  const selectAllCredits = () => {
+    const allIds = new Set(pendingCreditsList.map(credit => credit.id));
+    setSelectedCreditIds(allIds);
+    const total = pendingCreditsList.reduce((sum, credit) => sum + credit.amount, 0);
+    setTotalSelectedCreditAmount(total);
+  };
+
+  const deselectAllCredits = () => {
+    setSelectedCreditIds(new Set());
+    setTotalSelectedCreditAmount(0);
+  };
+
+  const addPendingCredit = async () => {
+    if (!newPendingCredit.employeeId) {
+      setError("Please select an employee");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+    
+    if (!newPendingCredit.amount || parseFloat(newPendingCredit.amount) <= 0) {
+      setError("Please enter a valid credit amount");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+    
+    try {
+      const token = getToken();
+      const payload = {
+        employeeId: parseInt(newPendingCredit.employeeId),
+        amount: parseFloat(newPendingCredit.amount),
+        reason: newPendingCredit.reason,
+        createdBy: user?.name || "System"
+      };
+      
+      const res = await fetch(`${API_BASE_URL}/api/payroll/pending-credits`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to add pending credit");
+      }
+      
+      setSuccess(`Pending credit of GHS ${parseFloat(newPendingCredit.amount).toFixed(2)} added successfully`);
+      setTimeout(() => setSuccess(""), 3000);
+      
+      setShowAddPendingCreditModal(false);
+      setNewPendingCredit({ employeeId: "", amount: "", reason: "" });
+      
+    } catch (err) {
+      setError(err.message);
+      setTimeout(() => setError(""), 5000);
+    }
+  };
+
   const fetchPayrollSummary = async (periodId) => {
     if (!periodId) {
       setSummary(null);
@@ -315,31 +1193,20 @@ function Payroll() {
     
     try {
       const token = getToken();
-      const selectedPeriodObj = payrollPeriods.find(p => p.id === periodId);
+      const res = await fetch(`${API_BASE_URL}/api/payroll/period-summary/${periodId}`, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
       
-      if (selectedPeriodObj?.category) {
-        const res = await fetch(`${API_BASE_URL}/api/payroll/summary/category/${selectedPeriodObj.category}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-        
-        if (!res.ok) throw new Error("Failed to fetch payroll summary by category");
-        const data = await res.json();
-        setSummary(data);
-      } else {
-        const res = await fetch(`${API_BASE_URL}/api/payroll/period-summary/${periodId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-        
-        if (!res.ok) throw new Error("Failed to fetch period summary");
-        const data = await res.json();
-        setSummary(data);
+      if (!res.ok) {
+        if (payrollRecords.length > 0) {
+          calculateLocalSummary(payrollRecords);
+        }
+        return;
       }
+      
+      const data = await res.json();
+      setSummary(data);
+      
     } catch (err) {
       console.error("Error fetching summary:", err);
       if (payrollRecords.length > 0) {
@@ -432,114 +1299,8 @@ function Payroll() {
   }, [payrollRecords]);
 
   const generatePayroll = async (periodId) => {
-    try {
-      const token = getToken();
-
-      const formattedTemporaryAllowances = {};
-      Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-        formattedTemporaryAllowances[employeeId] = {
-          housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-          tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-          clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-          otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-          nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-        };
-      });
-
-      const payload = {
-        periodId,
-        temporaryAllowances: formattedTemporaryAllowances,
-        creditAmounts: creditAmounts, 
-        settings: {
-          hourlyRate: settings.hourlyRate || 15.0,
-          overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
-          weekendRate: settings.weekendRate || 1.25,
-          holidayRate: settings.holidayRate || 1.5,
-          weekendDays: settings.weekendDays || [0, 6],
-          holidays: settings.holidays || [],
-          standardWorkHours: settings.standardWorkHours || 8,
-        },
-        includeBasicSalary, 
-      };
-
-      console.log("Sending payroll generation with temporary allowances:", payload);
-
-      const res = await fetch(`${API_BASE_URL}/api/payroll/generate`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Failed to generate payroll");
-      }
-
-      setSuccess("Payroll generated successfully with temporary allowances");
-      setTimeout(() => setSuccess(""), 3000);
-      setCreditAmounts({});
-
-      setTimeout(() => {
-        fetchPayrollRecords(periodId);
-        fetchPayrollSummary();
-      }, 1000);
-    } catch (err) {
-      setError(err.message);
-      setTimeout(() => setError(""), 5000);
-    }
-  };
-
-  const calculateLeaveDaysPerEmployee = (leaves, periodStart, periodEnd) => {
-    const leaveDaysByEmployee = {};
-
-    leaves.forEach((leave) => {
-      if (leave.status === "Approved" && leave.employee?.id) {
-        const employeeId = leave.employee.id;
-        const leaveStart = new Date(leave.startDate);
-        const leaveEnd = new Date(leave.endDate);
-        const periodStartDate = new Date(periodStart);
-        const periodEndDate = new Date(periodEnd);
-
-        const overlapStart = leaveStart < periodStartDate ? periodStartDate : leaveStart;
-        const overlapEnd = leaveEnd > periodEndDate ? periodEndDate : leaveEnd;
-
-        if (overlapStart <= overlapEnd) {
-          const overlapDays = calculateWorkingDaysInRange(overlapStart, overlapEnd);
-
-          if (!leaveDaysByEmployee[employeeId]) {
-            leaveDaysByEmployee[employeeId] = 0;
-          }
-          leaveDaysByEmployee[employeeId] += overlapDays;
-        }
-      }
-    });
-
-    return leaveDaysByEmployee;
-  };
-
-  const calculateWorkingDaysInRange = (startDate, endDate) => {
-    let count = 0;
-    const current = new Date(startDate);
-    const end = new Date(endDate);
-
-    while (current <= end) {
-      const dayOfWeek = current.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        count++;
-      }
-      current.setDate(current.getDate() + 1);
-    }
-
-    return count;
-  };
-
-  const isLeaveInPeriod = (leave, periodStart, periodEnd) => {
-    const leaveStart = new Date(leave.startDate);
-    const leaveEnd = new Date(leave.endDate);
-    const payrollStart = new Date(periodStart);
-    const payrollEnd = new Date(periodEnd);
-
-    return leaveStart <= payrollEnd && leaveEnd >= payrollStart;
+    await checkPendingCreditsBeforeGenerate(periodId);
+    await checkPayrollPreviewBeforeGenerate(periodId);
   };
 
   const processPayroll = async (periodId) => {
@@ -556,7 +1317,7 @@ function Payroll() {
       setSuccess("Payroll processed successfully");
       setTimeout(() => setSuccess(""), 3000);
       fetchPayrollRecords(periodId);
-      fetchPayrollSummary();
+      fetchPayrollSummary(periodId);
     } catch (err) {
       setError(err.message);
       setTimeout(() => setError(""), 5000);
@@ -676,6 +1437,39 @@ function Payroll() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Payroll");
     const fileName = `Payroll-Ssnit-Upload-${selectedPeriod || "period"}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
+
+  const exportTierTwoSpreadsheet = () => {
+    if (!payrollRecords || payrollRecords.length === 0) {
+      setError("No payroll records available to export");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+
+    const rows = payrollRecords.map((record) => {
+      const employee = record.employee || {};
+      const beneficiaryAccount = employee.tierTwoAccountNumber || "";
+      const tierTwoAccountName = employee.tierTwoAccountName || "";
+      const baseNumber = employee.baseNumber || "";
+      const ssnitNumber = employee.ssnitNumber || "";
+      const basicSalary = record.basicSalary || "";
+      const tier2Amount = record.tier2Amount || "";
+
+      return {
+        "Employee": tierTwoAccountName,
+        "Base Number": baseNumber,
+        "SSN": ssnitNumber,
+        "Basic Salary": basicSalary,
+        "5% Contribution": tier2Amount 
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Payroll");
+    const fileName = `EAC-TIER2-CONTRIBUTION-${selectedPeriod || "period"}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
 
@@ -817,9 +1611,7 @@ function Payroll() {
     return (record.rentAllowance || 0) + (record.transportAllowance || 0) + (record.clothingAllowance || 0) + (record.otherAllowance || 0) + (record.nssAllowance || 0) + (record.overtimePay || 0);
   };
 
-  const hasEmployeeData = (record) => {
-    return record && record.employee && record.employee.firstName;
-  };
+  const formatCurrency = (amount) => new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS" }).format(amount || 0);
 
   const toggleEmployeeSelection = (employeeId) => {
     if (selectedEmployees.includes(employeeId)) {
@@ -906,8 +1698,6 @@ function Payroll() {
     setRecordsPage(1);
     setRecordSearch("");
   }, [selectedPeriod]);
-
-  const formatCurrency = (amount) => new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS" }).format(amount || 0);
 
   const getAllowanceLabel = (type) => {
     const labels = {
@@ -1041,44 +1831,43 @@ function Payroll() {
     setTimeout(() => setSuccess(""), 3000);
   };
 
-  // NEW: Function to group payroll periods by month and category
-// NEW: Function to group payroll periods by month based on END DATE
-const getGroupedPeriods = () => {
-  const grouped = {};
-  
-  payrollPeriods.forEach(period => {
-    if (!period.endDate) return;
+  // Function to group payroll periods by month based on END DATE
+  const getGroupedPeriods = () => {
+    const grouped = {};
     
-    const date = new Date(period.endDate);
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const monthName = date.toLocaleString('default', { month: 'long' });
-    const monthKey = `${year}-${month}`;
+    payrollPeriods.forEach(period => {
+      if (!period.endDate) return;
+      
+      const date = new Date(period.endDate);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const monthName = date.toLocaleString('default', { month: 'long' });
+      const monthKey = `${year}-${month}`;
+      
+      if (!grouped[monthKey]) {
+        grouped[monthKey] = {
+          year,
+          month,
+          monthName,
+          periods: []
+        };
+      }
+      
+      grouped[monthKey].periods.push(period);
+    });
     
-    if (!grouped[monthKey]) {
-      grouped[monthKey] = {
-        year,
-        month,
-        monthName,
-        periods: []
-      };
-    }
+    // Sort months in descending order (most recent first)
+    const sortedMonths = Object.keys(grouped).sort((a, b) => {
+      const [yearA, monthA] = a.split('-').map(Number);
+      const [yearB, monthB] = b.split('-').map(Number);
+      if (yearA !== yearB) return yearB - yearA;
+      return monthB - monthA;
+    });
     
-    grouped[monthKey].periods.push(period);
-  });
-  
-  // Sort months in descending order (most recent first)
-  const sortedMonths = Object.keys(grouped).sort((a, b) => {
-    const [yearA, monthA] = a.split('-').map(Number);
-    const [yearB, monthB] = b.split('-').map(Number);
-    if (yearA !== yearB) return yearB - yearA;
-    return monthB - monthA;
-  });
-  
-  return { grouped, sortedMonths };
-};
+    return { grouped, sortedMonths };
+  };
 
-  // NEW: Toggle month expansion
+  // Toggle month expansion
   const toggleMonth = (monthKey) => {
     setExpandedMonths(prev => ({
       ...prev,
@@ -1086,7 +1875,7 @@ const getGroupedPeriods = () => {
     }));
   };
 
-  // NEW: Expand all months
+  // Expand all months
   const expandAllMonths = () => {
     const { grouped } = getGroupedPeriods();
     const allExpanded = {};
@@ -1096,7 +1885,7 @@ const getGroupedPeriods = () => {
     setExpandedMonths(allExpanded);
   };
 
-  // NEW: Collapse all months
+  // Collapse all months
   const collapseAllMonths = () => {
     setExpandedMonths({});
   };
@@ -1105,8 +1894,6 @@ const getGroupedPeriods = () => {
 
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-
-      
       <div 
         className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
           sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
@@ -1129,7 +1916,6 @@ const getGroupedPeriods = () => {
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
         }`}
       >
-        {/* Header Component - REPLACE the old header section */}
         <Header
           toggleSidebar={toggleSidebar}
           user={user}
@@ -1142,7 +1928,7 @@ const getGroupedPeriods = () => {
               <h1 className="text-2xl font-bold text-gray-800">Payroll Management</h1>
               <p className="text-gray-600">Manage employee payroll and compensation</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => setShowAllowanceModal(true)}
                 className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg flex items-center"
@@ -1155,6 +1941,15 @@ const getGroupedPeriods = () => {
                   />
                 </svg>
                 Add Temporary Allowances
+              </button>
+              <button
+                onClick={openMonthExportModal}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded-lg flex items-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                </svg>
+                Export Monthly Data
               </button>
               <Link to="/payslip">
                 <button className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg flex items-center">
@@ -1213,7 +2008,7 @@ const getGroupedPeriods = () => {
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-4 flex-wrap">
             {selectedPeriod && (
               <>
                 <button
@@ -1278,29 +2073,50 @@ const getGroupedPeriods = () => {
                   Export Summary
                 </button>
                 <button
-                  onClick={openCreditModal}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-4 rounded-md flex items-center"
-                  title="Add credits to employees"
+                  onClick={() => setShowAddPendingCreditModal(true)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white py-2 px-4 rounded-md flex items-center"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662c.722-.481 1.324-1.256 1.324-2.246 0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.51-1.31c-.562-.649-1.413-1.076-2.353-1.253V5z" clipRule="evenodd" />
+                    <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
                   </svg>
-                  Add Credits
+                  Add Pending Credit
                 </button>
                 <button
-                  onClick={exportBankSpreadsheet}
-                  disabled={!selectedPeriod || payrollRecords.length === 0}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-md flex items-center"
-                >
-                  Export Bank
-                </button>
+  onClick={openBankExportModal}
+  disabled={payrollRecords.length === 0 && payrollPeriods.length === 0}
+  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-md flex items-center"
+>
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+    <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+  </svg>
+  Export Bank (Monthly)
+</button>
+
+{/* Keep the original Export Bank button for current period if needed */}
+<button
+  onClick={exportBankSpreadsheet}
+  disabled={!selectedPeriod || payrollRecords.length === 0}
+  className="bg-teal-600 hover:bg-teal-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-md flex items-center"
+>
+  Export Bank (Current Period)
+</button>
+
+
                 <button
                   onClick={exportSsnitSpreadsheet}
                   disabled={!selectedPeriod || payrollRecords.length === 0}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-md flex items-center"
                 >
                   Export SSNIT
+                </button>
+                
+                <button
+                  onClick={exportTierTwoSpreadsheet}
+                  disabled={!selectedPeriod || payrollRecords.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white py-2 px-4 rounded-md flex items-center"
+                >
+                  Export TIER 2
                 </button>
               </>
             )}
@@ -1432,7 +2248,7 @@ const getGroupedPeriods = () => {
           </div>
 
           {/* Payroll Periods - Grouped by Month */}
-          <div className="overfl mb-6 bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="overflow mb-6 bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="p-4 border-b border-gray-200 flex justify-between items-center">
               <h2 className="text-lg font-semibold text-gray-800">Payroll Periods by Month</h2>
               <div className="flex gap-2">
@@ -1540,6 +2356,20 @@ const getGroupedPeriods = () => {
                                   >
                                     Process
                                   </button>
+                                  <button 
+                                    onClick={() => openEditPeriodModal(p)} 
+                                    className="text-yellow-600 hover:text-yellow-800 font-medium px-2 py-1 rounded"
+                                    title="Edit Period"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button 
+                                    onClick={() => openClearRecordsModal(p)} 
+                                    className="text-red-600 hover:text-red-800 font-medium px-2 py-1 rounded"
+                                    title="Clear Records"
+                                  >
+                                    Clear
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -1555,7 +2385,7 @@ const getGroupedPeriods = () => {
 
           {/* Payroll Records Table */}
           {selectedPeriod && (
-            <div className="overflow-x-auto mt-6 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="mt-6 bg-white rounded-lg shadow-sm border border-gray-200">
               {loading ? (
                 <div className="flex justify-center items-center h-32">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -1639,7 +2469,7 @@ const getGroupedPeriods = () => {
                       </button>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto" style={{ overflowX: 'auto', overflowY: 'visible' }}>
                       <table className="min-w-full text-left text-sm text-gray-700">
                         <thead>
                           <tr className="bg-gray-100">
@@ -1669,11 +2499,12 @@ const getGroupedPeriods = () => {
                             <th className="px-4 py-3 font-medium">Non-Taxable Income</th>
                             <th className="px-4 py-3 font-medium">Tax</th>
                             <th className="px-4 py-3 font-medium">Credit Amount</th>
+                            <th className="px-4 py-3 font-medium">Loan Deduction</th>
                             <th className="px-4 py-3 font-medium">Net Salary</th>
                             <th className="px-4 py-3 font-medium">Employer Cost</th>
                             <th className="px-4 py-3 font-medium">Status</th>
                             <th className="px-4 py-3 font-medium">Actions</th>
-                           </tr>
+                          </tr>
                         </thead>
                         <tbody>
                           {paginatedPayrollRecords.map((r, idx) => {
@@ -1698,7 +2529,7 @@ const getGroupedPeriods = () => {
                                       </span>
                                     )}
                                   </div>
-                                 </td>
+                                </td>
                                 <td className="px-4 py-3">{r.totalDaysInPeriod || 'N/A'}</td>
                                 <td className={`px-4 py-3 ${hasLeaveDays ? 'bg-blue-50 font-medium text-blue-700' : ''}`}>
                                   {r.leaveDays || 0}
@@ -1719,7 +2550,6 @@ const getGroupedPeriods = () => {
                                     </span>
                                   )}
                                 </td>
-                               
                                 <td className="px-4 py-3">{r.workingDays}</td>
                                 <td className="px-4 py-3 font-semibold text-gray-800">
                                   {(r.workingDays || 0) + (r.leaveDays || 0)}
@@ -1773,7 +2603,14 @@ const getGroupedPeriods = () => {
                                     {r.useNonTaxableAllowances ? 'Non-Taxable' : 'Taxable'}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3">{formatCurrency(r.ssnitEmployee)}</td>
+                                <td className="px-4 py-3">
+                                  {formatCurrency(r.ssnitEmployee)}
+                                  {r.excludeFromSsnit && (
+                                    <span className="ml-2 bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded-full">
+                                      Excluded
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3">{formatCurrency(r.ssnitEmployer)}</td>
                                 <td className="px-4 py-3">
                                   {formatCurrency((r.ssnitEmployee || 0) + (r.ssnitEmployer || 0))}
@@ -1802,6 +2639,7 @@ const getGroupedPeriods = () => {
                                     </button>
                                   )}
                                 </td>
+                                <td className="px-4 py-3">{formatCurrency(r.loanDeduction || 0)}</td>
                                 <td className="px-4 py-3 font-medium text-green-600">{formatCurrency(r.netSalary)}</td>
                                 <td className="px-4 py-3 font-medium text-green-500">
                                   {formatCurrency((r.grossSalary || 0) + (r.ssnitEmployer || 0))}
@@ -1839,6 +2677,112 @@ const getGroupedPeriods = () => {
           )}
         </main>
       </div>
+
+      {/* Month Export Modal */}
+      {showMonthExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Export Monthly Payroll Data</h2>
+              <button 
+                onClick={() => setShowMonthExportModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Year</label>
+                <select
+                  value={selectedExportYear}
+                  onChange={(e) => setSelectedExportYear(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {getAvailableYears().map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                  {getAvailableYears().length === 0 && (
+                    <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Month</label>
+                <select
+                  value={selectedExportMonth}
+                  onChange={(e) => setSelectedExportMonth(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Select a month</option>
+                  <option value="0">January</option>
+                  <option value="1">February</option>
+                  <option value="2">March</option>
+                  <option value="3">April</option>
+                  <option value="4">May</option>
+                  <option value="5">June</option>
+                  <option value="6">July</option>
+                  <option value="7">August</option>
+                  <option value="8">September</option>
+                  <option value="9">October</option>
+                  <option value="10">November</option>
+                  <option value="11">December</option>
+                </select>
+              </div>
+
+              <div className="bg-indigo-50 p-3 rounded-md border border-indigo-200">
+                <div className="flex items-start gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-500 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                  <div className="text-sm text-indigo-700">
+                    <p className="font-medium">Export includes:</p>
+                    <ul className="list-disc list-inside mt-1 space-y-1">
+                      <li>All payroll periods ending in the selected month</li>
+                      <li>Separate Excel sheets for each category found</li>
+                      <li>Summary sheet with category totals</li>
+                      <li>Complete "All Records" sheet for reference</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowMonthExportModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+                disabled={exportingMonthData}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={exportMonthByCategory}
+                disabled={!selectedExportMonth || exportingMonthData}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-gray-400 flex items-center gap-2"
+              >
+                {exportingMonthData ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Export Monthly Data
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Allowance Modal */}
       {showAllowanceModal && (
@@ -2042,14 +2986,14 @@ const getGroupedPeriods = () => {
         </div>
       )}
 
-      {/* Credit Modal */}
-      {showCreditModal && (
+      {/* Add Pending Credit Modal */}
+      {showAddPendingCreditModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-screen flex flex-col">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-800">Add Credits</h2>
+              <h2 className="text-xl font-bold text-gray-800">Add Pending Credit</h2>
               <button 
-                onClick={() => setShowCreditModal(false)}
+                onClick={() => setShowAddPendingCreditModal(false)}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2058,143 +3002,524 @@ const getGroupedPeriods = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2">
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-6">
-                <div className="flex items-start">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600 mr-2 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                  </svg>
-                  <div>
-                    <h3 className="text-sm font-medium text-blue-800">Credits Notice</h3>
-                    <p className="text-sm text-blue-700 mt-1">
-                      Credits are added to the employee's net salary AFTER all regular calculations and deductions.
-                      This is useful for bonuses, adjustments, or special payments.
-                    </p>
-                  </div>
-                </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Employee</label>
+                <select
+                  value={newPendingCredit.employeeId}
+                  onChange={(e) => setNewPendingCredit({ ...newPendingCredit, employeeId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">Select an employee</option>
+                  {filteredEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.firstName} {emp.lastName} - {emp.employeeId || 'No ID'}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Credit Amount (GHS)
-                </label>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Credit Amount (GHS)</label>
                 <input
                   type="number"
-                  value={creditValue}
-                  onChange={(e) => setCreditValue(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter amount to credit"
+                  value={newPendingCredit.amount}
+                  onChange={(e) => setNewPendingCredit({ ...newPendingCredit, amount: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Enter amount"
                   step="0.01"
                   min="0"
                 />
               </div>
 
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={creditDescription}
-                  onChange={(e) => setCreditDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Reason for credit (e.g., Performance Bonus)"
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reason (Optional)</label>
+                <textarea
+                  value={newPendingCredit.reason}
+                  onChange={(e) => setNewPendingCredit({ ...newPendingCredit, reason: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Reason for credit (e.g., Bonus, Correction)"
+                  rows="3"
                 />
               </div>
 
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
-                  <input
-                    type="text"
-                    placeholder="Filter by grade"
-                    value={filters.grade}
-                    onChange={(e) => setFilters({ ...filters, grade: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
-                  <input
-                    type="text"
-                    placeholder="Filter by work type"
-                    value={filters.workType}
-                    onChange={(e) => setFilters({ ...filters, workType: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <input
-                    type="text"
-                    placeholder="Filter by category"
-                    value={filters.category}
-                    onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="text-lg font-medium text-gray-800">Select Employees</h3>
-                  <button 
-                    onClick={selectAllEmployeesForCredit}
-                    className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
-                  >
-                    {selectedEmployeesForCredit.length === filteredEmployees.length ? 'Deselect All' : 'Select All'}
-                  </button>
-                </div>
-                <div className="border border-gray-200 rounded-md overflow-hidden max-h-60 overflow-y-auto">
-                  {filteredEmployees.length > 0 ? (
-                    <div>
-                      {filteredEmployees.map(employee => {
-                        const hasExistingCredit = creditAmounts[employee.id];
-                        return (
-                          <div key={employee.id} className="flex items-center p-3 border-b border-gray-200 hover:bg-gray-50">
-                            <input
-                              type="checkbox"
-                              checked={selectedEmployeesForCredit.includes(employee.id)}
-                              onChange={() => toggleEmployeeCreditSelection(employee.id)}
-                              className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500"
-                            />
-                            <span className="ml-3 text-gray-700 flex-1">
-                              {employee.firstName} {employee.lastName} - {employee.department || 'No Department'}
-                            </span>
-                            {hasExistingCredit && (
-                              <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                                Current: GHS {creditAmounts[employee.id].toFixed(2)}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="p-4 text-center text-gray-500">No employees found</div>
-                  )}
-                </div>
+              <div className="bg-amber-50 p-3 rounded-md border border-amber-200">
+                <p className="text-sm text-amber-700">
+                  <strong>Note:</strong> This credit will be stored as PENDING and will appear in the credit selection popup the next time you generate payroll for a period that includes this employee.
+                </p>
               </div>
             </div>
 
-            <div className="flex justify-end space-x-3 mt-4">
+            <div className="flex justify-end space-x-3 mt-6">
               <button
-                onClick={() => setShowCreditModal(false)}
+                onClick={() => setShowAddPendingCreditModal(false)}
                 className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
               >
                 Cancel
               </button>
               <button
-                onClick={applyCredits}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                disabled={selectedEmployeesForCredit.length === 0 || !creditValue || parseFloat(creditValue) <= 0}
+                onClick={addPendingCredit}
+                className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"
+                disabled={!newPendingCredit.employeeId || !newPendingCredit.amount || parseFloat(newPendingCredit.amount) <= 0}
               >
-                Apply Credit to {selectedEmployeesForCredit.length} Employee{selectedEmployeesForCredit.length !== 1 ? 's' : ''}
+                Add Pending Credit
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Credit & Loan Selection Modal */}
+{showCreditSelectionModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+      {/* Modal Header */}
+      <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-t-lg">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Payroll Preview</h2>
+          <p className="text-gray-600 mt-1">
+            Review pending credits and active loans before generating payroll.
+          </p>
+        </div>
+        <button 
+          onClick={() => setShowCreditSelectionModal(false)}
+          className="text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Tab navigation */}
+      <div className="flex border-b border-gray-200 bg-gray-50 px-6">
+        <button
+          className={`py-3 px-4 font-medium text-sm focus:outline-none ${
+            activeTab === 'credits' 
+              ? 'text-indigo-600 border-b-2 border-indigo-600' 
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+          onClick={() => setActiveTab('credits')}
+        >
+          Pending Credits {pendingCreditsList.length > 0 && `(${pendingCreditsList.length})`}
+        </button>
+        <button
+          className={`py-3 px-4 font-medium text-sm focus:outline-none ${
+            activeTab === 'loans' 
+              ? 'text-indigo-600 border-b-2 border-indigo-600' 
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+          onClick={() => setActiveTab('loans')}
+        >
+          Active Loans {activeLoansList.length > 0 && `(${activeLoansList.length})`}
+        </button>
+      </div>
+
+      {/* Modal Body - Credits Tab */}
+      {activeTab === 'credits' && (
+        <div className="flex-1 overflow-y-auto p-6">
+          {pendingCreditsList.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">No pending credits found.</div>
+          ) : (
+            <>
+              {/* Selection Controls */}
+              <div className="flex justify-between items-center mb-4 p-3 bg-gray-50 rounded-lg">
+                <div className="flex gap-3">
+                  <button onClick={selectAllCredits} className="px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded-md hover:bg-indigo-200">Select All</button>
+                  <button onClick={deselectAllCredits} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Deselect All</button>
+                </div>
+                <div className="text-sm text-gray-600"><span className="font-medium">{selectedCreditIds.size}</span> of <span className="font-medium">{pendingCreditsList.length}</span> selected</div>
+              </div>
+
+              {/* Credits Table */}
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-12">Select</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {pendingCreditsList.map((credit) => (
+                      <tr key={credit.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <input type="checkbox" checked={selectedCreditIds.has(credit.id)} onChange={() => toggleCreditSelection(credit.id)} className="h-4 w-4 text-indigo-600 rounded border-gray-300" />
+                        </td>
+                        <td className="px-4 py-3 font-medium">{credit.employeeName}</td>
+                        <td className="px-4 py-3 text-right text-green-600 font-semibold">GHS {credit.amount.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{credit.reason || "—"}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{new Date(credit.createdDate).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 p-4 bg-indigo-50 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-indigo-800">Total Selected Credits:</span>
+                  <span className="text-2xl font-bold text-indigo-900">GHS {totalSelectedCreditAmount.toFixed(2)}</span>
+                </div>
+                <p className="text-xs text-indigo-600 mt-2">Credits are added to net salary after tax and SSNIT.</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+  {/* Modal Body - Loans Tab (simple: employee + deduction amount) */}
+{activeTab === 'loans' && (
+  <div className="flex-1 overflow-y-auto p-6">
+    {activeLoansList.length === 0 ? (
+      <div className="text-center py-8 text-gray-500">No active loans for employees in this period.</div>
+    ) : (
+      <>
+        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount to Deduct (GHS)</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {activeLoansList.map((employeeLoan) => (
+                <tr key={employeeLoan.employeeId} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{employeeLoan.employeeName}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-green-600">
+                    GHS {employeeLoan.totalMonthlyDeduction.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <p className="text-sm text-blue-700">
+            <strong>Note:</strong> The amounts shown above will be automatically deducted from each employee’s net salary when you generate payroll.
+          </p>
+        </div>
+      </>
+    )}
+  </div>
+)}
+
+      {/* Modal Footer */}
+      <div className="flex justify-between items-center p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+        <button onClick={() => setShowCreditSelectionModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">Cancel</button>
+        <div className="flex gap-3">
+          <button onClick={handleSkipAllCredits} className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Skip All Credits</button>
+          <button onClick={handleApplySelectedCredits} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Generate Payroll</button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+      {/* Edit Period Modal */}
+      {showEditPeriodModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Edit Payroll Period</h2>
+              <button 
+                onClick={() => setShowEditPeriodModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Period Name</label>
+                <input
+                  type="text"
+                  value={editPeriodData.name}
+                  onChange={(e) => setEditPeriodData({ ...editPeriodData, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={editPeriodData.startDate}
+                    onChange={(e) => setEditPeriodData({ ...editPeriodData, startDate: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={editPeriodData.endDate}
+                    onChange={(e) => setEditPeriodData({ ...editPeriodData, endDate: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                <select
+                  value={editPeriodData.category}
+                  onChange={(e) => setEditPeriodData({ ...editPeriodData, category: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select Category</option>
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="editConvertExcessToOvertime"
+                  checked={editPeriodData.convertExcessToOvertime !== false}
+                  onChange={(e) => setEditPeriodData({ ...editPeriodData, convertExcessToOvertime: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                />
+                <label htmlFor="editConvertExcessToOvertime" className="ml-2 text-sm text-gray-700">
+                  Convert excess days to overtime
+                </label>
+                <span className="ml-2 text-xs text-gray-500">
+                  (When unchecked, all days worked count as regular days)
+                </span>
+              </div>
+
+              <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200 mt-4">
+                <p className="text-sm text-yellow-700">
+                  <strong>Note:</strong> Editing a period will not automatically recalculate existing payroll records. 
+                  You may need to regenerate payroll for this period after making changes.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowEditPeriodModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={updatePayrollPeriod}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                disabled={loading}
+              >
+                {loading ? "Updating..." : "Update Period"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear Records Confirmation Modal */}
+{showClearRecordsModal && periodToClear && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-lg p-6 w-full max-w-md">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold text-gray-800">Clear Payroll Records</h2>
+        <button 
+          onClick={() => setShowClearRecordsModal(false)}
+          className="text-gray-500 hover:text-gray-700"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+          <div className="flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p className="text-red-800 font-medium">Warning: This action cannot be undone!</p>
+              <p className="text-red-700 text-sm mt-1">
+                You are about to delete all payroll records for the period:
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <p className="font-semibold text-gray-800">{periodToClear.name}</p>
+          <p className="text-sm text-gray-600 mt-1">
+            {periodToClear.startDate} to {periodToClear.endDate}
+          </p>
+          {periodToClear.category && (
+            <span className="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+              {periodToClear.category}
+            </span>
+          )}
+        </div>
+
+        {/* NEW: Explanation of what will be reverted */}
+        <div className="bg-blue-50 p-3 rounded-md border border-blue-200">
+          <p className="text-sm font-medium text-blue-800 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            What will be reverted:
+          </p>
+          <ul className="text-sm text-blue-700 list-disc list-inside mt-2 space-y-1">
+            <li><strong>Loan deductions</strong> – Employee loan balances will be restored to their state before this period</li>
+            <li><strong>Pending credits</strong> – Any credits applied during payroll generation will be marked as PENDING again</li>
+            <li><strong>Payroll records</strong> – All generated payslip data will be permanently deleted</li>
+          </ul>
+          <p className="text-xs text-blue-600 mt-2 italic">
+            After clearing, you can regenerate payroll for this period with a fresh calculation.
+          </p>
+        </div>
+
+        <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+          <p className="text-sm text-yellow-700 font-medium">Important Note:</p>
+          <p className="text-sm text-yellow-700 mt-1">
+            Loan balances and pending credits are restored automatically. This ensures no double-deductions if you regenerate.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex justify-end space-x-3 mt-6">
+        <button
+          onClick={() => setShowClearRecordsModal(false)}
+          className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+          disabled={isClearingRecords}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={clearPayrollRecords}
+          className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+          disabled={isClearingRecords}
+        >
+          {isClearingRecords ? "Clearing..." : "Clear Records & Revert Loans/Credits"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+      {/* Bank Export Modal */}
+{showBankExportModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-lg p-6 w-full max-w-md">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold text-gray-800">Export Bank File by Month</h2>
+        <button 
+          onClick={() => setShowBankExportModal(false)}
+          className="text-gray-500 hover:text-gray-700"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Select Year</label>
+          <select
+            value={selectedBankExportYear}
+            onChange={(e) => setSelectedBankExportYear(parseInt(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            {getAvailableYears().map(year => (
+              <option key={year} value={year}>{year}</option>
+            ))}
+            {getAvailableYears().length === 0 && (
+              <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
+            )}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Select Month</label>
+          <select
+            value={selectedBankExportMonth}
+            onChange={(e) => setSelectedBankExportMonth(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            <option value="">Select a month</option>
+            <option value="0">January</option>
+            <option value="1">February</option>
+            <option value="2">March</option>
+            <option value="3">April</option>
+            <option value="4">May</option>
+            <option value="5">June</option>
+            <option value="6">July</option>
+            <option value="7">August</option>
+            <option value="8">September</option>
+            <option value="9">October</option>
+            <option value="10">November</option>
+            <option value="11">December</option>
+          </select>
+        </div>
+
+        <div className="bg-emerald-50 p-3 rounded-md border border-emerald-200">
+          <div className="flex items-start gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-emerald-500 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+              <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+            </svg>
+            <div className="text-sm text-emerald-700">
+              <p className="font-medium">Bank Export Format:</p>
+              <ul className="list-disc list-inside mt-1 space-y-1">
+                <li>Combines all payroll periods ending in selected month</li>
+                <li>Includes employee bank account details</li>
+                <li>Ready for bank upload processing</li>
+                <li>Columns: Beneficiary Name, Bank, Account, Amount, Narration, Purpose</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end space-x-3 mt-6">
+        <button
+          onClick={() => setShowBankExportModal(false)}
+          className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+          disabled={exportingBankData}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={exportBankByMonth}
+          disabled={!selectedBankExportMonth || exportingBankData}
+          className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:bg-gray-400 flex items-center gap-2"
+        >
+          {exportingBankData ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              Exporting...
+            </>
+          ) : (
+            <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+              </svg>
+              Export Bank File
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

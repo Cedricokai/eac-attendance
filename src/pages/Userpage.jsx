@@ -54,6 +54,10 @@ const Userpage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
+  // --- NEW: Bulk selection state ---
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
     const port = window.location.port;
@@ -95,6 +99,11 @@ const Userpage = () => {
     fetchUsers();
     fetchAllRoles();
   }, []);
+
+  // --- NEW: Clear selection when search or filter changes ---
+  useEffect(() => {
+    setSelectedUsers([]);
+  }, [searchTerm, statusFilter]);
 
   const fetchUsers = async () => {
     const token = localStorage.getItem('jwtToken');
@@ -505,6 +514,69 @@ const Userpage = () => {
 
   const filteredUsers = users.filter((u) => matchesStatus(u, statusFilter) && matchesSearch(u, searchTerm));
 
+  // --- NEW: Bulk selection handlers ---
+  const handleSelectUser = (userId) => {
+    setSelectedUsers(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedUsers.length === filteredUsers.length) {
+      setSelectedUsers([]);
+    } else {
+      setSelectedUsers(filteredUsers.map(u => u.id));
+    }
+  };
+
+  const handleBulkToggle = async (enable) => {
+    if (selectedUsers.length === 0) {
+      toast.warn('No users selected');
+      return;
+    }
+    setIsBulkUpdating(true);
+    const token = localStorage.getItem('jwtToken');
+    let successCount = 0;
+    let failCount = 0;
+    const failedUsers = [];
+
+    for (const userId of selectedUsers) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/users/${userId}/toggle-status`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to toggle user ${userId}`);
+        }
+        successCount++;
+      } catch (err) {
+        failCount++;
+        failedUsers.push(userId);
+      }
+    }
+
+    // Update local state for all successfully toggled users
+    if (successCount > 0) {
+      setUsers(prevUsers =>
+        prevUsers.map(user =>
+          selectedUsers.includes(user.id) && !failedUsers.includes(user.id)
+            ? { ...user, enabled: enable }
+            : user
+        )
+      );
+      toast.success(`${successCount} user(s) ${enable ? 'enabled' : 'disabled'} successfully.`);
+    }
+    if (failCount > 0) {
+      toast.error(`Failed to ${enable ? 'enable' : 'disable'} ${failCount} user(s).`);
+    }
+    setSelectedUsers([]);
+    setIsBulkUpdating(false);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -581,6 +653,7 @@ const Userpage = () => {
               </div>
 
               <div className="flex items-center gap-3 flex-wrap justify-end">
+                {/* Search and filters remain unchanged */}
                 <div className="relative w-72">
                   <input
                     value={searchTerm}
@@ -614,6 +687,38 @@ const Userpage = () => {
                   <option value="ENABLED">Enabled</option>
                   <option value="DISABLED">Disabled</option>
                 </select>
+
+                {/* --- NEW: Bulk action buttons --- */}
+                {selectedUsers.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 mr-1">
+                      {selectedUsers.length} selected
+                    </span>
+                    <button
+                      onClick={() => handleBulkToggle(true)}
+                      disabled={isBulkUpdating}
+                      className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                    >
+                      <CheckIcon className="h-4 w-4" />
+                      Enable
+                    </button>
+                    <button
+                      onClick={() => handleBulkToggle(false)}
+                      disabled={isBulkUpdating}
+                      className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                    >
+                      <XMarkIcon className="h-4 w-4" />
+                      Disable
+                    </button>
+                    <button
+                      onClick={() => setSelectedUsers([])}
+                      disabled={isBulkUpdating}
+                      className="px-3 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
 
                 <button
                   onClick={() => setShowAllRoles(true)}
@@ -654,6 +759,16 @@ const Userpage = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  {/* --- NEW: Checkbox column header --- */}
+                  <th className="px-4 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={filteredUsers.length > 0 && selectedUsers.length === filteredUsers.length}
+                      onChange={handleSelectAll}
+                      disabled={isBulkUpdating}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                    />
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Full Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
@@ -666,13 +781,23 @@ const Userpage = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                    <td colSpan="8" className="px-6 py-4 text-center text-gray-500">
                       {users.length === 0 ? "No users found in the system" : "No users match your search/filter"}
                     </td>
                   </tr>
                 ) : (
                   filteredUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                      {/* --- NEW: Checkbox cell --- */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.includes(user.id)}
+                          onChange={() => handleSelectUser(user.id)}
+                          disabled={isBulkUpdating}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <UserCircleIcon className="h-8 w-8 text-gray-400 mr-3" />
@@ -703,8 +828,8 @@ const Userpage = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <button
                           onClick={() => handleToggleUserStatus(user)}
-                          disabled={togglingUserId === user.id}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${user.enabled ? 'bg-green-600' : 'bg-gray-200'} ${togglingUserId === user.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          disabled={togglingUserId === user.id || isBulkUpdating}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${user.enabled ? 'bg-green-600' : 'bg-gray-200'} ${togglingUserId === user.id || isBulkUpdating ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <span
                             className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${user.enabled ? 'translate-x-6' : 'translate-x-1'}`}
@@ -789,6 +914,7 @@ const Userpage = () => {
           </div>
         </div>
 
+        {/* Create User Modal - unchanged */}
         {showCreateModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -913,6 +1039,7 @@ const Userpage = () => {
           </div>
         )}
 
+        {/* Set Password Modal - unchanged */}
         {showPasswordModal && selectedUser && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -999,6 +1126,7 @@ const Userpage = () => {
           </div>
         )}
 
+        {/* Role Management Modal - unchanged */}
         {showRoleManagement && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
@@ -1120,6 +1248,7 @@ const Userpage = () => {
           </div>
         )}
 
+        {/* View All Roles Modal - unchanged */}
         {showAllRoles && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[80vh] overflow-y-auto">

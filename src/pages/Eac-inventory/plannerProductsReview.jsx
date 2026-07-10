@@ -22,6 +22,22 @@ import {
   Store
 } from "lucide-react";
 
+// === API Base URL detection (same as LoginPage) ===
+const getApiBaseUrl = () => {
+  const hostname = window.location.hostname;
+  if (hostname === "localhost" || hostname === "127.0.0.1") return "http://localhost:8080";
+  if (hostname.startsWith("192.168.")) return import.meta.env.VITE_API_BASE_URL_LOCAL;
+  if (hostname === "100.114.178.13") return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+};
+const API_BASE_URL = getApiBaseUrl();
+
+// === Helper for authenticated headers ===
+const getHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`
+});
+
 const PlannerProductsReview = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,83 +67,51 @@ const PlannerProductsReview = () => {
     urgent: 0
   });
 
-    const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
-
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
-
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
-
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
-
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
-
-  const API_BASE_URL = getApiBaseUrl();
-
-  // Fetch all inventory requests
- // Add this to your fetchRequests function:
-const fetchRequests = async () => {
-  setLoading(true);
-  try {
-    const token = localStorage.getItem("jwtToken");
-    const response = await fetch(`${API_BASE_URL}/api/inventory-requests`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch requests: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    // DEBUG: Log the requests and their statuses
-    console.log("DEBUG - All requests from API:", data);
-    data.forEach((req, index) => {
-      console.log(`DEBUG - Request ${index}:`, {
-        id: req.id,
-        status: req.status,
-        ppeRequest: req.ppeRequest,
-        requestNumber: req.requestNumber
+  // Fetch requests for planner (using the dedicated endpoint)
+  const fetchRequests = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("jwtToken");
+      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/for-planner`, {
+        headers: getHeaders()
       });
-    });
-    
-    setRequests(data);
-    calculateStats(data);
-  } catch (err) {
-    setError(err.message);
-    console.error("Error fetching requests:", err);
-  } finally {
-    setLoading(false);
-  }
-};
 
-  // Calculate statistics
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // DEBUG: Log the requests and their statuses
+      console.log("DEBUG - Planner requests from API:", data);
+      
+      // Handle missing Job gracefully: if a request has a job reference that's missing, we set jobName to null
+      const processedData = data.map(req => ({
+        ...req,
+        // If job is an object with an id but no name, or if job is null, set fallback
+        jobName: req.job?.name || req.jobName || 'No Job Assigned',
+        // Also ensure items array exists
+        items: req.items || []
+      }));
+      
+      setRequests(processedData);
+      calculateStats(processedData);
+    } catch (err) {
+      setError(err.message);
+      console.error("Error fetching requests:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Calculate statistics (updated to treat both PENDING and PENDING_PLANNER as pending)
   const calculateStats = (requestsData) => {
     const stats = {
       total: requestsData.length,
-      pending: requestsData.filter(r => r.status === 'PENDING').length,
+      pending: requestsData.filter(r => 
+        r.status === 'PENDING' || r.status === 'PENDING_PLANNER'
+      ).length,
       approved: requestsData.filter(r => r.status === 'APPROVED').length,
       rejected: requestsData.filter(r => r.status === 'REJECTED').length,
       urgent: requestsData.filter(r => r.urgency === 'urgent' || r.urgency === 'high').length
@@ -144,13 +128,15 @@ const fetchRequests = async () => {
     return requests.filter(request => {
       // Search term filter
       const matchesSearch = !searchTerm || 
-        request.requestNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.projectName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.requestedBy?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.department?.toLowerCase().includes(searchTerm.toLowerCase());
+        (request.requestNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (request.projectName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (request.requestedBy || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (request.department || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-      // Status filter
-      const matchesStatus = filters.status === "all" || request.status === filters.status;
+      // Status filter (include PENDING_PLANNER)
+      const matchesStatus = filters.status === "all" || 
+        (filters.status === "PENDING" && (request.status === 'PENDING' || request.status === 'PENDING_PLANNER')) ||
+        request.status === filters.status;
       
       // Urgency filter
       const matchesUrgency = filters.urgency === "all" || request.urgency === filters.urgency;
@@ -176,50 +162,44 @@ const fetchRequests = async () => {
     return ["all", ...depts];
   }, [requests]);
 
-  
-
-  // Handle request approval
- const handleApproveRequest = async (requestId) => {
+  // Handle request approval (planner approve)
+  const handleApproveRequest = async (requestId) => {
     if (!approvalNotes.trim()) {
-        alert("Please provide approval notes");
-        return;
+      alert("Please provide approval notes");
+      return;
     }
 
     setApproving(true);
     try {
-        const token = localStorage.getItem("jwtToken");
-        const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/planner-approve`, {
-            method: "PUT",
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                notes: approvalNotes,
-                approvedBy: localStorage.getItem("username") || "Planner"
-            })
-        });
+      const payload = {
+        notes: approvalNotes,
+        approvedBy: localStorage.getItem("username") || "Planner"
+      };
 
-        if (response.ok) {
-            alert("Request approved successfully! It will now go to Procurement.");
-            fetchRequests(); // Refresh the list
-            setShowDetailsModal(false);
-            setApprovalNotes("");
-        } else {
-            const errorText = await response.text();
-            console.error("Backend error response:", errorText);
-            throw new Error(errorText);
-        }
+      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/planner-approve`, {
+        method: "PUT",
+        headers: getHeaders(),
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+
+      alert("Request approved successfully! It will now go to Procurement.");
+      fetchRequests();
+      setShowDetailsModal(false);
+      setApprovalNotes("");
     } catch (err) {
-        console.error("Error approving request:", err);
-        alert("Failed to approve request: " + err.message);
+      console.error("Error approving request:", err);
+      alert("Failed to approve request: " + err.message);
     } finally {
-        setApproving(false);
+      setApproving(false);
     }
-};
+  };
 
-
-  // Handle request rejection
+  // Handle request rejection (planner reject)
   const handleRejectRequest = async (requestId) => {
     if (!approvalNotes.trim()) {
       alert("Please provide rejection notes");
@@ -228,28 +208,26 @@ const fetchRequests = async () => {
 
     setRejecting(true);
     try {
-      const token = localStorage.getItem("jwtToken");
-      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/reject`, {
+      const payload = {
+        notes: approvalNotes,
+        approvedBy: localStorage.getItem("username") || "Planner"
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/planner-reject`, {
         method: "PUT",
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          notes: approvalNotes,
-          rejectedBy: localStorage.getItem("username") || "Planner"
-        })
+        headers: getHeaders(),
+        body: JSON.stringify(payload)
       });
 
-      if (response.ok) {
-        alert("Request rejected successfully!");
-        fetchRequests(); // Refresh the list
-        setShowDetailsModal(false);
-        setApprovalNotes("");
-      } else {
+      if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText);
       }
+
+      alert("Request rejected successfully!");
+      fetchRequests();
+      setShowDetailsModal(false);
+      setApprovalNotes("");
     } catch (err) {
       console.error("Error rejecting request:", err);
       alert("Failed to reject request: " + err.message);
@@ -258,77 +236,42 @@ const fetchRequests = async () => {
     }
   };
 
-  // Send to Procurement Preview
+  // Send to Procurement Preview (for approved requests)
   const sendToProcurementPreview = async (requestId) => {
     try {
-        const token = localStorage.getItem("jwtToken");
-        const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/send-to-procurement`, {
-            method: "POST",
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (response.ok) {
-            alert("Sent to Procurement successfully!");
-            fetchRequests(); // Refresh the list
-        } else {
-            const errorText = await response.text();
-            throw new Error(errorText);
-        }
-    } catch (err) {
-        console.error("Error sending to procurement:", err);
-        alert("Failed to send to procurement: " + err.message);
-    }
-};
-
-// Add this to your component to debug
-useEffect(() => {
-    const token = localStorage.getItem("jwtToken");
-    const userRole = localStorage.getItem("userRole");
-    console.log("Current user role:", userRole);
-    console.log("Token exists:", !!token);
-    
-    // Fetch current user details
-    const fetchCurrentUser = async () => {
-        try {
-            const response = await fetch(`${API_BASE_URL}/auth/me`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                }
-            });
-            const userData = await response.json();
-            console.log("Current user data:", userData);
-        } catch (error) {
-            console.error("Error fetching user:", error);
-        }
-    };
-    
-    if (token) {
-        fetchCurrentUser();
-    }
-}, []);
-
-  // Send to Store Officer
-  const sendToStoreOfficer = async (requestId) => {
-    try {
-      const token = localStorage.getItem("jwtToken");
-      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/send-to-store`, {
+      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/send-to-procurement`, {
         method: "POST",
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        headers: getHeaders()
       });
 
-      if (response.ok) {
-        alert("Sent to Store Officer successfully!");
-        fetchRequests(); // Refresh the list
-      } else {
+      if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText);
       }
+
+      alert("Sent to Procurement successfully!");
+      fetchRequests();
+    } catch (err) {
+      console.error("Error sending to procurement:", err);
+      alert("Failed to send to procurement: " + err.message);
+    }
+  };
+
+  // Send to Store Officer (for approved requests)
+  const sendToStoreOfficer = async (requestId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/inventory-requests/${requestId}/send-to-store`, {
+        method: "POST",
+        headers: getHeaders()
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+
+      alert("Sent to Store Officer successfully!");
+      fetchRequests();
     } catch (err) {
       console.error("Error sending to store officer:", err);
       alert("Failed to send to store officer: " + err.message);
@@ -353,10 +296,11 @@ useEffect(() => {
     });
   };
 
-  // Get status badge color
+  // Get status badge color (add PENDING_PLANNER)
   const getStatusBadge = (status) => {
     switch (status) {
       case 'PENDING':
+      case 'PENDING_PLANNER':
         return { bg: 'bg-yellow-100', text: 'text-yellow-800', icon: <Clock size={14} /> };
       case 'APPROVED':
         return { bg: 'bg-green-100', text: 'text-green-800', icon: <CheckCircle size={14} /> };
@@ -413,7 +357,6 @@ useEffect(() => {
 
   return (
     <div className="relative min-h-screen bg-gray-50 flex">
-     
       {/* Main content */}
       <main className="flex-1 ml-64 overflow-y-auto">
         <header className="flex justify-between items-center bg-white h-16 w-full px-6 shadow-md sticky top-0 z-10">
@@ -511,7 +454,7 @@ useEffect(() => {
                   className="px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="all">All Status</option>
-                  <option value="PENDING">Pending</option>
+                  <option value="PENDING">Pending (including PENDING_PLANNER)</option>
                   <option value="APPROVED">Approved</option>
                   <option value="REJECTED">Rejected</option>
                   <option value="PROCUREMENT">Procurement</option>
@@ -602,7 +545,10 @@ useEffect(() => {
                       const statusBadge = getStatusBadge(request.status);
                       const urgencyBadge = getUrgencyBadge(request.urgency);
                       const totalItems = request.items?.length || 0;
-                      const totalQuantity = request.items?.reduce((sum, item) => sum + (item.requestedQuantity || 0), 0) || 0;
+                      const totalQuantity = request.items?.reduce((sum, item) => sum + (item.requestedQuantity || item.quantity || 0), 0) || 0;
+
+                      // Check if request is pending for planner (both PENDING and PENDING_PLANNER)
+                      const isPendingForPlanner = request.status === 'PENDING' || request.status === 'PENDING_PLANNER';
 
                       return (
                         <tr key={request.id} className="hover:bg-gray-50">
@@ -615,15 +561,15 @@ useEffect(() => {
                                 <div className="text-sm text-gray-500">
                                   <div className="flex items-center gap-1">
                                     <User size={12} />
-                                    {request.requestedBy}
+                                    {request.requestedBy || 'Unknown'}
                                   </div>
                                   <div className="flex items-center gap-1 mt-1">
                                     <Building size={12} />
-                                    {request.department}
+                                    {request.department || 'N/A'}
                                   </div>
                                   <div className="flex items-center gap-1 mt-1">
                                     <Calendar size={12} />
-                                    {formatDate(request.requestDate)}
+                                    {formatDate(request.requestDate || request.createdAt)}
                                   </div>
                                 </div>
                               </div>
@@ -632,10 +578,10 @@ useEffect(() => {
                           
                           <td className="px-6 py-4">
                             <div className="text-sm text-gray-900 font-medium">
-                              {request.projectName}
+                              {request.projectName || 'N/A'}
                             </div>
                             <div className="text-sm text-gray-500">
-                              {request.jobDescription}
+                              {request.jobDescription || request.jobName || 'No Job Assigned'}
                             </div>
                             <div className="mt-1">
                               <span className={`px-2 py-1 text-xs rounded-full ${urgencyBadge.bg} ${urgencyBadge.text}`}>
@@ -649,22 +595,29 @@ useEffect(() => {
                             </div>
                           </td>
                           
-         <td className="px-6 py-4">
-  {/* Add individual quantities - QUICK FIX */}
-  <div className="mt-1 text-xs text-gray-600 space-y-1">
-    {request.items?.slice(0, 3).map((item, idx) => (
-      <div key={idx} className="flex justify-between">
-        <span className="truncate">{item.productName}</span>
-        <span className="font-medium ml-2">{item.quantity}</span>
-      </div>
-    ))}
-  </div>
-</td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-gray-900">
+                              {totalItems} item{totalItems !== 1 && 's'}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              Total Qty: {totalQuantity}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-600 space-y-1">
+                              {request.items?.slice(0, 3).map((item, idx) => (
+                                <div key={idx} className="flex justify-between">
+                                  <span className="truncate">{item.productName || item.name}</span>
+                                  <span className="font-medium ml-2">{item.requestedQuantity || item.quantity}</span>
+                                </div>
+                              ))}
+                              {totalItems > 3 && <span className="text-gray-400">+{totalItems - 3} more</span>}
+                            </div>
+                          </td>
+
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
                               <span className={`px-3 py-1 text-xs rounded-full flex items-center gap-1 ${statusBadge.bg} ${statusBadge.text}`}>
                                 {statusBadge.icon}
-                                {request.status}
+                                {request.status || 'UNKNOWN'}
                               </span>
                             </div>
                           </td>
@@ -679,7 +632,7 @@ useEffect(() => {
                                 View
                               </button>
                               
-                              {request.status === 'PENDING' && (
+                              {isPendingForPlanner && (
                                 <>
                                   <button
                                     onClick={() => {
@@ -748,7 +701,7 @@ useEffect(() => {
                     Request Details: {selectedRequest.requestNumber}
                   </h2>
                   <p className="text-sm text-gray-600">
-                    Submitted on {formatDate(selectedRequest.requestDate)}
+                    Submitted on {formatDate(selectedRequest.requestDate || selectedRequest.createdAt)}
                   </p>
                 </div>
                 <button
@@ -770,15 +723,15 @@ useEffect(() => {
                   <div className="space-y-2">
                     <div>
                       <span className="text-sm text-gray-600">Name:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.requestedBy}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.requestedBy || 'Unknown'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Department:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.department}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.department || 'N/A'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Contact:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.contactPerson}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.contactPerson || 'N/A'}</span>
                     </div>
                     {selectedRequest.contactPhone && (
                       <div>
@@ -794,15 +747,15 @@ useEffect(() => {
                   <div className="space-y-2">
                     <div>
                       <span className="text-sm text-gray-600">Project:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.projectName}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.projectName || 'N/A'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Job Description:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.jobDescription}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.jobDescription || selectedRequest.jobName || 'No Job Assigned'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Location:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.location}</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.location || 'N/A'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Urgency:</span>
@@ -833,12 +786,12 @@ useEffect(() => {
                     <tbody>
                       {selectedRequest.items?.map((item, index) => (
                         <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 border text-sm">{item.productName}</td>
-                          <td className="px-4 py-2 border text-sm text-gray-600">{item.productCode}</td>
-                          <td className="px-4 py-2 border text-sm font-medium">{item.requestedQuantity}</td>
+                          <td className="px-4 py-2 border text-sm">{item.productName || item.name}</td>
+                          <td className="px-4 py-2 border text-sm text-gray-600">{item.productCode || item.code}</td>
+                          <td className="px-4 py-2 border text-sm font-medium">{item.requestedQuantity || item.quantity}</td>
                           <td className="px-4 py-2 border text-sm">
-                            <span className={item.currentStock < item.quantity ? "text-red-600 font-medium" : "text-green-600"}>
-                              {item.currentStock}
+                            <span className={item.currentStock < (item.requestedQuantity || item.quantity) ? "text-red-600 font-medium" : "text-green-600"}>
+                              {item.currentStock || 0}
                             </span>
                           </td>
                           <td className="px-4 py-2 border text-sm text-gray-500">{item.notes}</td>
@@ -860,7 +813,7 @@ useEffect(() => {
               )}
 
               {/* Approval/Rejection Section */}
-              {selectedRequest.status === 'PENDING' && (
+              {selectedRequest.status === 'PENDING' || selectedRequest.status === 'PENDING_PLANNER' ? (
                 <div className="border-t pt-6">
                   <h3 className="font-medium text-gray-900 mb-3">Review & Decision</h3>
                   <div className="mb-4">
@@ -910,7 +863,7 @@ useEffect(() => {
                     </button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Action buttons for approved requests */}
               {selectedRequest.status === 'APPROVED' && (

@@ -32,10 +32,11 @@ function Employee() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isBasicSalaryEditable, setIsBasicSalaryEditable] = useState(false);
 
-    const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
+  // ✅ Expanded newEmployee state with all fields
   const [newEmployee, setNewEmployee] = useState({
     firstName: "",
     lastName: "",
@@ -75,41 +76,45 @@ function Employee() {
     otherAllowance: "",
     nssAllowance: "",
     accountName: "",
-    ssnitAccountName: ""
+    ssnitAccountName: "",
+    applyWithholdingTax: false,
+    excludeFromSsnit: false,
+    tierTwoAccountName: "",
+    tierTwoAccountNumber: "",
+    baseNumber: "",
+    endDate: "" // optional
   });
 
- const filteredEmployees = employees.filter(emp => {
-  // Filter by category if selected
-  if (selectedCategory && emp.category !== selectedCategory) {
-    return false;
-  }
-  
-  // Filter by search query if provided
-  if (query.trim()) {
-    const searchTerm = query.toLowerCase().trim();
-    const searchableFields = [
-      emp.employeeId || '',
-      emp.firstName || '',
-      emp.lastName || '',
-      emp.email || '',
-      emp.phone || '',
-      emp.jobPosition || '',
-      emp.category || '',
-      emp.workType || '',
-      emp.tagNumber || '',
-      emp.ssnitNumber || '',
-      emp.tinNumber || '',
-      emp.department || '',
-      emp.location || ''
-    ];
+  const filteredEmployees = employees.filter(emp => {
+    if (selectedCategory && emp.category !== selectedCategory) {
+      return false;
+    }
     
-    return searchableFields.some(field => 
-      field.toLowerCase().includes(searchTerm)
-    );
-  }
-  
-  return true;
-});
+    if (query.trim()) {
+      const searchTerm = query.toLowerCase().trim();
+      const searchableFields = [
+        emp.employeeId || '',
+        emp.firstName || '',
+        emp.lastName || '',
+        emp.email || '',
+        emp.phone || '',
+        emp.jobPosition || '',
+        emp.category || '',
+        emp.workType || '',
+        emp.tagNumber || '',
+        emp.ssnitNumber || '',
+        emp.tinNumber || '',
+        emp.department || '',
+        emp.location || ''
+      ];
+      
+      return searchableFields.some(field => 
+        field.toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    return true;
+  });
 
   const createMenuRef = useRef(null);
   const editMenuRef = useRef(null);
@@ -121,25 +126,21 @@ function Employee() {
     console.log("🖥️ Current hostname:", hostname);
     console.log("🔌 Current port:", port);
 
-    // If frontend is opened via localhost → use localhost backend
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       console.log("🏠 Using LOCALHOST API URL");
       return "http://localhost:8080";
     }
 
-    // LAN access
     if (hostname.startsWith("192.168.")) {
       console.log("🏠 Using LAN API URL");
       return import.meta.env.VITE_API_BASE_URL_LOCAL;
     }
 
-    // Public / Tailscale / Cloudflare IP
     if (hostname === "100.114.178.13") {
       console.log("🌐 Using PUBLIC API URL");
       return import.meta.env.VITE_API_BASE_URL_PUBLIC;
     }
 
-    // Default fallback
     console.log("🌍 Using PUBLIC API URL (fallback)");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
   };
@@ -150,12 +151,10 @@ function Employee() {
     return localStorage.getItem('jwtToken');
   };
 
-    // Add toggleSidebar function
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
   };
 
-  // Add responsive sidebar handling
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
@@ -170,7 +169,7 @@ function Employee() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-   useEffect(() => {
+  useEffect(() => {
     const handleClickOutside = (event) => {
       if (sidebarOpen && window.innerWidth < 768) {
         const sidebar = document.querySelector('.sidebar-container');
@@ -186,7 +185,7 @@ function Employee() {
     };
   }, [sidebarOpen]);
 
-    useEffect(() => {
+  useEffect(() => {
     const fetchUser = async () => {
       try {
         const token = localStorage.getItem("jwtToken");
@@ -274,7 +273,6 @@ function Employee() {
 
         const result = await response.json();
         
-        // Update the employee in the local state
         setEmployees(employees.map(emp => 
             emp.id === id ? { ...emp, active: result.active } : emp
         ));
@@ -285,7 +283,7 @@ function Employee() {
     } catch (err) {
         setError(err.message);
     }
-};
+  };
 
   const getPositionGrades = (positionName) => {
     const position = settings.jobPositions?.find(p => p.name === positionName);
@@ -493,7 +491,6 @@ function Employee() {
               case 'position':
               case 'jobtitle':
                 const jobPositionValue = getSafeValue(value);
-                // Check if job position exists in settings, otherwise use default
                 const jobPositionExists = settings.jobPositions?.some(p => 
                   p.name.toLowerCase() === jobPositionValue.toLowerCase()
                 );
@@ -529,13 +526,12 @@ function Employee() {
               case 'socialsecurity':
                 employee.ssnitNumber = getSafeValue(value);
                 break;
-             case 'ssnitaccountname':
-case 'ssnit_account_name':
-case 'ssnitaccount_name':
-case 'ssnitaccount':
-  employee.ssnitAccountName = getSafeValue(value);
-  break;
-
+              case 'ssnitaccountname':
+              case 'ssnit_account_name':
+              case 'ssnitaccount_name':
+              case 'ssnitaccount':
+                employee.ssnitAccountName = getSafeValue(value);
+                break;
               case 'tinnumber':
               case 'tin_number':
               case 'tin':
@@ -624,7 +620,7 @@ case 'ssnitaccount':
               case 'additionalallowance':
               case 'extraallowance':
                 employee.otherAllowance = getSafeValue(value);
-                     break;
+                break;
               case 'nssallowance':
               case 'nss_allowance':
               case 'nssAllowance':
@@ -646,8 +642,8 @@ case 'ssnitaccount':
               case 'bank_name':
                 employee.bank = getSafeValue(value);
                 break;
-                case 'accountname':
-                case 'account_name':
+              case 'accountname':
+              case 'account_name':
                 employee.accountName = getSafeValue(value);
                 break;
               case 'bankbranch':
@@ -681,6 +677,12 @@ case 'ssnitaccount':
               case 'partner':
                 employee.spouse = getSafeValue(value);
                 break;
+              case 'tierTwoAccountName':
+                employee.tierTwoAccountName = getSafeValue(value);
+                 break;
+              case 'tierTwoAccountNumber':
+                employee.tierTwoAccountNumber = getSafeValue(value);
+                 break;   
               case 'numberofchildren':
               case 'number_of_children':
               case 'children':
@@ -747,7 +749,7 @@ case 'ssnitaccount':
       'Minimum Rate': employee.minimumRate,
       'Basic Salary': employee.basicSalary,
       'SSNIT Number': employee.ssnitNumber,
-      'SSNIT ACCOUNT NAME': employee.ssnitAccountName,
+      'SSNIT Account Name': employee.ssnitAccountName,
       'TIN Number': employee.tinNumber,
       'Start Date': employee.startDate,
       'End Date': employee.endDate,
@@ -776,6 +778,7 @@ case 'ssnitaccount':
       'Hourly Rate': employee.hourlyRate,
       'Overtime Rate': employee.overtimeRate,
       'Active Status': employee.active ? 'Active' : 'Inactive',
+      'Exclude from SSNIT': employee.excludeFromSsnit ? 'Yes' : 'No',
       'Supervisor': employee.isSupervisor ? 'Yes' : 'No',
       'Supervisor Name': employee.supervisor ? `${employee.supervisor.firstName} ${employee.supervisor.lastName}` : 'N/A',
       'Supervisor ID': employee.supervisor ? employee.supervisor.employeeId : 'N/A',
@@ -840,7 +843,7 @@ case 'ssnitaccount':
           transportAllowance: employee.transportAllowance ? parseFloat(employee.transportAllowance) : 0,
           clothingAllowance: employee.clothingAllowance ? parseFloat(employee.clothingAllowance) : 0,
           otherAllowance: employee.otherAllowance ? parseFloat(employee.otherAllowance) : 0,
-            nssAllowance: employee.nssAllowance ? parseFloat(employee.nssAllowance) : 0,
+          nssAllowance: employee.nssAllowance ? parseFloat(employee.nssAllowance) : 0,
           tagNumber: employee.tagNumber ? String(employee.tagNumber).trim() : null,
           dateOfBirth: employee.dateOfBirth || null,
           emergencyContact: employee.emergencyContact ? String(employee.emergencyContact).trim() : null,
@@ -848,7 +851,7 @@ case 'ssnitaccount':
           location: employee.location ? String(employee.location).trim() : null,
           ghanaCard: employee.ghanaCard ? String(employee.ghanaCard).trim() : null,
           bank: employee.bank ? String(employee.bank).trim() : null,
-          accountName: employee.accountName ? String(employee.accountName).trim () : null,
+          accountName: employee.accountName ? String(employee.accountName).trim() : null,
           bankBranch: employee.bankBranch ? String(employee.bankBranch).trim() : null,
           contactPerson: employee.contactPerson ? String(employee.contactPerson).trim() : null,
           relationship: employee.relationship ? String(employee.relationship).trim() : null,
@@ -856,7 +859,11 @@ case 'ssnitaccount':
           houseNumber: employee.houseNumber ? String(employee.houseNumber).trim() : null,
           spouse: employee.spouse ? String(employee.spouse).trim() : null,
           jobGrade: employee.grade || "I",
-          allowances: employee.allowances ? parseFloat(employee.allowances) : 0
+          allowances: employee.allowances ? parseFloat(employee.allowances) : 0,
+          excludeFromSsnit: employee.excludeFromSsnit || false,
+          tierTwoAccountName: employee.tierTwoAccountName || null,
+          tierTwoAccountNumber: employee.tierTwoAccountNumber || null,
+          baseNumber: employee.baseNumber || null
         };
 
         Object.keys(cleanEmployee).forEach(key => {
@@ -916,6 +923,7 @@ case 'ssnitaccount':
     }
   };
 
+  // ✅ Updated createEmployee to include all fields
   const createEmployee = async () => {
     let finalRate = newEmployee.minimumRate;
 
@@ -939,10 +947,29 @@ case 'ssnitaccount':
       transportAllowance: newEmployee.transportAllowance ? parseFloat(newEmployee.transportAllowance) : 0.0,
       clothingAllowance: newEmployee.clothingAllowance ? parseFloat(newEmployee.clothingAllowance) : 0.0,
       otherAllowance: newEmployee.otherAllowance ? parseFloat(newEmployee.otherAllowance) : 0.0,
-nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 0.0,
+      nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 0.0,
       accountName: newEmployee.accountName || "N/A",
       ssnitAccountName: newEmployee.ssnitAccountName || "N/A",
-      categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
+      categoryId: selectedCategoryObj ? selectedCategoryObj.id : null,
+      excludeFromSsnit: newEmployee.excludeFromSsnit || false,
+      applyWithholdingTax: newEmployee.applyWithholdingTax || false,
+      tierTwoAccountName: newEmployee.tierTwoAccountName || null,
+      tierTwoAccountNumber: newEmployee.tierTwoAccountNumber || null,
+      baseNumber: newEmployee.baseNumber || null,
+      dateOfBirth: newEmployee.dateOfBirth || null,
+      location: newEmployee.location || null,
+      ghanaCard: newEmployee.ghanaCard || null,
+      bank: newEmployee.bank || null,
+      bankBranch: newEmployee.bankBranch || null,
+      contactPerson: newEmployee.contactPerson || null,
+      relationship: newEmployee.relationship || null,
+      townOfResidence: newEmployee.townOfResidence || null,
+      houseNumber: newEmployee.houseNumber || null,
+      spouse: newEmployee.spouse || null,
+      tagNumber: newEmployee.tagNumber || null,
+      emergencyContact: newEmployee.emergencyContact || null,
+      department: newEmployee.department || null,
+      endDate: newEmployee.endDate || null
     };
 
     delete employeeData.usePositionRate;
@@ -969,6 +996,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
       const data = await response.json();
       setEmployees((prevEmployees) => [...prevEmployees, data]);
       
+      // Reset form with defaults (including new fields)
       setNewEmployee({
         firstName: "",
         lastName: "",
@@ -990,7 +1018,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
         usePositionRate: true,
         numberOfChildren: 0,
         age: 0,
-        accountName: "",
         dateOfBirth: "",
         location: "",
         ghanaCard: "",
@@ -1008,7 +1035,13 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
         transportAllowance: "",
         clothingAllowance: "",
         otherAllowance: "",
-        nssAllowance: ""
+        nssAllowance: "",
+        excludeFromSsnit: false,
+        tierTwoAccountName: "",
+        tierTwoAccountNumber: "",
+        baseNumber: "",
+        applyWithholdingTax: false,
+        endDate: ""
       });
 
       setIsCreateMenuOpen(false);
@@ -1118,9 +1151,10 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
   const handleEditEmployee = (employee) => {
     setEditingEmployee({
       ...employee,
-      usePositionRate: employee.usePositionRate !== false, // Ensure boolean
+      usePositionRate: employee.usePositionRate !== false,
       jobGrade: employee.jobGrade || "I",
-      minimumRate: employee.minimumRate || 0
+      minimumRate: employee.minimumRate || 0,
+      excludeFromSsnit: employee.excludeFromSsnit || false,
     });
     setIsEditMenuOpen(true);
     setOpenMenuId(null);
@@ -1136,7 +1170,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
         <MainSidebar isCollapsed={!sidebarOpen} />
       </div>
 
-      {/* Mobile overlay */}
       {sidebarOpen && window.innerWidth < 768 && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-20"
@@ -1144,7 +1177,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
         />
       )}
 
-      {/* Main content with dynamic margin - SAME AS ATTENDANCE COMPONENT */}
       <div 
         className={`flex-1 transition-all duration-300 ${
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
@@ -1173,7 +1205,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
         )}
 
         <main className="flex-1 mx-auto px-4 md:px-6 py-6">
-           <Header
+          <Header
             toggleSidebar={toggleSidebar}
             user={user}
             onLogout={handleLogout}
@@ -1301,9 +1333,15 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Rate
                       </th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-    Status
-</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        SSNIT Exempt
+                      </th>
+                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Witholding
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
                       <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
@@ -1351,12 +1389,28 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-    <span className={`px-2 py-1 rounded-full text-xs ${
-        employee.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-    }`}>
-        {employee.active ? 'Active' : 'Inactive'}
-    </span>
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              employee.excludeFromSsnit ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                            }`}>
+                              {employee.excludeFromSsnit ? 'Excluded' : 'Included'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+  <span className={`px-2 py-1 rounded-full text-xs ${
+    employee.applyWithholdingTax 
+      ? 'bg-orange-100 text-orange-800' 
+      : 'bg-blue-100 text-blue-800'
+  }`}>
+    {employee.applyWithholdingTax ? 'Withholding Tax' : 'Standard PAYE'}
+  </span>
 </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                                employee.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                                {employee.active ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex justify-end items-center gap-3">
                               <button
@@ -1403,11 +1457,11 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                                         Delete
                                       </button>
                                       <button
-    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-    onClick={() => toggleEmployeeActive(employee.id, employee.active)}
->
-    {employee.active ? 'Deactivate' : 'Activate'} Employee
-</button>
+                                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                        onClick={() => toggleEmployeeActive(employee.id, employee.active)}
+                                      >
+                                        {employee.active ? 'Deactivate' : 'Activate'} Employee
+                                      </button>
                                     </div>
                                   </div>
                                 )}
@@ -1418,14 +1472,13 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                         
                         {expandedRows[employee.id] && (
                           <tr className="bg-blue-50">
-                            <td colSpan="8" className="px-6 py-4">
+                            <td colSpan="10" className="px-6 py-4">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
                                   <p className="text-xs text-gray-500">Phone</p>
                                   <p className="text-sm font-medium">{employee.phone || 'N/A'}</p>
                                 </div>
-
-                                 <div>
+                                <div>
                                   <p className="text-xs text-gray-500">SSNIT Account Name</p>
                                   <p className="text-sm font-medium">{employee.ssnitAccountName || 'N/A'}</p>
                                 </div>
@@ -1453,14 +1506,26 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                                   <p className="text-xs text-gray-500">Account Number</p>
                                   <p className="text-sm font-medium">{employee.accountNumber || 'N/A'}</p>
                                 </div>
-
-                                 <div>
-                                  <p className="text-xs text-gray-500">Account Name</p>
+                                <div>
+                                  <p className="text-xs text-gray-500">Name on Bank Account</p>
                                   <p className="text-sm font-medium">{employee.accountName || 'N/A'}</p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Location</p>
                                   <p className="text-sm font-medium">{employee.location || 'N/A'}</p>
+                                </div>
+                                 <div>
+                                  <p className="text-xs text-gray-500">Tier Two Account Name</p>
+                                  <p className="text-sm font-medium">{employee.tierTwoAccountName || 'N/A'}</p>
+                                </div>
+
+                                <div>
+                                  <p className="text-xs text-gray-500">Tier Two Account Number</p>
+                                  <p className="text-sm font-medium">{employee.tierTwoAccountNumber || 'N/A'}</p>
+                                </div>
+                                  <div>
+                                  <p className="text-xs text-gray-500">Base Number</p>
+                                  <p className="text-sm font-medium">{employee.baseNumber || 'N/A'}</p>
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Ghana Card</p>
@@ -1506,10 +1571,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                                   <p className="text-xs text-gray-500">Department</p>
                                   <p className="text-sm font-medium">{employee.department || 'N/A'}</p>
                                 </div>
-                                 <div>
-                                  <p className="text-xs text-gray-500">Tag Number</p>
-                                  <p className="text-sm font-medium">{employee.tagNumber || 'N/A'}</p>
-                                </div>
                                 <div>
                                   <p className="text-xs text-gray-500">Basic Salary</p>
                                   <p className="text-sm font-medium">{formatCurrency(employee.basicSalary)}</p>
@@ -1530,7 +1591,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                                   <p className="text-xs text-gray-500">Other Allowance</p>
                                   <p className="text-sm font-medium">{formatCurrency(employee.otherAllowance)}</p>
                                 </div>
-                                   <div>
+                                <div>
                                   <p className="text-xs text-gray-500">NSS Allowance</p>
                                   <p className="text-sm font-medium">{formatCurrency(employee.nssAllowance)}</p>
                                 </div>
@@ -1541,6 +1602,10 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                                 <div>
                                   <p className="text-xs text-gray-500">End Date</p>
                                   <p className="text-sm font-medium">{formatDate(employee.endDate)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Exclude from SSNIT</p>
+                                  <p className="text-sm font-medium">{employee.excludeFromSsnit ? 'Yes' : 'No'}</p>
                                 </div>
                               </div>
                             </td>
@@ -1555,9 +1620,12 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
           </section>
         </main>
 
+        {/* ============================================================ */}
+        {/* 🟢 CREATE MODAL – enhanced with all missing fields             */}
+        {/* ============================================================ */}
         {isCreateMenuOpen && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-            <div ref={createMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div ref={createMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
               <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
                 <h2 className="text-xl font-semibold text-gray-800">Add New Employee</h2>
                 <button
@@ -1571,6 +1639,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
               </div>
               
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+                {/* Category */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                   {loadingCategories ? (
@@ -1593,9 +1662,10 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   )}
                 </div>
 
+                {/* Name */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
                     <input
                       type="text"
                       placeholder="First name"
@@ -1604,9 +1674,8 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
                     <input
                       type="text"
                       placeholder="Last name"
@@ -1617,8 +1686,9 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   </div>
                 </div>
 
+                {/* Email */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
                   <input
                     type="text"
                     placeholder="Employee email"
@@ -1628,6 +1698,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   />
                 </div>
 
+                {/* Job Position & Grade */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
@@ -1683,6 +1754,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   )}
                 </div>
 
+                {/* Work Type */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
                   <input
@@ -1694,6 +1766,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   />
                 </div>
 
+                {/* Rate Configuration */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
@@ -1740,20 +1813,11 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   </div>
                 )}
 
-                {newEmployee.jobPosition && newEmployee.jobGrade && (
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-700">
-                      <strong>Current Rate:</strong> {newEmployee.usePositionRate ? 
-                        `GHS${getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || newEmployee.minimumRate}/hr (Position-based)` : 
-                        `GHS${newEmployee.minimumRate}/hr (Custom)`}
-                    </p>
-                  </div>
-                )}
-
+                {/* Phone */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input
-                    type="number"
+                    type="text"
                     placeholder="E.g. 123456789"
                     value={getSafeValue(newEmployee.phone)}
                     onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
@@ -1761,7 +1825,8 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   />
                 </div>
 
-                   <div>
+                {/* SSNIT Account Name */}
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
                   <input
                     type="text"
@@ -1772,6 +1837,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   />
                 </div>
 
+                {/* SSNIT & TIN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
@@ -1783,7 +1849,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
                     <input
@@ -1796,16 +1861,63 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={getSafeValue(newEmployee.startDate)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                {/* Exclude from SSNIT Toggle */}
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Exclude from SSNIT</label>
+                    <p className="text-xs text-gray-500">When checked, no SSNIT will be deducted from this employee's pay</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmployee.excludeFromSsnit}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, excludeFromSsnit: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
                 </div>
 
+                {/* Apply Withholding Tax Toggle */}
+                <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Apply Withholding Tax</label>
+                    <p className="text-xs text-gray-500">When checked, Withholding Tax applies instead of PAYE</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmployee.applyWithholdingTax}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, applyWithholdingTax: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                  </label>
+                </div>
+
+                {/* Start Date & End Date */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.startDate)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date (optional)</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.endDate)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, endDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Basic Salary & Account Number */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -1833,7 +1945,6 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       }`}
                     />
                   </div>
-                
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
                     <input
@@ -1843,19 +1954,251 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
+                </div>
 
-                     <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                {/* Account Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(newEmployee.accountName)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, accountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* ========== NEW FIELDS ========== */}
+
+                {/* Personal & Contact */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.dateOfBirth)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, dateOfBirth: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(newEmployee.age)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, age: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
                     <input
                       type="text"
-                      value={getSafeValue(newEmployee.accountName)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, accountName: e.target.value })}
+                      value={getSafeValue(newEmployee.location)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, location: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.ghanaCard)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, ghanaCard: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.emergencyContact)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, emergencyContact: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tag Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.tagNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tagNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.bank)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, bank: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.bankBranch)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, bankBranch: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Family & Residence */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.contactPerson)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, contactPerson: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.relationship)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, relationship: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.townOfResidence)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, townOfResidence: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.houseNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, houseNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.spouse)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, spouse: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(newEmployee.numberOfChildren)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.department)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Allowances */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={getSafeValue(newEmployee.rentAllowance)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, rentAllowance: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Transport Allowance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={getSafeValue(newEmployee.transportAllowance)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, transportAllowance: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Clothing Allowance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={getSafeValue(newEmployee.clothingAllowance)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, clothingAllowance: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={getSafeValue(newEmployee.otherAllowance)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, otherAllowance: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">NSS Allowance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={getSafeValue(newEmployee.nssAllowance)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, nssAllowance: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Tier Two & Base */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Name</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.tierTwoAccountName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tierTwoAccountName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.tierTwoAccountNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tierTwoAccountNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Base Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.baseNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, baseNumber: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                 </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
                 <button
                   className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -1872,8 +2215,11 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
               </div>
             </div>
           </div>
-        )} 
+        )}
 
+        {/* ============================================================ */}
+        {/* 🟡 EDIT MODAL – unchanged (already complete)                   */}
+        {/* ============================================================ */}
         {isEditMenuOpen && editingEmployee && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
             <div ref={editMenuRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -2067,20 +2413,27 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   </p>
                 </div>
 
-                  
-               
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.phone)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, phone: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.ssnitAccountName)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, ssnitAccountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                     <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(editingEmployee.ssnitAccountName)}
-                      onChange={(e) => setEditingEmployee({ ...editingEmployee, ssnitAccountName: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
                     <input
@@ -2102,222 +2455,272 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   </div>
                 </div>
 
-                // Add these fields in the edit modal section (isEditMenuOpen)
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.emergencyContact)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, emergencyContact: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Emergency Contact
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.emergencyContact)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, emergencyContact: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.department)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, department: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Department
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.department)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, department: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                  <input
+                    type="date"
+                    value={getSafeValue(editingEmployee.dateOfBirth)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, dateOfBirth: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Date of Birth
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
-  <input
-    type="date"
-    value={getSafeValue(editingEmployee.dateOfBirth)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, dateOfBirth: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.location)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, location: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Location
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.location)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, location: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.ghanaCard)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, ghanaCard: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Ghana Card
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.ghanaCard)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, ghanaCard: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.bank)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, bank: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Bank Details
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.bank)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, bank: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.bankBranch)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, bankBranch: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.bankBranch)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, bankBranch: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name on Bank Account</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.accountName)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, accountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.accountName)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, accountName: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Name</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.tierTwoAccountName)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, tierTwoAccountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Contact Person Details
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.contactPerson)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, contactPerson: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Number</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.tierTwoAccountNumber)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, tierTwoAccountNumber: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.relationship)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, relationship: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Base Number</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.baseNumber)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, baseNumber: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Residence Details
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.townOfResidence)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, townOfResidence: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.contactPerson)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, contactPerson: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.houseNumber)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, houseNumber: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.relationship)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, relationship: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Family Details
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
-  <input
-    type="text"
-    value={getSafeValue(editingEmployee.spouse)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, spouse: e.target.value })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.townOfResidence)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, townOfResidence: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
-  <input
-    type="number"
-    value={getSafeValue(editingEmployee.numberOfChildren)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.houseNumber)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, houseNumber: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
-  <input
-    type="number"
-    value={getSafeValue(editingEmployee.age)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, age: parseInt(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(editingEmployee.spouse)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, spouse: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-// Allowances
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
-  <input
-    type="number"
-    step="0.01"
-    value={getSafeValue(editingEmployee.rentAllowance)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, rentAllowance: parseFloat(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
+                  <input
+                    type="number"
+                    value={getSafeValue(editingEmployee.numberOfChildren)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Transport Allowance</label>
-  <input
-    type="number"
-    step="0.01"
-    value={getSafeValue(editingEmployee.transportAllowance)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, transportAllowance: parseFloat(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                  <input
+                    type="number"
+                    value={getSafeValue(editingEmployee.age)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, age: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Clothing Allowance</label>
-  <input
-    type="number"
-    step="0.01"
-    value={getSafeValue(editingEmployee.clothingAllowance)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, clothingAllowance: parseFloat(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={getSafeValue(editingEmployee.rentAllowance)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, rentAllowance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowance</label>
-  <input
-    type="number"
-    step="0.01"
-    value={getSafeValue(editingEmployee.otherAllowance)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, otherAllowance: parseFloat(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Transport Allowance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={getSafeValue(editingEmployee.transportAllowance)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, transportAllowance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
 
-<div>
-  <label className="block text-sm font-medium text-gray-700 mb-1">Nss Allowance</label>
-  <input
-    type="number"
-    step="0.01"
-    value={getSafeValue(editingEmployee.nssAllowance)}
-    onChange={(e) => setEditingEmployee({ ...editingEmployee, nssAllowance: parseFloat(e.target.value) || 0 })}
-    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  />
-</div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Clothing Allowance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={getSafeValue(editingEmployee.clothingAllowance)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, clothingAllowance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={getSafeValue(editingEmployee.otherAllowance)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, otherAllowance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">NSS Allowance</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={getSafeValue(editingEmployee.nssAllowance)}
+                    onChange={(e) => setEditingEmployee({ ...editingEmployee, nssAllowance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Exclude from SSNIT</label>
+                    <p className="text-xs text-gray-500">When checked, no SSNIT will be deducted from this employee's pay</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingEmployee.excludeFromSsnit || false}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, excludeFromSsnit: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Apply Withholding Tax</label>
+                    <p className="text-xs text-gray-500">When checked, Withholding Tax will apply instead of standard PAYE</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingEmployee?.applyWithholdingTax || false}
+                      onChange={(e) => setEditingEmployee({ ...editingEmployee, applyWithholdingTax: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                  </label>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -2333,22 +2736,12 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
                     <input
-                      type="number"
+                      type="text"
                       value={getSafeValue(editingEmployee.accountNumber)}
                       onChange={(e) => setEditingEmployee({ ...editingEmployee, accountNumber: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Allowances</label>
-                  <input
-                    type="number"
-                    value={getSafeValue(editingEmployee.allowances)}
-                    onChange={(e) => setEditingEmployee({ ...editingEmployee, allowances: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
                 </div>
 
                 <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
@@ -2390,7 +2783,10 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Account Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Account Name</th>
+                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Name</th>
+                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Number</th>
+                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Base Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
@@ -2411,11 +2807,11 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clothing Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Other Allowance</th>
-                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSS Allowance</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSS Allowance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ghana Card</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank</th>
-                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Name</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank Branch</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact Person</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relationship</th>
@@ -2424,6 +2820,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Spouse</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Number of Children</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exclude SSNIT</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -2436,7 +2833,10 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                         <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.lastName}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitAccountName || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitAccountName || 'N/A'}</td>
+                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountName || 'N/A'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountNumber || 'N/A'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.baseNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
@@ -2461,11 +2861,11 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.transportAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.clothingAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.otherAllowance || 'N/A'}</td>
-                           <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.nssAllowance || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.nssAllowance || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.location || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ghanaCard || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bank || 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountName || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountName || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bankBranch || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.contactPerson || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.relationship || 'N/A'}</td>
@@ -2474,6 +2874,7 @@ nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.spouse || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.numberOfChildren || '0'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.age || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.excludeFromSsnit ? 'Yes' : 'No'}</td>
                       </tr>
                     ))}
                   </tbody>

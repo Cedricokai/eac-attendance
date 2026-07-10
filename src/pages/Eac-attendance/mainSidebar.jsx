@@ -56,7 +56,8 @@ import {
   Mail,
   Lock,
   Home as HomeIcon,
-  UserCircle
+  UserCircle,
+  PieChart
 } from "lucide-react";
 
 function MainSidebar({ isCollapsed = false }) {
@@ -102,7 +103,7 @@ function MainSidebar({ isCollapsed = false }) {
     setOpenDropdowns({
       employees: location.pathname.startsWith("/employee") || location.pathname === "/employee",
       attendance: location.pathname.startsWith("/attendance") || location.pathname === "/attendance" || location.pathname === "/timesheets" || location.pathname === "/overtime" || location.pathname === "/overview",
-      payroll: location.pathname.startsWith("/payroll") || location.pathname === "/payroll" || location.pathname === "/payslip",
+      payroll: location.pathname.startsWith("/payroll") || location.pathname === "/payroll" || location.pathname === "/payslip" || location.pathname === "/PayrollReports",
       departments: location.pathname.startsWith("/departments"),
       inventory: location.pathname.startsWith("/inventory") || location.pathname === "/inventoryRequest" || location.pathname === "/inventoryRequestStatus",
       procurement: location.pathname.startsWith("/procurement"),
@@ -210,13 +211,14 @@ function MainSidebar({ isCollapsed = false }) {
     if (path === "/overview" || name.includes("overview")) return <BarChart size={16} />;
     if (path === "/employee" || path === "/employees" || name.includes("employee")) return <User size={16} />;
     if (path === "/payroll" || name.includes("payroll")) return <FileText size={16} />;
+    if (path === "/PayrollReports" || name.includes("report")) return <PieChart size={16} />;
     if (path === "/payslip" || name.includes("payslip")) return <FileText size={16} />;
     if (path === "/inventoryRequest" || name.includes("inventory")) return <Package size={16} />;
     if (path === "/leave" || path === "/leaveRequestForm" || name.includes("leave")) return <Calendar size={16} />;
     if (path === "/userpage" || name.includes("user")) return <UserCog size={16} />;
     if (path === "/pagePermissionManagement" || name.includes("permission")) return <Shield size={16} />;
     if (path === "/settingspage" || name.includes("setting")) return <Settings size={16} />;
-    if (path === "/centralizedDashboard" || path === "/attendanceDashboard" || name.includes("dashboard")) return <Home size={16} />;
+    if (path === "/attendanceDashboard" || path === "/attendanceDashboard" || name.includes("dashboard")) return <Home size={16} />;
     if (path === "/loanManagementDashboard" || name.includes("loan")) return <DollarSign size={16} />;
     
     return <FileText size={16} />;
@@ -227,10 +229,10 @@ function MainSidebar({ isCollapsed = false }) {
     const menuItems = [];
     
     // Dashboard - always show if accessible
-    if (hasPageAccess("/attendanceDashboard") || hasPageAccess("/centralizedDashboard") || userRole === "admin") {
+    if (hasPageAccess("/attendanceDashboard") || hasPageAccess("/attendanceDashboard") || userRole === "admin") {
       menuItems.push({
         type: "link",
-        to: userRole === "admin" ? "/centralizedDashboard" : "/attendanceDashboard",
+        to: userRole === "admin" ? "/attendanceDashboard" : "/attendanceDashboard",
         icon: <Home size={18} />,
         label: "Dashboard"
       });
@@ -284,25 +286,63 @@ function MainSidebar({ isCollapsed = false }) {
       });
     }
 
-
-    
-    // Payroll Section
-    if (hasModuleAccess("PAYROLL") || hasPageAccess("/payroll") || hasPageAccess("/payslip") || userRole === "admin") {
+    // Payroll Section - ADDED PAYROLL REPORTS LINK
+    if (hasModuleAccess("PAYROLL") || hasPageAccess("/payroll") || hasPageAccess("/payslip") || hasPageAccess("/PayrollReports") || userRole === "admin") {
       const payrollPages = getPagesByModule("PAYROLL");
-      menuItems.push({
-        type: "dropdown",
-        id: "payroll",
-        icon: <DollarSign size={18} />,
-        label: "Payroll",
-        items: payrollPages.length > 0 ? payrollPages.map(page => ({
-          to: page.path,
-          icon: getIconForPage(page),
-          label: page.name
-        })) : [
-          { to: "/payroll", icon: <FileText size={16} />, label: "Payroll Processing" },
-          { to: "/payslip", icon: <FileText size={16} />, label: "Payslip Generator" }
-        ]
-      });
+      
+      // Create base payroll items
+      const payrollItems = [];
+      
+      // Add Payroll Processing if accessible
+      if (hasPageAccess("/payroll") || userRole === "admin") {
+        payrollItems.push({ 
+          to: "/payroll", 
+          icon: <FileText size={16} />, 
+          label: "Payroll Processing" 
+        });
+      }
+      
+      // Add Payslip Generator if accessible
+      if (hasPageAccess("/payslip") || userRole === "admin") {
+        payrollItems.push({ 
+          to: "/payslip", 
+          icon: <FileText size={16} />, 
+          label: "Payslip Generator" 
+        });
+      }
+      
+      // Add Payroll Reports if accessible
+      if (hasPageAccess("/PayrollReports") || userRole === "admin") {
+        payrollItems.push({ 
+          to: "/PayrollReports", 
+          icon: <PieChart size={16} />, 
+          label: "Payroll Reports" 
+        });
+      }
+      
+      // Add any custom payroll pages from permissions
+      if (payrollPages.length > 0) {
+        payrollPages.forEach(page => {
+          if (!payrollItems.some(item => item.to === page.path)) {
+            payrollItems.push({
+              to: page.path,
+              icon: getIconForPage(page),
+              label: page.name
+            });
+          }
+        });
+      }
+      
+      // Only add dropdown if there are items
+      if (payrollItems.length > 0) {
+        menuItems.push({
+          type: "dropdown",
+          id: "payroll",
+          icon: <DollarSign size={18} />,
+          label: "Payroll",
+          items: payrollItems
+        });
+      }
     }
     
     // Inventory Section

@@ -32,12 +32,12 @@ const LeaveRequestForm = () => {
   const [userRole, setUserRole] = useState("");
   const [dateWarnings, setDateWarnings] = useState([]);
   const [availableBalance, setAvailableBalance] = useState(0);
-const [leaveSettings, setLeaveSettings] = useState({
-  maternityLeaveMonths: 3,
-  paternityLeaveMonths: 1,
-  nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study'],
-  annualLeaveBalance: 20 // Default value
-});
+  const [leaveSettings, setLeaveSettings] = useState({
+    maternityLeaveMonths: 3,
+    paternityLeaveMonths: 1,
+    nonDeductibleLeaveTypes: ['Maternity', 'Paternity', 'Sick', 'Study'],
+    annualLeaveBalance: 20
+  });
 
   const leaveTypes = [
     "Annual Leave",
@@ -52,114 +52,95 @@ const [leaveSettings, setLeaveSettings] = useState({
     "Sabbatical Leave",
   ];
 
-   const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  const port = window.location.port;
+  const getApiBaseUrl = () => {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
 
-  console.log("🖥️ Current hostname:", hostname);
-  console.log("🔌 Current port:", port);
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8080";
+    }
 
-  // If frontend is opened via localhost → use localhost backend
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("🏠 Using LOCALHOST API URL");
-    return "http://localhost:8080";
-  }
+    if (hostname.startsWith("192.168.")) {
+      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    }
 
-  // LAN access
-  if (hostname.startsWith("192.168.")) {
-    console.log("🏠 Using LAN API URL");
-    return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  }
+    if (hostname === "100.114.178.13") {
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    }
 
-  // Public / Tailscale / Cloudflare IP
-  if (hostname === "100.114.178.13") {
-    console.log("🌐 Using PUBLIC API URL");
     return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  }
-
-  // Default fallback
-  console.log("🌍 Using PUBLIC API URL (fallback)");
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
+  };
 
   const API_BASE_URL = getApiBaseUrl();
 
-  // Helper function to get JWT token
   const getToken = () => {
     return localStorage.getItem('jwtToken');
   };
 
-  // Fetch leave settings
   const fetchLeaveSettings = async () => {
-  try {
-    const token = getToken();
-    const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/leave`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLeaveSettings(data);
       }
-    });
-    if (response.ok) {
-      const data = await response.json();
-      setLeaveSettings(data);
-      // Calculate available balance for current user
-      await calculateAvailableBalance(data.annualLeaveBalance);
+    } catch (err) {
+      console.error('Failed to fetch leave settings:', err);
     }
-  } catch (err) {
-    console.error('Failed to fetch leave settings:', err);
-  }
-};
+  };
 
-const calculateAvailableBalance = async (totalAnnualBalance) => {
-  try {
-    if (!currentEmployee?.id) return;
-    
-    const token = getToken();
-    const response = await fetch(`${API_BASE_URL}/api/leave/employee/${currentEmployee.id}/used-days`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+  const calculateAvailableBalance = async (totalAnnualBalance) => {
+    try {
+      if (!currentEmployee?.id) return;
+      
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/leave/employee/${currentEmployee.id}/used-days`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const usedDays = await response.json();
+        const available = totalAnnualBalance - usedDays;
+        setAvailableBalance(available > 0 ? available : 0);
       }
-    });
-    
-    if (response.ok) {
-      const usedDays = await response.json();
-      const available = totalAnnualBalance - usedDays;
-      setAvailableBalance(available > 0 ? available : 0);
+    } catch (err) {
+      console.error('Error calculating balance:', err);
     }
-  } catch (err) {
-    console.error('Error calculating balance:', err);
-  }
-};
+  };
 
-  // Function to check if a date is a weekend
   const isWeekend = (dateString) => {
     const date = new Date(dateString);
     const day = date.getDay();
-    return day === 0 || day === 6; // 0 = Sunday, 6 = Saturday
+    return day === 0 || day === 6;
   };
 
-  // Function to get day name
   const getDayName = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { weekday: 'long' });
   };
 
-  // Function to get the next weekday from a given date
   const getNextWeekday = (dateString) => {
     const date = new Date(dateString);
     const day = date.getDay();
     
-    if (day === 0) { // Sunday
-      date.setDate(date.getDate() + 1); // Move to Monday
-    } else if (day === 6) { // Saturday
-      date.setDate(date.getDate() + 2); // Move to Monday
+    if (day === 0) {
+      date.setDate(date.getDate() + 1);
+    } else if (day === 6) {
+      date.setDate(date.getDate() + 2);
     }
     
     return date.toISOString().split('T')[0];
   };
 
-  // Function to calculate business days between two dates (excludes weekends)
   const calculateBusinessDays = (startDate, endDate) => {
     if (!startDate || !endDate) return 0;
     
@@ -180,11 +161,9 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     return businessDays;
   };
 
-  // Function to validate dates and set warnings
   const validateDates = (startDate, endDate) => {
     const warnings = [];
     
-    // Only validate weekdays for non-maternity/paternity leaves
     if (!['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType)) {
       if (startDate && isWeekend(startDate)) {
         warnings.push({
@@ -210,7 +189,6 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
       });
     }
 
-    // Check if dates include weekends in the period (for non-maternity/paternity)
     if (!['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType) && 
         startDate && endDate && !isWeekend(startDate) && !isWeekend(endDate)) {
       const totalDays = calculateTotalDays(startDate, endDate);
@@ -229,7 +207,6 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     return warnings.length === 0;
   };
 
-  // Function to calculate total calendar days
   const calculateTotalDays = (startDate, endDate) => {
     if (!startDate || !endDate) return 0;
     const start = new Date(startDate);
@@ -237,23 +214,19 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     return Math.ceil((end - start) / (1000 * 3600 * 24)) + 1;
   };
 
-  // Enhanced function to handle start date change
   const handleStartDateChange = (e) => {
     const { value } = e.target;
     
-    // Only validate weekdays for non-maternity/paternity leaves
     if (!['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType) && value && isWeekend(value)) {
       setSubmitMessage(`Start date cannot be a weekend. Please select a weekday.`);
       setIsError(true);
       
-      // Auto-correct to next weekday
       const nextWeekday = getNextWeekday(value);
       const updatedFormData = {
         ...formData,
         startDate: nextWeekday
       };
 
-      // If end date is before new start date, clear end date
       if (formData.endDate && nextWeekday && new Date(formData.endDate) < new Date(nextWeekday)) {
         updatedFormData.endDate = '';
       }
@@ -268,7 +241,6 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
       startDate: value
     };
 
-    // If end date is before new start date, clear end date
     if (formData.endDate && value && new Date(formData.endDate) < new Date(value)) {
       updatedFormData.endDate = '';
     }
@@ -279,16 +251,13 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     setSubmitMessage("");
   };
 
-  // Enhanced function to handle end date change
   const handleEndDateChange = (e) => {
     const { value } = e.target;
     
-    // Only validate weekdays for non-maternity/paternity leaves
     if (!['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType) && value && isWeekend(value)) {
       setSubmitMessage(`End date cannot be a weekend. Please select a weekday.`);
       setIsError(true);
       
-      // Auto-correct to next weekday
       const nextWeekday = getNextWeekday(value);
       setFormData({
         ...formData,
@@ -298,7 +267,6 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
       return;
     }
 
-    // Validate that end date is not before start date
     if (value && formData.startDate && new Date(value) < new Date(formData.startDate)) {
       setSubmitMessage('End date cannot be before start date.');
       setIsError(true);
@@ -314,12 +282,10 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     setSubmitMessage("");
   };
 
-  // Auto-calculate end date for maternity/paternity leave
   const handleLeaveTypeChange = (e) => {
     const { value } = e.target;
     setFormData(prev => ({ ...prev, leaveType: value }));
     
-    // Auto-calculate end date for maternity/paternity leave
     if (value === 'Maternity Leave' && formData.startDate) {
       const startDate = new Date(formData.startDate);
       startDate.setMonth(startDate.getMonth() + leaveSettings.maternityLeaveMonths);
@@ -339,17 +305,14 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
     return token;
   };
 
-  // Fetch current user info and determine role
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         const token = getToken();
         if (!token) return;
 
-        // Fetch leave settings first
         await fetchLeaveSettings();
 
-        // Fetch current user info
         const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -358,34 +321,32 @@ const calculateAvailableBalance = async (totalAnnualBalance) => {
         const userData = await userResponse.json();
         setCurrentUser(userData);
 
-        // Determine user role from authorities or role field
         const authorities = userData.authorities || [];
         const roleFromBackend = userData.role || "";
         
-       let role = "EMPLOYEE";
-if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
-  role = "ADMIN";
-} else if (authorities.includes("ROLE_SUPERVISOR") || roleFromBackend === "ROLE_SUPERVISOR") {
-  role = "SUPERVISOR";
-} else if (authorities.includes("ROLE_PLANNER") || roleFromBackend === "ROLE_PLANNER") {
-  role = "PLANNER";
-} else if (authorities.includes("ROLE_HR") || roleFromBackend === "ROLE_HR") {
-  role = "HR";
-} else if (authorities.includes("ROLE_PROCUREMENT_OFFICER") || roleFromBackend === "ROLE_PROCUREMENT_OFFICER") {
-  role = "PROCUREMENT_OFFICER";
-} else if (authorities.includes("ROLE_INVENTORY") || roleFromBackend === "ROLE_INVENTORY") {
-  role = "INVENTORY";
-} else if (authorities.includes("ROLE_EMPLOYEE") || roleFromBackend === "ROLE_EMPLOYEE") {
-  role = "EMPLOYEE";
-} else if (authorities.includes("ROLE_CUSTOMER") || roleFromBackend === "ROLE_CUSTOMER") {
-  role = "CUSTOMER";
-  } else if (authorities.includes("ROLE_TRANSPORT") || roleFromBackend === "ROLE_TRANSPORT") {
-  role = "ROLE_TRANSPORT";
-}
+        let role = "EMPLOYEE";
+        if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
+          role = "ADMIN";
+        } else if (authorities.includes("ROLE_SUPERVISOR") || roleFromBackend === "ROLE_SUPERVISOR") {
+          role = "SUPERVISOR";
+        } else if (authorities.includes("ROLE_PLANNER") || roleFromBackend === "ROLE_PLANNER") {
+          role = "PLANNER";
+        } else if (authorities.includes("ROLE_HR") || roleFromBackend === "ROLE_HR") {
+          role = "HR";
+        } else if (authorities.includes("ROLE_PROCUREMENT_OFFICER") || roleFromBackend === "ROLE_PROCUREMENT_OFFICER") {
+          role = "PROCUREMENT_OFFICER";
+        } else if (authorities.includes("ROLE_INVENTORY") || roleFromBackend === "ROLE_INVENTORY") {
+          role = "INVENTORY";
+        } else if (authorities.includes("ROLE_EMPLOYEE") || roleFromBackend === "ROLE_EMPLOYEE") {
+          role = "EMPLOYEE";
+        } else if (authorities.includes("ROLE_CUSTOMER") || roleFromBackend === "ROLE_CUSTOMER") {
+          role = "CUSTOMER";
+        } else if (authorities.includes("ROLE_TRANSPORT") || roleFromBackend === "ROLE_TRANSPORT") {
+          role = "ROLE_TRANSPORT";
+        }
         
         setUserRole(role);
 
-        // For ALL roles, try to find their employee record first
         const empResponse = await fetch(
           `${API_BASE_URL}/api/employee/email/${userData.email}`,
           {
@@ -397,20 +358,23 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
           const empData = await empResponse.json();
           setCurrentEmployee(empData);
           setFormData((prev) => ({ ...prev, employeeId: empData.id }));
+          
+          // Calculate available balance
+          const annualBalance = empData.category?.annualLeaveDays || 20;
+          await calculateAvailableBalance(annualBalance);
         } else {
           console.warn("No employee record found for:", userData.email);
           setSubmitMessage("No employee record found for your account. Please contact administrator.");
           setIsError(true);
         }
 
-        // Only fetch all employees if user is ADMIN and needs to create requests for others
-       if (!['PROCUREMENT_OFFICER', 'CUSTOMER', 'INVENTORY','PLANNER'].includes(role)) {
-    const empResponse = await fetch(
-      `${API_BASE_URL}/api/employee/email/${userData.email}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+        if (!['PROCUREMENT_OFFICER', 'CUSTOMER', 'INVENTORY', 'PLANNER'].includes(role)) {
+          const allEmpResponse = await fetch(
+            `${API_BASE_URL}/api/employee`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
 
           if (allEmpResponse.ok) {
             const empData = await allEmpResponse.json();
@@ -453,20 +417,29 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
     }
   };
 
+  // FIXED: Optimized submit handler with better loading states and error handling
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Prevent multiple submissions
+    if (isSubmitting) {
+      console.log("Submission already in progress, ignoring duplicate click");
+      return;
+    }
+    
     setIsSubmitting(true);
     setIsError(false);
-    setSubmitMessage("");
+    setSubmitMessage("Submitting leave request...");
 
     try {
       const token = getValidToken();
 
+      // Validation
       if (!formData.employeeId || !formData.leaveType || !formData.startDate || !formData.reason) {
         throw new Error("Please fill in all required fields");
       }
 
-      // Auto-calculate end date for maternity/paternity leave if not provided
+      // Auto-calculate end date for maternity/paternity leave
       let finalEndDate = formData.endDate;
       if (!finalEndDate && formData.leaveType === 'Maternity Leave') {
         const startDate = new Date(formData.startDate);
@@ -478,7 +451,7 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
         finalEndDate = startDate.toISOString().split('T')[0];
       }
 
-      // Validate dates are weekdays (for non-maternity/paternity leaves)
+      // Validate weekdays for non-maternity/paternity leaves
       if (!['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType)) {
         if (isWeekend(formData.startDate)) {
           throw new Error("Start date must be a weekday (Monday to Friday)");
@@ -509,6 +482,9 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
         hrStatus: "Pending"
       };
 
+      setSubmitMessage("Creating leave request...");
+      
+      // Step 1: Create leave request
       const response = await fetch(`${API_BASE_URL}/api/leave`, {
         method: "POST",
         headers: {
@@ -518,69 +494,81 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
         body: JSON.stringify(leaveRequest),
       });
 
-      if (response.ok) {
-        if (file && formData.leaveType === "Sick Leave") {
-          await uploadAttachment(response, file, token);
-        }
-
-        setSubmitMessage("Leave request submitted successfully!");
-        setIsError(false);
-
-        // Reset form
-        setFormData({
-          employeeId: currentEmployee?.id || "",
-          leaveType: "",
-          startDate: "",
-          endDate: "",
-          reason: "",
-          status: "Pending",
-        });
-        setFile(null);
-        setFileName("");
-        setDateWarnings([]);
-
-        setTimeout(() => {
-          if (userRole === "EMPLOYEE" || userRole === "SUPERVISOR" || userRole === "PLANNER" || userRole === "HR") {
-            navigate("/employeeDashboard");
-          } else {
-            navigate("/employeeDashboard");
-          }
-        }, 2000);
-      } else {
-        throw new Error("Failed to submit leave request");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to submit leave request");
       }
+
+      const savedLeave = await response.json();
+      setSubmitMessage("Leave request created, uploading attachment...");
+
+      // Step 2: Upload attachment if needed (do this in parallel or sequentially)
+      let attachmentUploadSuccess = true;
+      if (file && formData.leaveType === "Sick Leave") {
+        try {
+          const formDataFile = new FormData();
+          formDataFile.append("file", file);
+
+          const uploadResponse = await fetch(
+            `${API_BASE_URL}/api/leave/${savedLeave.id}/attachment`,
+            {
+              method: "POST",
+              headers: { 
+                Authorization: `Bearer ${token}`,
+              },
+              body: formDataFile,
+            }
+          );
+
+          if (!uploadResponse.ok) {
+            console.warn("Attachment upload failed, but leave request was created");
+            attachmentUploadSuccess = false;
+            setSubmitMessage("Leave request created but attachment upload failed. You can upload it later.");
+          } else {
+            setSubmitMessage("Leave request submitted successfully with attachment!");
+          }
+        } catch (uploadError) {
+          console.error("Attachment upload error:", uploadError);
+          attachmentUploadSuccess = false;
+          setSubmitMessage("Leave request created but attachment upload failed. You can upload it later.");
+        }
+      } else {
+        setSubmitMessage("Leave request submitted successfully!");
+      }
+
+      setIsError(false);
+
+      // Reset form
+      setFormData({
+        employeeId: currentEmployee?.id || "",
+        leaveType: "",
+        startDate: "",
+        endDate: "",
+        reason: "",
+        status: "Pending",
+      });
+      setFile(null);
+      setFileName("");
+      setDateWarnings([]);
+
+      // Navigate after a short delay to show success message
+      setTimeout(() => {
+        navigate("/employeeDashboard");
+      }, 2000);
+
     } catch (error) {
+      console.error("Submit error:", error);
       setSubmitMessage(error.message);
       setIsError(true);
-    } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const uploadAttachment = async (leaveResponse, file, token) => {
-    try {
-      const leaveData = await leaveResponse.json();
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadResponse = await fetch(
-        `${API_BASE_URL}/api/leave/${leaveData.id}/attachment`,
-        {
-          method: "POST",
-          headers: { 
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
+    } finally {
+      // Don't set isSubmitting to false immediately if we're navigating
+      // Let the navigation handle it
+      setTimeout(() => {
+        if (!submitMessage.includes("successfully")) {
+          setIsSubmitting(false);
         }
-      );
-
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload attachment");
-      }
-      
-      console.log("Attachment uploaded successfully");
-    } catch (error) {
-      console.error("Attachment upload failed:", error);
+      }, 1000);
     }
   };
 
@@ -604,7 +592,7 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
     }
   };
 
-  // Show loading state while determining user role and employee data
+  // Loading state
   if (!currentUser || !currentEmployee) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -652,7 +640,7 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
                   {currentUser.name || currentUser.username}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {getRoleDisplayName()}
+                  {getRoleDisplayName()} • {availableBalance} days remaining
                 </p>
               </div>
             </div>
@@ -737,7 +725,7 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
                   onChange={handleStartDateChange}
                   className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
                   required
-                  min={new Date().toISOString().split('T')[0]}
+                  // Removed min restriction to allow past dates
                 />
                 {formData.startDate && !['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType) && (
                   <p className={`text-xs ${isWeekend(formData.startDate) ? 'text-red-600' : 'text-green-600'}`}>
@@ -747,7 +735,6 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
                 )}
               </div>
               
-              {/* End Date - Conditional rendering based on leave type */}
               {['Maternity Leave', 'Paternity Leave'].includes(formData.leaveType) ? (
                 <div className="space-y-2">
                   <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700">
@@ -779,7 +766,7 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
                     onChange={handleEndDateChange}
                     className="w-full p-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white transition-colors"
                     required
-                    min={formData.startDate || new Date().toISOString().split('T')[0]}
+                    // Removed min restriction to allow past dates
                   />
                   {formData.endDate && (
                     <p className={`text-xs ${isWeekend(formData.endDate) ? 'text-red-600' : 'text-green-600'}`}>
@@ -875,7 +862,6 @@ if (authorities.includes("ROLE_ADMIN") || roleFromBackend === "ROLE_ADMIN") {
                     accept=".pdf,.jpg,.jpeg,.png"
                     className="hidden"
                     id="file-upload"
-                    required
                   />
                   <label htmlFor="file-upload" className="cursor-pointer">
                     <ArrowUpTrayIcon className="h-8 w-8 text-gray-400 mx-auto mb-3" />

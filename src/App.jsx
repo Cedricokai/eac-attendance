@@ -3,7 +3,6 @@ import { Routes, Route } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -37,6 +36,7 @@ import LeaveStatus from "./pages/Eac-attendance/attendance/leave-status";
 import Payslip from "./pages/Eac-attendance/attendance/payslip";
 import PayslipCard from "./pages/Eac-attendance/attendance/PayslipCard";
 import JobsManagement from "./pages/Eac-attendance/attendance/JobsManagement";
+import JobDetailView from "./pages/Eac-attendance/attendance/JobDetailView"; // ADD THIS IMPORT
 import GenerateInvoice from "./pages/Eac-attendance/attendance/GenerateInvoice";
 import LeaveBalanceTracker from "./pages/Eac-attendance/attendance/LeaveBalanceTracker";
 import QuotationMaster from "./pages/Eac-attendance/attendance/quotationMaster";
@@ -81,6 +81,13 @@ import Search from "./components/search";
 import MainSidebar from './pages/Eac-attendance/mainSidebar';
 import Sidebar from "./pages/Transport/Sidebar";
 import LeaveDetailsModal from "./pages/Eac-attendance/attendance/leaveDetailsModal";
+import QuickApprove from "./pages/Eac-attendance/attendance/QuickApprove";
+import QuickReject from "./pages/Eac-attendance/attendance/QuickReject";
+import PayrollReports from "./pages/Eac-attendance/attendance/PayrollReports.jsx";
+import ActivityLogs from "./pages/Eac-attendance/attendance/ActivityLogs.jsx";
+import NotificationsPage from "./pages/NotificationsPage.jsx";
+import DirectPurchase from "./pages/Eac-inventory/DirectPurchase.jsx";
+import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx";
 
 function App() {
   return (
@@ -132,7 +139,41 @@ function App() {
               <PlannerDashboard />
             </ProtectedRoute>
           } />
-          
+
+          <Route path="/QuickApprove" element={
+            <ProtectedRoute>
+              <QuickApprove />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/QuickReject" element={
+            <ProtectedRoute>
+              <QuickReject />
+            </ProtectedRoute>
+          } />
+
+             <Route path="/ActivityLogs" element={
+            <ProtectedRoute>
+              <ActivityLogs />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/PayrollReports" element={
+            <ProtectedRoute>
+              <PayrollReports/>
+            </ProtectedRoute>
+          } />
+
+      <Route path="/DirectPurchase" element={<DirectPurchase />} />
+<Route path="/DirectPurchase/:id" element={<DirectPurchaseDetail />} />
+
+          <Route path="/NotificationsPage" element={
+            <ProtectedRoute>
+              <NotificationsPage/>
+            </ProtectedRoute>
+          } />
+
+
           <Route path="/supervisorDashboard" element={
             <ProtectedRoute>
               <SupervisorDashboard />
@@ -151,7 +192,7 @@ function App() {
             </ProtectedRoute>
           } />
 
-           <Route path="/leaveDetailsModal" element={
+          <Route path="/leaveDetailsModal" element={
             <ProtectedRoute>
               <LeaveDetailsModal />
             </ProtectedRoute>
@@ -266,9 +307,17 @@ function App() {
             </ProtectedRoute>
           } />
           
+          {/* Job Routes - ADD THESE TWO */}
           <Route path="/JobsManagement" element={
             <ProtectedRoute>
               <JobsManagement />
+            </ProtectedRoute>
+          } />
+          
+          {/* NEW: Direct job view route - opens specific job */}
+          <Route path="/jobs/:jobId" element={
+            <ProtectedRoute>
+              <JobDetailView />
             </ProtectedRoute>
           } />
           
