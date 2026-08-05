@@ -41,6 +41,7 @@ import {
   Filter,
   Search,
   X,
+  Utensils // ✅ ADDED for Meals
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
@@ -999,6 +1000,20 @@ const EmployeeDashboard = () => {
                   <p className="text-sm text-gray-600">Check your payslip</p>
                 </div>
               </button>
+
+              {/* ✅ NEW: My Meals Quick Action */}
+              <Link
+                to="/my-meals"
+                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="p-2 bg-amber-100 rounded-lg mr-3">
+                  <Utensils className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">My Meals</h3>
+                  <p className="text-sm text-gray-600">View meal plan & requests</p>
+                </div>
+              </Link>
             </div>
           </div>
         </div>

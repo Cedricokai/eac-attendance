@@ -164,7 +164,10 @@ function MainSidebar({ isCollapsed = false }) {
           page.name &&
           !page.name.toLowerCase().includes("signin") &&
           !page.name.toLowerCase().includes("signup") &&
-          !page.name.toLowerCase().includes("login")
+          !page.name.toLowerCase().includes("login") &&
+          // Remove "My Meals" from sidebar pages
+          !page.name.toLowerCase().includes("meal") &&
+          !page.path.includes("/my-meals")
         );
         
         setAccessiblePages(filteredPages);
