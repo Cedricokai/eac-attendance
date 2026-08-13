@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import EmployeePortalNavigation from "../Eac-attendance/attendance/EmployeePortalNavigation";
 
 const InventoryRequest = () => {
   const [products, setProducts] = useState([]);
@@ -619,7 +620,11 @@ const InventoryRequest = () => {
   }
 
   return (
-    <div className="p-6 dark:bg-gray-900 min-h-screen">
+    <div className="min-h-screen p-4 sm:p-6 lg:pl-72 dark:bg-gray-900">
+      <EmployeePortalNavigation
+        employeeName={employeeDetails.name}
+        jobPosition={employeeDetails.position}
+      />
       <div className="max-w-7xl mx-auto">
         <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800 border border-blue-100 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4">

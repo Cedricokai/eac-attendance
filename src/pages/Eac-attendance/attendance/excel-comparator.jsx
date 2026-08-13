@@ -145,7 +145,7 @@ function ExcelComparator() {
   const deleteComparisonFromHistory = async (comparisonId, event) => {
     event.stopPropagation(); // Prevent triggering the parent click
     
-    if (!confirm('Are you sure you want to delete this comparison from history?')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this comparison from history?')) return;
     
     try {
       const token = localStorage.getItem("jwtToken");
@@ -261,7 +261,7 @@ function ExcelComparator() {
   };
 
   const deleteRuleSet = async (id) => {
-    if (!confirm('Are you sure you want to delete this rule set?')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this rule set?')) return;
     
     try {
       const token = localStorage.getItem("jwtToken");
@@ -1823,8 +1823,8 @@ function RuleSetManager({ ruleSets, onSave, onDelete, onClose, isSaving }) {
     }
   };
 
-  const handleRemoveCode = (code) => {
-    if (confirm(`Remove code ${code}?`)) {
+  const handleRemoveCode = async (code) => {
+    if (await window.appConfirm(`Remove code ${code}?`)) {
       setEditingRuleSet(prev => {
         const newRules = { ...prev.rules };
         delete newRules[code];

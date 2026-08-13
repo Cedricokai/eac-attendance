@@ -56,6 +56,21 @@ const getHeaders = () => ({
   'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`
 });
 
+const normalizeRole = (role) => {
+  if (!role) return '';
+  return String(role)
+    .trim()
+    .toUpperCase()
+    .replace(/^ROLE_/, '');
+};
+
+const canActForRole = (user, requiredRole) => {
+  const currentRole = normalizeRole(user?.role);
+  const targetRole = normalizeRole(requiredRole);
+
+  return currentRole === 'ADMIN' || currentRole === targetRole;
+};
+
 const STATUS_CONFIG = {
   PENDING: { label: 'Pending', color: 'yellow' },
   ACCOUNTANT_APPROVED: { label: 'Approved by Accountant', color: 'indigo' },
@@ -79,6 +94,8 @@ const DirectPurchase = () => {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
+  const [accountants, setAccountants] = useState([]);
+  const [loadingAccountants, setLoadingAccountants] = useState(false);
 
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -90,8 +107,7 @@ const DirectPurchase = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newRequest, setNewRequest] = useState({
     requestDate: new Date().toISOString().split('T')[0],
-    requester: '',
-    accountant: '',
+    accountantUserId: '',
     notes: '',
     items: [{ description: '', quantity: 1, unitPrice: 0, total: 0 }]
   });
@@ -149,8 +165,9 @@ const DirectPurchase = () => {
         if (res.ok) {
           const data = await res.json();
           setUser({
+            id: data.id,
             name: data.username,
-            role: data.role.replace("ROLE_", "").toLowerCase(),
+            role: normalizeRole(data.role),
             email: data.email
           });
         }
@@ -181,6 +198,53 @@ const DirectPurchase = () => {
     }
   };
 
+  const fetchAccountants = async () => {
+    setLoadingAccountants(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/direct-purchases/approvers/ACCOUNTANT`,
+        {
+          headers: getHeaders()
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const safeList = Array.isArray(data) ? data : [];
+
+      setAccountants(safeList);
+
+      setNewRequest(previous => {
+        const stillValid = safeList.some(
+          accountant =>
+            String(accountant.id) ===
+            String(previous.accountantUserId)
+        );
+
+        return {
+          ...previous,
+          accountantUserId: stillValid
+            ? previous.accountantUserId
+            : ''
+        };
+      });
+    } catch (err) {
+      console.error('Failed to load accountants:', err);
+      setAccountants([]);
+      toast.error(
+        err.message ||
+        'Failed to load users with the Accountant role'
+      );
+    } finally {
+      setLoadingAccountants(false);
+    }
+  };
+
   const fetchRequests = async () => {
     setLoading(true);
     try {
@@ -204,6 +268,7 @@ const DirectPurchase = () => {
 
   useEffect(() => {
     fetchRequests();
+    fetchAccountants();
   }, []);
 
   const handleAddItemRow = () => {
@@ -237,17 +302,22 @@ const DirectPurchase = () => {
 
   const handleNewRequestChange = (e) => {
     const { name, value } = e.target;
-    setNewRequest(prev => ({ ...prev, [name]: value }));
+
+    setNewRequest(previous => ({
+      ...previous,
+      [name]: value
+    }));
   };
 
   const handleSubmitRequest = async (e) => {
     e.preventDefault();
-    if (!newRequest.requester.trim()) {
-      toast.error('Requester (Procurement Officer) is required');
+    if (!user?.email) {
+      toast.error('Your logged-in user account does not have an email address');
       return;
     }
-    if (!newRequest.accountant.trim()) {
-      toast.error('Accountant is required');
+
+    if (!newRequest.accountantUserId) {
+      toast.error('Please select an Accountant');
       return;
     }
     if (newRequest.items.some(item => !item.description.trim() || item.quantity <= 0 || item.unitPrice < 0)) {
@@ -258,11 +328,14 @@ const DirectPurchase = () => {
 
     const payload = {
       requestDate: newRequest.requestDate,
-      requester: newRequest.requester,
-      accountant: newRequest.accountant,
+      accountantUserId: Number(newRequest.accountantUserId),
       notes: newRequest.notes,
-      items: newRequest.items,
-      totalAmount: grandTotal
+      items: newRequest.items.map(item => ({
+        description: item.description.trim(),
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        total: Number(item.total || 0)
+      }))
     };
 
     setIsSubmitting(true);
@@ -281,8 +354,7 @@ const DirectPurchase = () => {
       setIsCreateModalOpen(false);
       setNewRequest({
         requestDate: new Date().toISOString().split('T')[0],
-        requester: '',
-        accountant: '',
+        accountantUserId: '',
         notes: '',
         items: [{ description: '', quantity: 1, unitPrice: 0, total: 0 }]
       });
@@ -353,7 +425,7 @@ const DirectPurchase = () => {
   };
 
   const handleDeleteRequest = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this request? This action cannot be undone.')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this request? This action cannot be undone.')) return;
     try {
       const response = await fetch(`${API_BASE_URL}/api/direct-purchases/${id}`, {
         method: 'DELETE',
@@ -407,6 +479,13 @@ const DirectPurchase = () => {
     setActiveTab(tabKey);
     setFilterStatus(TAB_TO_STATUS[tabKey] || 'all');
   };
+
+  const currentRole = normalizeRole(user?.role);
+
+  const canApproveAsAccountant = canActForRole(user, 'ACCOUNTANT');
+  const canApproveAsReviewer = canActForRole(user, 'REVIEWER');
+  const canMarkPaid = canActForRole(user, 'FINANCE');
+  const canDelete = currentRole === 'ADMIN' || currentRole === 'PROCUREMENT';
 
   const RequestsTable = ({ requestList, showActions = true }) => (
     <Card className="overflow-hidden border border-gray-200">
@@ -485,7 +564,7 @@ const DirectPurchase = () => {
                       </td>
                       <td className="p-4 border-b">
                         <Typography variant="small" className="font-bold text-green-600">
-                          ${(req.totalAmount || 0).toFixed(2)}
+                          ₵{(req.totalAmount || 0).toFixed(2)}
                         </Typography>
                       </td>
                       <td className="p-4 border-b">
@@ -494,7 +573,7 @@ const DirectPurchase = () => {
                       {showActions && (
                         <td className="p-4 border-b">
                           <div className="flex gap-2 flex-wrap">
-                            {isPending && (
+                            {isPending && canApproveAsAccountant && (
                               <>
                                 <Tooltip content="Approve (Accountant)">
                                   <IconButton
@@ -518,7 +597,7 @@ const DirectPurchase = () => {
                                 </Tooltip>
                               </>
                             )}
-                            {isAccountantApproved && (
+                            {isAccountantApproved && canApproveAsReviewer && (
                               <Tooltip content="Reviewer Approve">
                                 <IconButton
                                   variant="text"
@@ -530,7 +609,7 @@ const DirectPurchase = () => {
                                 </IconButton>
                               </Tooltip>
                             )}
-                            {isReviewerApproved && (
+                            {isReviewerApproved && canMarkPaid && (
                               <Tooltip content="Mark as Paid">
                                 <IconButton
                                   variant="text"
@@ -552,7 +631,7 @@ const DirectPurchase = () => {
                                 <EyeIcon className="h-5 w-5" />
                               </IconButton>
                             </Tooltip>
-                            {(isPending || isRejected) && (
+                            {(isPending || isRejected) && canDelete && (
                               <Tooltip content="Delete">
                                 <IconButton
                                   variant="text"
@@ -655,6 +734,17 @@ const DirectPurchase = () => {
                 <Typography>{error}</Typography>
               </Alert>
             )}
+
+            <Alert color="blue" className="mb-6">
+              <Typography variant="small" className="font-semibold">
+                Current role: {currentRole || 'Unknown'}
+              </Typography>
+              <Typography variant="small">
+                Accountant users approve pending requests, Reviewer users approve
+                Accountant-approved requests, and Finance users mark reviewed
+                requests as paid.
+              </Typography>
+            </Alert>
 
             {/* ========== CLICKABLE SUMMARY CARDS ========== */}
             <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
@@ -895,26 +985,46 @@ const DirectPurchase = () => {
                       />
                     </div>
                     <div>
-                      <Typography variant="small" className="font-semibold mb-2">Requester (Procurement Officer)</Typography>
-                      <Input
-                        type="text"
-                        name="requester"
-                        value={newRequest.requester}
-                        onChange={handleNewRequestChange}
-                        placeholder="Enter requester name"
-                        required
-                      />
+                      <Typography variant="small" className="font-semibold mb-2">
+                        Requester
+                      </Typography>
+                      <div className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2">
+                        <Typography variant="small" className="font-medium text-gray-900">
+                          {user?.name || 'Loading user...'}
+                        </Typography>
+                        <Typography variant="small" className="text-xs text-gray-500">
+                          {user?.email || 'No email available'}
+                        </Typography>
+                      </div>
                     </div>
                     <div>
-                      <Typography variant="small" className="font-semibold mb-2">Accountant (First Approver)</Typography>
-                      <Input
-                        type="text"
-                        name="accountant"
-                        value={newRequest.accountant}
+                      <Typography variant="small" className="font-semibold mb-2">
+                        Accountant (First Approver)
+                      </Typography>
+                      <select
+                        name="accountantUserId"
+                        value={newRequest.accountantUserId}
                         onChange={handleNewRequestChange}
-                        placeholder="Enter accountant name"
+                        disabled={loadingAccountants}
                         required
-                      />
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
+                      >
+                        <option value="">
+                          {loadingAccountants
+                            ? 'Loading Accountants...'
+                            : 'Select an Accountant'}
+                        </option>
+                        {accountants.map(accountant => (
+                          <option key={accountant.id} value={accountant.id}>
+                            {accountant.name} — {accountant.email}
+                          </option>
+                        ))}
+                      </select>
+                      {!loadingAccountants && accountants.length === 0 && (
+                        <Typography variant="small" className="mt-1 text-xs text-red-600">
+                          No enabled users with ROLE_ACCOUNTANT were found.
+                        </Typography>
+                      )}
                     </div>
                   </div>
 
@@ -937,8 +1047,8 @@ const DirectPurchase = () => {
                           <tr>
                             <th className="p-2 text-left text-xs font-medium text-gray-500">Description</th>
                             <th className="p-2 text-left text-xs font-medium text-gray-500">Qty</th>
-                            <th className="p-2 text-left text-xs font-medium text-gray-500">Unit Price ($)</th>
-                            <th className="p-2 text-left text-xs font-medium text-gray-500">Total ($)</th>
+                            <th className="p-2 text-left text-xs font-medium text-gray-500">Unit Price (₵)</th>
+                            <th className="p-2 text-left text-xs font-medium text-gray-500">Total (₵)</th>
                             <th className="p-2 text-center text-xs font-medium text-gray-500">Action</th>
                           </tr>
                         </thead>
@@ -979,7 +1089,7 @@ const DirectPurchase = () => {
                               </td>
                               <td className="p-2">
                                 <Typography variant="small" className="font-semibold text-green-600">
-                                  ${(item.total || 0).toFixed(2)}
+                                  ₵{(item.total || 0).toFixed(2)}
                                 </Typography>
                               </td>
                               <td className="p-2 text-center">
@@ -999,7 +1109,7 @@ const DirectPurchase = () => {
                           <tr>
                             <td colSpan="3" className="p-2 text-right font-bold">Grand Total:</td>
                             <td className="p-2 font-bold text-lg text-green-600">
-                              ${newRequest.items.reduce((sum, item) => sum + (item.total || 0), 0).toFixed(2)}
+                              ₵{newRequest.items.reduce((sum, item) => sum + (item.total || 0), 0).toFixed(2)}
                             </td>
                             <td></td>
                           </tr>
@@ -1021,7 +1131,16 @@ const DirectPurchase = () => {
                 </DialogBody>
                 <DialogFooter className="flex justify-between p-6 border-t border-gray-200">
                   <Button variant="outlined" color="gray" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
-                  <Button type="submit" color="blue" disabled={isSubmitting} className="flex items-center gap-2">
+                  <Button
+                    type="submit"
+                    color="blue"
+                    disabled={
+                      isSubmitting ||
+                      loadingAccountants ||
+                      !newRequest.accountantUserId
+                    }
+                    className="flex items-center gap-2"
+                  >
                     {isSubmitting ? <Spinner className="h-4 w-4" /> : <CheckIcon className="h-5 w-5" />}
                     {isSubmitting ? 'Submitting...' : 'Submit Request'}
                   </Button>
@@ -1043,7 +1162,7 @@ const DirectPurchase = () => {
                   <div className="mb-4">
                     <Typography variant="small" className="font-semibold">Request #{selectedRequest.requestNumber || selectedRequest.id}</Typography>
                     <Typography variant="small" className="text-gray-600">
-                      Requester: {selectedRequest.requester} | Amount: ${(selectedRequest.totalAmount || 0).toFixed(2)}
+                      Requester: {selectedRequest.requester} | Amount: ₵{(selectedRequest.totalAmount || 0).toFixed(2)}
                     </Typography>
                   </div>
                 )}

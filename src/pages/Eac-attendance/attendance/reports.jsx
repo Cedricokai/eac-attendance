@@ -99,6 +99,28 @@ function Report() {
   const itemsPerPage = 20;
   
   const [expandedRows, setExpandedRows] = useState([]);
+  const [showRawBiometric, setShowRawBiometric] = useState(false);
+  const [rawEvents, setRawEvents] = useState([]);
+  const [rawLoading, setRawLoading] = useState(false);
+  const [rawPage, setRawPage] = useState(0);
+  const [rawTotalPages, setRawTotalPages] = useState(1);
+  const [selectedRawEvent, setSelectedRawEvent] = useState(null);
+  const [rawFilters, setRawFilters] = useState({ employeeId: "", startDate: "", endDate: "", source: "", status: "" });
+
+  const employeeNamesById = useMemo(() => {
+    return new Map(employees.map((employee) => [
+      String(employee.id),
+      [employee.firstName, employee.lastName].filter(Boolean).join(" ") || employee.employeeId || `Employee ${employee.id}`
+    ]));
+  }, [employees]);
+
+  const getRawEventEmployeeName = (event) => {
+    if (event.employeeId != null) {
+      const linkedEmployeeName = employeeNamesById.get(String(event.employeeId));
+      if (linkedEmployeeName) return linkedEmployeeName;
+    }
+    return event.rawEmployeeName || event.deviceUserId || "Unmatched";
+  };
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -119,6 +141,38 @@ function Report() {
   };
 
   const API_BASE_URL = getApiBaseUrl();
+
+  const fetchRawEvents = async (page = rawPage) => {
+    setRawLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), size: "100" });
+      Object.entries(rawFilters).forEach(([key, value]) => value && params.set(key, value));
+      const response = await fetch(`${API_BASE_URL}/api/biometric/raw-events?${params}`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        if (response.status === 401) throw new Error("Your session has expired. Please sign in again.");
+        if (response.status === 403) throw new Error("Only HR and administrators can view raw biometric events.");
+        throw new Error(message || `Failed to load raw biometric events (${response.status})`);
+      }
+      const data = await response.json();
+      setRawEvents(data.content || []);
+      setRawPage(data.number || 0);
+      setRawTotalPages(Math.max(data.totalPages || 1, 1));
+    } catch (e) { setError(e.message); } finally { setRawLoading(false); }
+  };
+
+  const exportRawEvents = () => {
+    const rows = rawEvents.map(({ employeeId, rawPayload, ...event }) => ({
+      ...event,
+      employeeName: getRawEventEmployeeName({ ...event, employeeId }),
+      rawPayload
+    }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Raw Biometric Events");
+    XLSX.writeFile(workbook, `raw_biometric_events_${rawFilters.startDate || "all"}_${rawFilters.endDate || "all"}.xlsx`);
+  };
 
   const getToken = () => {
     return localStorage.getItem('jwtToken');
@@ -387,8 +441,15 @@ function Report() {
   };
 
   const exportToExcel = () => {
+    const selectedEmployee = employees.find(
+      (employee) => String(employee.id) === String(filters.employeeId)
+    );
+    const employeeName = selectedEmployee
+      ? `${selectedEmployee.firstName || ''} ${selectedEmployee.lastName || ''}`.trim()
+      : 'All Employees';
     const wsData = [
-      ['Attendance Report', 'Generated', new Date().toLocaleDateString()],
+      ['Attendance Report', employeeName, new Date().toLocaleDateString()],
+      ['Period', filters.startDate || 'All dates', filters.endDate || 'All dates'],
       [''],
       ['Overall Summary', '', ''],
       ['Total Records', overallSummary.totalRecords],
@@ -426,7 +487,13 @@ function Report() {
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
-    XLSX.writeFile(wb, `attendance_report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const employeeFileName = selectedEmployee
+      ? employeeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      : 'all-employees';
+    const periodFileName = filters.startDate && filters.endDate
+      ? `${filters.startDate}_to_${filters.endDate}`
+      : new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `attendance_report_${employeeFileName}_${periodFileName}.xlsx`);
     setSuccess("Report exported successfully!");
     setTimeout(() => setSuccess(""), 3000);
   };
@@ -691,6 +758,10 @@ function Report() {
             </div>
             
             <div className="flex items-center gap-2">
+              <button onClick={() => { setShowRawBiometric(true); setRawPage(0); setTimeout(() => fetchRawEvents(0), 0); }} className="flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-white transition hover:bg-slate-800">
+                <FileText size={18} />
+                <span className="hidden sm:inline">Raw Biometric</span>
+              </button>
               <button onClick={fetchData} className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition">
                 <RefreshCw size={18} />
                 <span className="hidden sm:inline">Refresh</span>
@@ -845,8 +916,55 @@ function Report() {
               </div>
             </div>
 
+            <div className="mt-4 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4">
+              <div className="mb-3 flex flex-col justify-between gap-1 sm:flex-row sm:items-center">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Employee attendance report</h3>
+                  <p className="text-xs text-gray-500">Choose one employee and the exact days you want to include.</p>
+                </div>
+                <span className="text-xs font-medium text-blue-700">{filteredData.length} matching records</span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                <select
+                  value={filters.employeeId}
+                  onChange={(e) => setFilters({ ...filters, employeeId: e.target.value })}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="">All employees</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.firstName} {employee.lastName} ({employee.employeeId || employee.id})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  aria-label="Report start date"
+                  value={filters.startDate}
+                  max={filters.endDate || undefined}
+                  onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                />
+                <input
+                  type="date"
+                  aria-label="Report end date"
+                  value={filters.endDate}
+                  min={filters.startDate || undefined}
+                  onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                />
+                <button
+                  onClick={exportToExcel}
+                  disabled={!filters.startDate || !filters.endDate || filteredData.length === 0}
+                  className="flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download size={16} /> Export report
+                </button>
+              </div>
+            </div>
+
             {/* Active Filters Display */}
-            {(filters.startDate || filters.endDate || filters.category || filters.department || filters.status) && (
+            {(filters.startDate || filters.endDate || filters.employeeId || filters.category || filters.department || filters.status) && (
               <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-gray-100">
                 <span className="text-xs text-gray-500">Active filters:</span>
                 {filters.startDate && (
@@ -854,6 +972,11 @@ function Report() {
                 )}
                 {filters.endDate && (
                   <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full">To: {filters.endDate}</span>
+                )}
+                {filters.employeeId && (
+                  <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-full">
+                    Employee: {employees.find((employee) => String(employee.id) === String(filters.employeeId))?.firstName || filters.employeeId}
+                  </span>
                 )}
                 {filters.category && (
                   <span className="px-2 py-1 bg-green-50 text-green-700 text-xs rounded-full">Category: {filters.category}</span>
@@ -868,6 +991,31 @@ function Report() {
               </div>
             )}
           </div>
+
+          {showRawBiometric && (
+            <div className="fixed inset-0 z-50 bg-slate-950/60 p-4 backdrop-blur-sm">
+              <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <div className="flex items-center justify-between border-b bg-slate-950 px-6 py-4 text-white">
+                  <div><h2 className="text-lg font-bold">Raw Biometric Events</h2><p className="text-xs text-slate-400">Original device punches for reporting and verification</p></div>
+                  <div className="flex gap-2"><button onClick={exportRawEvents} disabled={!rawEvents.length} className="rounded-lg bg-green-600 px-3 py-2 text-sm disabled:opacity-50"><Download size={16} className="inline mr-1" />Export</button><button onClick={() => setShowRawBiometric(false)} className="rounded-lg bg-white/10 p-2"><X size={18} /></button></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 border-b bg-slate-50 p-4 md:grid-cols-6">
+                  <select value={rawFilters.employeeId} onChange={e => setRawFilters({...rawFilters, employeeId:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All employees</option>{employees.map(e=><option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
+                  <input type="date" value={rawFilters.startDate} onChange={e=>setRawFilters({...rawFilters,startDate:e.target.value})} className="rounded-lg border px-3 py-2 text-sm" />
+                  <input type="date" value={rawFilters.endDate} onChange={e=>setRawFilters({...rawFilters,endDate:e.target.value})} className="rounded-lg border px-3 py-2 text-sm" />
+                  <select value={rawFilters.source} onChange={e=>setRawFilters({...rawFilters,source:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All sources</option><option value="ONEPASS">ONEPASS</option><option value="EXCEL_IMPORT">Excel import</option></select>
+                  <select value={rawFilters.status} onChange={e=>setRawFilters({...rawFilters,status:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All statuses</option><option value="RECEIVED">Received</option><option value="PROCESSED">Processed</option><option value="FAILED">Failed</option></select>
+                  <button onClick={()=>fetchRawEvents(0)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Apply filters</button>
+                </div>
+                <div className="flex-1 overflow-auto">
+                  <table className="min-w-full divide-y"><thead className="sticky top-0 bg-white"><tr>{["Time","Employee","Source","Punch","Method","Status","Attendance",""].map(h=><th key={h} className="px-4 py-3 text-left text-xs uppercase text-slate-500">{h}</th>)}</tr></thead><tbody className="divide-y">{rawEvents.map(event=><tr key={event.id} className="hover:bg-slate-50"><td className="px-4 py-3 text-sm">{event.eventTimestamp || event.receivedAt}</td><td className="px-4 py-3 text-sm">{getRawEventEmployeeName(event)}</td><td className="px-4 py-3 text-xs">{event.sourceType}</td><td className="px-4 py-3 text-sm">{event.punchType || "-"}</td><td className="px-4 py-3 text-sm">{event.verificationMethod || "-"}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${event.processingStatus==="PROCESSED"?"bg-green-100 text-green-700":event.processingStatus==="FAILED"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{event.processingStatus}</span></td><td className="px-4 py-3 text-xs">{event.attendanceId || "-"}</td><td className="px-4 py-3"><button onClick={()=>setSelectedRawEvent(event)} className="text-sm font-semibold text-blue-600">Payload</button></td></tr>)}</tbody></table>
+                  {!rawLoading && !rawEvents.length && <div className="p-12 text-center text-slate-500">No raw biometric events found.</div>}
+                </div>
+                <div className="flex items-center justify-between border-t px-5 py-3 text-sm"><span>Page {rawPage+1} of {rawTotalPages}</span><div className="flex gap-2"><button disabled={rawPage===0} onClick={()=>fetchRawEvents(rawPage-1)} className="rounded border px-3 py-1.5 disabled:opacity-40">Previous</button><button disabled={rawPage+1>=rawTotalPages} onClick={()=>fetchRawEvents(rawPage+1)} className="rounded border px-3 py-1.5 disabled:opacity-40">Next</button></div></div>
+              </div>
+              {selectedRawEvent && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={()=>setSelectedRawEvent(null)}><div className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl bg-slate-950 p-5 text-slate-100" onClick={e=>e.stopPropagation()}><div className="mb-3 flex justify-between"><h3 className="font-bold">Raw payload #{selectedRawEvent.id}</h3><button onClick={()=>setSelectedRawEvent(null)}><X size={18}/></button></div><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(typeof selectedRawEvent.rawPayload === "string" ? (()=>{try{return JSON.parse(selectedRawEvent.rawPayload)}catch{return selectedRawEvent.rawPayload}})() : selectedRawEvent.rawPayload, null, 2)}</pre></div></div>}
+            </div>
+          )}
 
           {/* Filter Modal */}
           {showFilterModal && (

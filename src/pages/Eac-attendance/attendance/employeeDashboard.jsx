@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import LeaveBalanceTracker from "./LeaveBalanceTracker";
 import InventoryRequestStatusTracker from "./InventoryRequestStatusTracker";
 import html2pdf from "html2pdf.js";
 import companyLogo from "../../../assets/companyLogo.jpg";
+import { useSettings } from "../context/SettingsContext";
 import {
   CalendarCheck,
   Users,
@@ -44,9 +45,13 @@ import {
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
+  const location = useLocation();
+  const { settings } = useSettings();
   const [accessiblePages, setAccessiblePages] = useState([]);
   const [filteredPages, setFilteredPages] = useState([]);
   const [pageSearchQuery, setPageSearchQuery] = useState("");
+  const [selectedModule, setSelectedModule] = useState("ALL");
+  const [showApplicationsWorkspace, setShowApplicationsWorkspace] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState({ username: "", roles: [], email: "" });
   const [leaveRequests, setLeaveRequests] = useState([]);
@@ -81,7 +86,10 @@ const EmployeeDashboard = () => {
   const payslipRef = useRef(null);
   const pdfRef = useRef(null);
 
-  const companyName = "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyName = settings.companyName || "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyContactLine = [settings.companyAddress, settings.companyEmail, settings.companyPhone]
+    .filter(Boolean)
+    .join(" • ");
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
@@ -172,9 +180,15 @@ const EmployeeDashboard = () => {
         setPayrollPeriods(data);
 
         if (data.length > 0) {
-          const years = [...new Set(data.map((period) => new Date(period.startDate).getFullYear()))];
+          const years = [...new Set(
+            data
+              .filter((period) => period.endDate)
+              .map((period) => new Date(period.endDate).getFullYear())
+          )];
           const currentYear = new Date().getFullYear();
-          setYearFilter(years.includes(currentYear) ? currentYear : Math.max(...years));
+          if (years.length > 0) {
+            setYearFilter(years.includes(currentYear) ? currentYear : Math.max(...years));
+          }
         }
       }
     } catch (err) {
@@ -217,6 +231,52 @@ const EmployeeDashboard = () => {
       setPayrollRecord(null);
     } finally {
       setLoadingPayslip(false);
+    }
+  };
+
+  const fetchAvailableEmployeePayslips = async (periods, employeeId) => {
+    if (!employeeId || !Array.isArray(periods) || periods.length === 0) {
+      setPayslips([]);
+      return;
+    }
+
+    setLoadingPayslips(true);
+    try {
+      const token = getToken();
+      const availablePeriods = await Promise.all(
+        periods.map(async (period) => {
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/payroll/employee-payslip?periodId=${period.id}&employeeId=${employeeId}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+            return response.ok ? period : null;
+          } catch (error) {
+            console.error(`Could not check payslip for period ${period.id}:`, error);
+            return null;
+          }
+        })
+      );
+
+      const employeePeriods = availablePeriods.filter(Boolean);
+      setPayslips(employeePeriods);
+
+      const employeeYears = [...new Set(
+        employeePeriods
+          .filter((period) => period.endDate)
+          .map((period) => new Date(period.endDate).getFullYear())
+      )];
+      if (employeeYears.length > 0) {
+        const currentYear = new Date().getFullYear();
+        setYearFilter(employeeYears.includes(currentYear) ? currentYear : Math.max(...employeeYears));
+      }
+    } finally {
+      setLoadingPayslips(false);
     }
   };
 
@@ -507,7 +567,7 @@ const EmployeeDashboard = () => {
 
             <div class="footer">
               <div><strong>${companyName}</strong></div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>${companyContactLine}</div>
               <div style="margin-top: 3px; font-size: 8px;">
                 This is a computer-generated payslip. No signature is required for digital copies.
               </div>
@@ -545,9 +605,12 @@ const EmployeeDashboard = () => {
     printWindow.document.close();
   };
 
-  const filteredPeriods = payrollPeriods.filter((period) => {
-    const periodYear = new Date(period.startDate).getFullYear();
-    const periodMonth = new Date(period.startDate).getMonth();
+  const filteredPeriods = payslips.filter((period) => {
+    if (!period.endDate) return false;
+
+    const periodEndDate = new Date(period.endDate);
+    const periodYear = periodEndDate.getFullYear();
+    const periodMonth = periodEndDate.getMonth();
 
     if (yearFilter && periodYear !== parseInt(yearFilter)) return false;
     if (monthFilter && periodMonth !== parseInt(monthFilter)) return false;
@@ -571,9 +634,11 @@ const EmployeeDashboard = () => {
     { value: "11", label: "December" },
   ];
 
-  const availableYears = [...new Set(payrollPeriods.map((period) => new Date(period.startDate).getFullYear()))].sort(
-    (a, b) => b - a
-  );
+  const availableYears = [...new Set(
+    payslips
+      .filter((period) => period.endDate)
+      .map((period) => new Date(period.endDate).getFullYear())
+  )].sort((a, b) => b - a);
 
   const handleGeneratePayslip = () => {
     if (!selectedPeriod) {
@@ -611,17 +676,27 @@ const EmployeeDashboard = () => {
             !page.name.toLowerCase().includes("register")
         );
 
-        const transformedPages = filteredPages.map((page) => ({
-          id: page.id,
-          to: page.path,
-          icon: getIconComponent(page.iconName),
-          title: page.name,
-          description: page.description || "Access this page",
-          module: page.module || "GENERAL",
-          isPublic: page.isPublic || false,
-          displayOrder: page.displayOrder || 0,
-          requiresAuth: page.requiresAuth !== false,
-        }));
+        const transformedPages = filteredPages.map((page) => {
+          const normalizedName = String(page.name || "").trim().toLowerCase();
+          const normalizedPath = String(page.path || "").trim().toLowerCase();
+          const isDashboardOverview =
+            normalizedName === "dashboard overview" ||
+            normalizedName === "employee dashboard" ||
+            normalizedPath === "/overview" ||
+            normalizedPath === "/attendancedashboard";
+
+          return {
+            id: page.id,
+            to: isDashboardOverview ? "/employeeDashboard" : page.path,
+            icon: getIconComponent(page.iconName),
+            title: page.name,
+            description: page.description || "Access this page",
+            module: page.module || "GENERAL",
+            isPublic: page.isPublic || false,
+            displayOrder: page.displayOrder || 0,
+            requiresAuth: page.requiresAuth !== false,
+          };
+        });
 
         transformedPages.sort((a, b) => a.displayOrder - b.displayOrder);
         setAccessiblePages(transformedPages);
@@ -818,20 +893,37 @@ const EmployeeDashboard = () => {
     );
   };
 
-  // Filter pages based on search query
+  const applicationModules = useMemo(
+    () => [...new Set(accessiblePages.map((page) => page.module || "GENERAL"))].sort(),
+    [accessiblePages]
+  );
+
+  const moduleTheme = (moduleName = "GENERAL") => {
+    const themes = {
+      LEAVE: { accent: "from-blue-500 to-cyan-400", icon: "bg-blue-50 ring-blue-100", badge: "bg-blue-50 text-blue-700" },
+      ATTENDANCE: { accent: "from-emerald-500 to-teal-400", icon: "bg-emerald-50 ring-emerald-100", badge: "bg-emerald-50 text-emerald-700" },
+      INVENTORY: { accent: "from-orange-500 to-amber-400", icon: "bg-orange-50 ring-orange-100", badge: "bg-orange-50 text-orange-700" },
+      PAYROLL: { accent: "from-violet-500 to-purple-400", icon: "bg-violet-50 ring-violet-100", badge: "bg-violet-50 text-violet-700" },
+      TRANSPORT: { accent: "from-rose-500 to-red-400", icon: "bg-rose-50 ring-rose-100", badge: "bg-rose-50 text-rose-700" },
+      ADMIN: { accent: "from-slate-600 to-slate-400", icon: "bg-slate-100 ring-slate-200", badge: "bg-slate-100 text-slate-700" },
+      GENERAL: { accent: "from-indigo-500 to-blue-400", icon: "bg-indigo-50 ring-indigo-100", badge: "bg-indigo-50 text-indigo-700" },
+    };
+    return themes[String(moduleName).toUpperCase()] || themes.GENERAL;
+  };
+
+  // Filter pages based on search query and selected module.
   useEffect(() => {
-    if (!pageSearchQuery.trim()) {
-      setFilteredPages(accessiblePages);
-    } else {
-      const query = pageSearchQuery.toLowerCase().trim();
-      const filtered = accessiblePages.filter(page => 
+    const query = pageSearchQuery.toLowerCase().trim();
+    const filtered = accessiblePages.filter((page) => {
+      const matchesModule = selectedModule === "ALL" || (page.module || "GENERAL") === selectedModule;
+      const matchesQuery = !query ||
         page.title.toLowerCase().includes(query) ||
         page.description.toLowerCase().includes(query) ||
-        page.module?.toLowerCase().includes(query)
-      );
-      setFilteredPages(filtered);
-    }
-  }, [pageSearchQuery, accessiblePages]);
+        page.module?.toLowerCase().includes(query);
+      return matchesModule && matchesQuery;
+    });
+    setFilteredPages(filtered);
+  }, [pageSearchQuery, selectedModule, accessiblePages]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -858,29 +950,137 @@ const EmployeeDashboard = () => {
     }
   }, [statusFilter, leaveRequests]);
 
+  useEffect(() => {
+    if (employeeInfo?.id && payrollPeriods.length > 0) {
+      fetchAvailableEmployeePayslips(payrollPeriods, employeeInfo.id);
+    }
+  }, [employeeInfo?.id, payrollPeriods]);
+
+  useEffect(() => {
+    if (location.hash === "#applications-launcher") {
+      setShowApplicationsWorkspace(true);
+      return;
+    }
+
+    if (location.hash === "#recent-activity") {
+      setShowApplicationsWorkspace(false);
+      window.requestAnimationFrame(() => {
+        document.getElementById("recent-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [location.hash]);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-lg font-medium text-gray-700">Loading dashboard...</p>
+          <div className="mx-auto h-11 w-11 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
+          <p className="mt-4 text-sm font-medium text-slate-600">Preparing your workspace...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="bg-white shadow-sm border-b rounded-lg mb-6">
-        <div className="px-6 py-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Employee Dashboard</h1>
-              <p className="text-gray-600">Welcome back, {userInfo.username}!</p>
+    <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
+      <aside className="fixed inset-y-4 left-4 z-30 hidden w-64 flex-col overflow-hidden rounded-2xl bg-slate-950 text-white shadow-2xl shadow-slate-300/50 lg:flex">
+        <div className="border-b border-white/10 px-5 py-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500 shadow-lg shadow-blue-950/30">
+              <User className="h-5 w-5" />
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold">{employeeInfo?.firstName || userInfo.username}</p>
+              <p className="truncate text-xs text-slate-400">Employee workspace</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-5">
+          <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Dashboard</p>
+          <nav className="space-y-1">
+            <a href="#dashboard-overview" onClick={() => setShowApplicationsWorkspace(false)} className="flex items-center gap-3 rounded-xl bg-white/10 px-3 py-2.5 text-sm font-semibold text-white">
+              <Home className="h-4 w-4 text-blue-400" /> Overview
+            </a>
+            <button onClick={() => setShowApplicationsWorkspace(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <Layers className="h-4 w-4" /> Applications
+            </button>
+            <a href="#recent-activity" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <Clock className="h-4 w-4" /> Recent activity
+            </a>
+          </nav>
+
+          <p className="mb-2 mt-7 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Quick actions</p>
+          <div className="space-y-1">
+            <Link to="/leaveRequestForm" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-blue-500/10 hover:text-blue-300">
+              <CalendarCheck className="h-4 w-4" /> Apply for leave
+            </Link>
+            <Link to="/inventoryRequest" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-orange-500/10 hover:text-orange-300">
+              <Package className="h-4 w-4" /> Request inventory
+            </Link>
+            <button onClick={() => setShowLeaveBalance(!showLeaveBalance)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-emerald-500/10 hover:text-emerald-300">
+              <Calendar className="h-4 w-4" /> Leave balance
+            </button>
+            <button onClick={() => setShowPayslip(!showPayslip)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-violet-500/10 hover:text-violet-300">
+              <CreditCard className="h-4 w-4" /> View payslip
+            </button>
+          </div>
+
+          {accessiblePages.length > 0 && (
+            <div className="mt-7">
+              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Pinned apps</p>
+              <div className="space-y-1">
+                {accessiblePages.slice(0, 4).map((page) => (
+                  <Link
+                    key={`sidebar-${page.id || page.to}`}
+                    to={page.to}
+                    onClick={() => {
+                      if (page.to === "/employeeDashboard") setShowApplicationsWorkspace(false);
+                    }}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="scale-75">{page.icon}</span>
+                    <span className="truncate">{page.title}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-white/10 p-4">
+          <div className="rounded-xl bg-white/5 px-3 py-3">
+            <p className="text-xs font-semibold text-slate-200">EAC Employee Portal</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-500">Secure access based on your assigned role.</p>
+          </div>
+        </div>
+      </aside>
+
+      <div id="dashboard-overview" className="mx-auto max-w-[1600px] scroll-mt-6 lg:ml-72 lg:max-w-none">
+      <div className="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-blue-800 shadow-lg">
+        <div className="absolute -right-16 -top-24 h-64 w-64 rounded-full bg-white/10" />
+        <div className="relative px-6 py-7 sm:px-8">
+          <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">
+                <User className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">Employee self-service</p>
+                <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Welcome, {employeeInfo?.firstName || userInfo.username}</h1>
+                <div className="mt-2 flex items-center gap-2 text-sm font-medium text-blue-50">
+                  <Briefcase className="h-4 w-4 text-blue-200" />
+                  <span>
+                    <span className="text-blue-200">Job Position:</span>{" "}
+                    {employeeInfo?.jobPosition || "Not assigned"}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm text-blue-100">Manage your requests, documents and workplace applications.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               {userInfo.roles.map((role, index) => (
-                <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full font-medium">
+                <span key={index} className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
                   {role.replace("ROLE_", "")}
                 </span>
               ))}
@@ -889,21 +1089,64 @@ const EmployeeDashboard = () => {
         </div>
       </div>
 
-      <div className="mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white rounded-lg shadow p-6">
+      {accessiblePages.length > 0 && (
+        <section id="applications-launcher" className="mb-6 scroll-mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:hidden">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-blue-600" />
+                <h2 className="font-bold text-slate-900">Applications</h2>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Open your most accessible workplace tools.</p>
+            </div>
+            <button
+              onClick={() => setShowApplicationsWorkspace(true)}
+              className="flex items-center gap-1 self-start rounded-lg px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 sm:self-auto"
+            >
+              Browse all {accessiblePages.length}
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6">
+            {accessiblePages.slice(0, 6).map((page) => {
+              const theme = moduleTheme(page.module);
+              return (
+                <Link
+                  key={`launcher-${page.id || page.to}`}
+                  to={page.to}
+                  className="group relative flex min-h-[132px] flex-col items-center justify-center gap-3 p-4 text-center transition hover:bg-slate-50"
+                >
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ring-1 transition group-hover:-translate-y-0.5 group-hover:shadow-md ${theme.icon}`}>
+                    {page.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800 group-hover:text-blue-700">{page.title}</p>
+                    <p className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {page.module || "GENERAL"}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <div id="quick-actions" className="mb-8 scroll-mt-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
-              <div className="p-3 bg-blue-100 rounded-lg mr-4">
+              <div className="mr-4 rounded-xl bg-blue-50 p-3 ring-1 ring-blue-100">
                 <CalendarCheck className="w-6 h-6 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-600">Leave Requests</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+                <p className="text-sm font-medium text-slate-500">Leave Requests</p>
+                <p className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900">{stats.total}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-orange-100 rounded-lg mr-4">
                 <Package className="w-6 h-6 text-orange-600" />
@@ -915,19 +1158,21 @@ const EmployeeDashboard = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-green-100 rounded-lg mr-4">
                 <FileTextIcon className="w-6 h-6 text-green-600" />
               </div>
               <div>
                 <p className="text-sm text-gray-600">Available Payslips</p>
-                <p className="text-2xl font-bold text-gray-900">{payrollPeriods.filter((p) => payrollRecord).length}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {loadingPayslips ? "..." : payslips.length}
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-purple-100 rounded-lg mr-4">
                 <AlertCircle className="w-6 h-6 text-purple-600" />
@@ -942,15 +1187,16 @@ const EmployeeDashboard = () => {
       </div>
 
       <div className="mb-8">
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-lg font-semibold text-slate-900">Quick actions</h2>
+            <p className="mt-0.5 text-sm text-slate-500">Your most frequently used employee services.</p>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <Link
                 to="/leaveRequestForm"
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-blue-100 rounded-lg mr-3">
                   <CalendarCheck className="w-5 h-5 text-blue-600" />
@@ -963,7 +1209,7 @@ const EmployeeDashboard = () => {
 
               <Link
                 to="/inventoryRequest"
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-orange-200 hover:bg-orange-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-orange-100 rounded-lg mr-3">
                   <Package className="w-5 h-5 text-orange-600" />
@@ -976,7 +1222,7 @@ const EmployeeDashboard = () => {
 
               <button
                 onClick={() => setShowLeaveBalance(!showLeaveBalance)}
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-green-200 hover:bg-green-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-green-100 rounded-lg mr-3">
                   <Calendar className="w-5 h-5 text-green-600" />
@@ -989,7 +1235,7 @@ const EmployeeDashboard = () => {
 
               <button
                 onClick={() => setShowPayslip(!showPayslip)}
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-purple-200 hover:bg-purple-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-purple-100 rounded-lg mr-3">
                   <FileTextIcon className="w-5 h-5 text-purple-600" />
@@ -1023,7 +1269,11 @@ const EmployeeDashboard = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Year</label>
                     <select
                       value={yearFilter}
-                      onChange={(e) => setYearFilter(e.target.value)}
+                      onChange={(e) => {
+                        setYearFilter(e.target.value);
+                        setSelectedPeriod(null);
+                        setPayrollRecord(null);
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       {availableYears.map((year) => (
@@ -1038,7 +1288,11 @@ const EmployeeDashboard = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Month</label>
                     <select
                       value={monthFilter}
-                      onChange={(e) => setMonthFilter(e.target.value)}
+                      onChange={(e) => {
+                        setMonthFilter(e.target.value);
+                        setSelectedPeriod(null);
+                        setPayrollRecord(null);
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       {months.map((month) => (
@@ -1055,9 +1309,11 @@ const EmployeeDashboard = () => {
                       value={selectedPeriod || ""}
                       onChange={(e) => setSelectedPeriod(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      disabled={loadingPayslip || filteredPeriods.length === 0}
+                      disabled={loadingPayslip || loadingPayslips || filteredPeriods.length === 0}
                     >
-                      <option value="">Select a period</option>
+                      <option value="">
+                        {loadingPayslips ? "Checking your payslips..." : "Select a period"}
+                      </option>
                       {filteredPeriods.map((period) => (
                         <option key={period.id} value={period.id}>
                           {period.name} ({formatDate(period.startDate)} - {formatDate(period.endDate)})
@@ -1394,7 +1650,7 @@ const EmployeeDashboard = () => {
 
                     <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm">
                       <div className="font-semibold">{companyName}</div>
-                      <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+                      <div>{companyContactLine}</div>
                       <div className="text-xs mt-1 text-gray-500">
                         This is a computer-generated payslip. No signature is required.
                       </div>
@@ -1407,7 +1663,7 @@ const EmployeeDashboard = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+      <div id="recent-activity" className="mb-8 grid scroll-mt-6 grid-cols-1 gap-8 lg:grid-cols-2">
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold text-gray-900">Recent Leave Requests</h2>
@@ -1691,7 +1947,7 @@ const EmployeeDashboard = () => {
 
             <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm footer">
               <div className="font-semibold">{companyName}</div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>{companyContactLine}</div>
               <div className="text-xs mt-1 text-gray-500">This is a computer-generated payslip. No signature is required.</div>
             </div>
           </div>
@@ -1715,7 +1971,7 @@ const EmployeeDashboard = () => {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>{companyName}</div>
-              <div style={{ fontSize: "10px", color: "#666" }}>P. O. Box AB 253 Abeka-Accra Ghana</div>
+              <div style={{ fontSize: "10px", color: "#666" }}>{settings.companyAddress || ""}</div>
             </div>
 
             <div style={{ textAlign: "right" }}>
@@ -1833,87 +2089,178 @@ const EmployeeDashboard = () => {
       )}
 
       {/* All Applications Section with Search */}
-      {accessiblePages.length > 0 && (
-        <div className="mt-8">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">All Applications</h2>
-            
-            {/* Search Input for Pages */}
-            <div className="relative w-full sm:w-80">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-gray-400" />
+      {showApplicationsWorkspace && accessiblePages.length > 0 && (
+        <section id="applications-workspace" className="fixed inset-4 left-[18rem] z-40 m-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl max-lg:left-4">
+          <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-5 py-7 sm:px-7">
+            <div className="absolute -right-12 -top-20 h-56 w-56 rounded-full bg-blue-500/20 blur-2xl" />
+            <div className="absolute bottom-0 right-1/3 h-24 w-24 rounded-full bg-cyan-400/10 blur-xl" />
+            <div className="relative flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+              <div className="max-w-xl">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-300">
+                  <Layers className="h-4 w-4" />
+                  Digital workspace
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Your applications</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Everything you have access to, organised in one secure workspace.
+                </p>
               </div>
-              <input
-                type="text"
-                placeholder="Search applications by name, description, or module..."
-                value={pageSearchQuery}
-                onChange={(e) => setPageSearchQuery(e.target.value)}
-                className="block w-full pl-9 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-              />
-              {pageSearchQuery && (
+
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center backdrop-blur-sm">
+                  <div className="text-xl font-bold text-white">{accessiblePages.length}</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Applications</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center backdrop-blur-sm">
+                  <div className="text-xl font-bold text-white">{applicationModules.length}</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Modules</div>
+                </div>
                 <button
-                  onClick={() => setPageSearchQuery("")}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  onClick={() => setShowApplicationsWorkspace(false)}
+                  aria-label="Close applications workspace"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </button>
-              )}
+              </div>
             </div>
           </div>
-          
-          {/* Search Results Count */}
-          {pageSearchQuery && (
-            <div className="mb-3 text-sm text-gray-500">
-              Found {filteredPages.length} {filteredPages.length === 1 ? "application" : "applications"} matching "{pageSearchQuery}"
+
+          <div className="border-b border-slate-100 bg-white px-5 py-5 sm:px-7">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Find an application</p>
+                <p className="text-xs text-slate-500">Search by name, description, or module.</p>
+              </div>
+              <div className="relative w-full sm:w-96">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  aria-label="Search applications"
+                  placeholder="Search your applications..."
+                  value={pageSearchQuery}
+                  onChange={(e) => setPageSearchQuery(e.target.value)}
+                  className="block w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-10 pr-10 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+                {pageSearchQuery && (
+                  <button
+                    onClick={() => setPageSearchQuery("")}
+                    aria-label="Clear application search"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+            <p className="mt-4 text-xs font-medium text-slate-500">
+              Showing {filteredPages.length} of {accessiblePages.length} applications
+              {pageSearchQuery ? ` for “${pageSearchQuery}”` : ""}
+            </p>
+          </div>
           
+          <div className="flex flex-col lg:flex-row">
+            <aside className="shrink-0 border-b border-slate-200 bg-slate-50/80 p-4 lg:w-60 lg:border-b-0 lg:border-r lg:p-5">
+              <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
+                <Layers className="h-4 w-4 text-slate-400" />
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Modules</span>
+              </div>
+              <nav className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0" aria-label="Application modules">
+                {["ALL", ...applicationModules].map((moduleName) => {
+                  const count = moduleName === "ALL"
+                    ? accessiblePages.length
+                    : accessiblePages.filter((page) => (page.module || "GENERAL") === moduleName).length;
+                  return (
+                    <button
+                      key={moduleName}
+                      onClick={() => setSelectedModule(moduleName)}
+                      className={`group flex shrink-0 items-center justify-between gap-4 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition lg:w-full ${
+                        selectedModule === moduleName
+                          ? "bg-slate-900 text-white shadow-md shadow-slate-200"
+                          : "border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 lg:border-transparent lg:bg-transparent"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <span className={`h-2 w-2 rounded-full ${selectedModule === moduleName ? "bg-blue-400" : "bg-slate-300 group-hover:bg-blue-400"}`} />
+                        {moduleName === "ALL" ? "All applications" : moduleName.replaceAll("_", " ")}
+                      </span>
+                      <span className={`rounded-md px-2 py-0.5 text-[11px] ${selectedModule === moduleName ? "bg-white/10 text-white" : "bg-slate-200/70 text-slate-500"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="mt-5 hidden rounded-xl border border-blue-100 bg-blue-50 p-3 lg:block">
+                <Shield className="mb-2 h-4 w-4 text-blue-600" />
+                <p className="text-xs font-semibold text-blue-900">Role-based access</p>
+                <p className="mt-1 text-[11px] leading-4 text-blue-700">Only applications assigned to your account are shown.</p>
+              </div>
+            </aside>
+
+            <div className="min-w-0 flex-1">
+              <div className="border-b border-slate-100 px-5 py-4 sm:px-7">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {selectedModule === "ALL" ? "All applications" : selectedModule.replaceAll("_", " ")}
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">{filteredPages.length} applications in this view</p>
+              </div>
+
           {/* Applications Grid */}
           {filteredPages.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-8 text-center">
+            <div className="p-12 text-center">
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                  <Search className="w-8 h-8 text-gray-400" />
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                  <Search className="h-7 w-7 text-slate-400" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-1">No applications found</h3>
-                <p className="text-gray-500 text-sm">
-                  {pageSearchQuery 
-                    ? `No results matching "${pageSearchQuery}". Try a different search term.`
-                    : "No applications available for your role."}
-                </p>
+                <h3 className="mb-1 text-lg font-semibold text-slate-900">No applications found</h3>
+                <p className="max-w-sm text-sm text-slate-500">Try another search term or choose a different module.</p>
+                <button onClick={() => { setPageSearchQuery(""); setSelectedModule("ALL"); }} className="mt-5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+                  Clear filters
+                </button>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {filteredPages.map((page) => (
-                <Link
-                  key={page.id || page.to}
-                  to={page.to}
-                  className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col items-center text-center hover:shadow-md transition-shadow group"
-                >
-                  <div className="mb-3 group-hover:scale-110 transition-transform duration-200">
-                    {page.icon}
-                  </div>
-                  <h3 className="font-medium text-gray-900 mb-1">{page.title}</h3>
-                  <p className="text-sm text-gray-600 mb-3 line-clamp-2">{page.description}</p>
-                  
-                  {/* Module Badge */}
-                  {page.module && page.module !== "GENERAL" && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full mb-2">
-                      {page.module}
-                    </span>
-                  )}
-                  
-                  <div className="flex items-center text-blue-600 text-sm group-hover:text-blue-700">
-                    <span>Open</span>
-                    <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </Link>
-              ))}
+            <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 sm:p-7 xl:grid-cols-3">
+              {filteredPages.map((page) => {
+                const theme = moduleTheme(page.module);
+                return (
+                  <Link
+                    key={page.id || page.to}
+                    to={page.to}
+                    onClick={() => {
+                      if (page.to === "/employeeDashboard") {
+                        setShowApplicationsWorkspace(false);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }
+                    }}
+                    className="group relative flex min-h-[220px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left transition duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl hover:shadow-slate-200/70"
+                  >
+                    <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${theme.accent}`} />
+                    <div className="mb-5 flex items-start justify-between">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl ring-1 ${theme.icon}`}>
+                        {page.icon}
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-blue-600" />
+                    </div>
+                    <h3 className="mb-1.5 text-base font-bold text-slate-900 transition group-hover:text-blue-700">{page.title}</h3>
+                    <p className="mb-5 line-clamp-2 text-sm leading-5 text-slate-500">{page.description}</p>
+                    <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-4">
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${theme.badge}`}>
+                        {(page.module || "GENERAL").replaceAll("_", " ")}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400 transition group-hover:text-blue-600">Open app</span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
-        </div>
+            </div>
+          </div>
+        </section>
       )}
+      </div>
     </div>
   );
 };

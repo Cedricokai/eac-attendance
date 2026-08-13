@@ -191,7 +191,7 @@ const getApiBaseUrl = () => {
   });
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this maintenance record?')) {
+    if (await window.appConfirm('Are you sure you want to delete this maintenance record?')) {
       try {
         const token = getAuthToken();
         const response = await fetch(`${API_BASE_URL}/api/maintenance/${id}`, {

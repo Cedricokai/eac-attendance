@@ -41,6 +41,8 @@ import GenerateInvoice from "./pages/Eac-attendance/attendance/GenerateInvoice";
 import LeaveBalanceTracker from "./pages/Eac-attendance/attendance/LeaveBalanceTracker";
 import QuotationMaster from "./pages/Eac-attendance/attendance/quotationMaster";
 import EmployeeOvertimeRequest from "./pages/Eac-attendance/attendance/employeeOvertimeRequest";
+import AttendanceRequests from "./pages/Eac-attendance/attendance/attendanceRequests";
+import AttendanceRequestReview from "./pages/Eac-attendance/attendance/attendanceRequestReview";
 import EmployeeLoanRequest from "./pages/Eac-attendance/attendance/employeeLoanRequest";
 import LoanManagementDashboard from "./pages/Eac-attendance/attendance/loanManagementDashboard";
 import ExcelComparator from "./pages/Eac-attendance/attendance/excel-comparator";
@@ -85,11 +87,20 @@ import QuickApprove from "./pages/Eac-attendance/attendance/QuickApprove";
 import QuickReject from "./pages/Eac-attendance/attendance/QuickReject";
 import PayrollReports from "./pages/Eac-attendance/attendance/PayrollReports.jsx";
 import ActivityLogs from "./pages/Eac-attendance/attendance/ActivityLogs.jsx";
+import HospitalPublicForm from "./pages/Eac-attendance/hospital/HospitalPublicForm.jsx";
+import HospitalManagement from "./pages/Eac-attendance/hospital/HospitalManagement.jsx";
+import MedicalVisitReview from "./pages/Eac-attendance/hospital/MedicalVisitReview.jsx";
+import MedicalVisitDetails from "./pages/Eac-attendance/hospital/MedicalVisitDetails.jsx";
+import EmployeeMedicalHistory from "./pages/Eac-attendance/hospital/EmployeeMedicalHistory.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
 import DirectPurchase from "./pages/Eac-inventory/DirectPurchase.jsx";
 import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx";
+import ThemeToggle from "./components/ThemeToggle";
+import { useTheme } from "./context/ThemeContext";
 
 function App() {
+  const { theme } = useTheme();
+
   return (
     <>
       <ToastContainer
@@ -101,7 +112,9 @@ function App() {
         pauseOnFocusLoss
         draggable
         pauseOnHover
+        theme={theme}
       />
+      <ThemeToggle />
       
       <Routes>
         {/* Public routes - no authentication required */}
@@ -110,6 +123,7 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/must-change-password" element={<MustChangePasswordPage />} />
+        <Route path="/hospital/portal/:token" element={<HospitalPublicForm />} />
 
         {/* Protected routes - wrapped in MainLayout with sidebar and header */}
         <Route>
@@ -368,6 +382,22 @@ function App() {
               <AdminLeaveBalanceView />
             </ProtectedRoute>
           } />
+
+          <Route path="/attendanceRequests" element={
+            <ProtectedRoute>
+              <AttendanceRequests />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/attendanceRequestReview" element={
+            <ProtectedRoute>
+              <AttendanceRequestReview />
+            </ProtectedRoute>
+          } />
+          <Route path="/hospitals" element={<ProtectedRoute><HospitalManagement /></ProtectedRoute>} />
+          <Route path="/medical-visits" element={<ProtectedRoute><MedicalVisitReview /></ProtectedRoute>} />
+          <Route path="/medical-visits/:id" element={<ProtectedRoute><MedicalVisitDetails /></ProtectedRoute>} />
+          <Route path="/my-medical-visits" element={<ProtectedRoute><EmployeeMedicalHistory /></ProtectedRoute>} />
           
           {/* Inventory Routes */}
           <Route path="/InventoryRequest" element={

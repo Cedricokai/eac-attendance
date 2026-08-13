@@ -68,9 +68,14 @@
             }
 
             try {
-                const API_BASE_URL = window.location.hostname === 'localhost' 
-                    ? 'http://localhost:8080' 
-                    : window.location.protocol + '//' + window.location.hostname + (window.location.port ? ':' + window.location.port : '');
+                const hostname = window.location.hostname;
+                const API_BASE_URL = hostname === 'localhost' || hostname === '127.0.0.1'
+                    ? 'http://localhost:8080'
+                    : hostname.startsWith('192.168.')
+                        ? 'http://192.168.1.97:8080'
+                        : hostname === '100.114.178.13'
+                            ? 'http://100.114.178.13:8080'
+                            : 'https://api.eaconcept.org';
 
                 const response = await fetch(`${API_BASE_URL}/api/leave/public-approve`, {
                     method: 'POST',

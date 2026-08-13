@@ -1,36 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { XMarkIcon, DocumentIcon, CheckBadgeIcon, XCircleIcon, ClockIcon, UserIcon, CalendarDaysIcon, PencilIcon } from '@heroicons/react/24/outline';
 
-function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject, autoAction }) {
+function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject }) {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [rejectionFeedback, setRejectionFeedback] = useState('');
+  const [decisionType, setDecisionType] = useState(null);
+  const [decisionFeedback, setDecisionFeedback] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Auto-trigger action if coming from email
-  useEffect(() => {
-    if (autoAction === 'approve' && leave && leave.status === 'Pending') {
-      handleApprove();
-    } else if (autoAction === 'reject' && leave && leave.status === 'Pending') {
-      setShowFeedbackModal(true);
-    }
-  }, [autoAction, leave]);
-
-  const handleApprove = async () => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-    try {
-      await onApprove(leave.id);
-    } finally {
-      setIsProcessing(false);
-    }
+  const openDecisionModal = (type) => {
+    setDecisionType(type);
+    setDecisionFeedback('');
+    setShowFeedbackModal(true);
   };
 
-  const handleReject = async () => {
+  const handleDecision = async () => {
     if (isProcessing) return;
+    if (!decisionFeedback.trim()) return;
     setIsProcessing(true);
     try {
-      await onReject(leave.id, rejectionFeedback);
-      setShowFeedbackModal(false);
+      let succeeded;
+      if (decisionType === 'approve') {
+        succeeded = await onApprove(leave.id, decisionFeedback.trim());
+      } else {
+        succeeded = await onReject(leave.id, decisionFeedback.trim());
+      }
+      if (succeeded !== false) setShowFeedbackModal(false);
     } finally {
       setIsProcessing(false);
     }
@@ -251,14 +245,14 @@ function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject, au
             {leave.status === 'Pending' && (
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
-                  onClick={() => setShowFeedbackModal(true)}
+                  onClick={() => openDecisionModal('reject')}
                   disabled={isProcessing}
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
                   Reject Request
                 </button>
                 <button
-                  onClick={handleApprove}
+                  onClick={() => openDecisionModal('approve')}
                   disabled={isProcessing}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
@@ -270,13 +264,15 @@ function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject, au
         </div>
       </div>
 
-      {/* Rejection Feedback Modal */}
+      {/* Decision Feedback Modal */}
       {showFeedbackModal && (
         <div className="fixed inset-0 flex items-center justify-center z-[60]">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowFeedbackModal(false)}></div>
           <div className="relative bg-white rounded-xl shadow-2xl p-6 w-[90%] max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-900">Rejection Reason</h3>
+              <h3 className="text-xl font-bold text-gray-900">
+                {decisionType === 'approve' ? 'Approve Leave Request' : 'Reject Leave Request'}
+              </h3>
               <button onClick={() => setShowFeedbackModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
                 <XMarkIcon className="w-5 h-5 text-gray-500" />
               </button>
@@ -284,14 +280,14 @@ function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject, au
             
             <div className="mb-4">
               <p className="text-sm text-gray-600 mb-3">
-                Please provide a reason for rejecting this leave request. This will be shared with the employee.
+                Review the request and attachment, then provide feedback before confirming your decision.
               </p>
               <textarea
-                value={rejectionFeedback}
-                onChange={(e) => setRejectionFeedback(e.target.value)}
+                value={decisionFeedback}
+                onChange={(e) => setDecisionFeedback(e.target.value)}
                 rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-shadow resize-none"
-                placeholder="Enter rejection reason..."
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow resize-none"
+                placeholder={decisionType === 'approve' ? 'Enter approval feedback...' : 'Enter rejection reason...'}
                 autoFocus
               />
             </div>
@@ -304,11 +300,11 @@ function LeaveDetailsModal({ leave, apiBaseUrl, onClose, onApprove, onReject, au
                 Cancel
               </button>
               <button
-                onClick={handleReject}
-                disabled={isProcessing}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+                onClick={handleDecision}
+                disabled={isProcessing || !decisionFeedback.trim()}
+                className={`px-4 py-2 text-white rounded-lg font-medium transition-colors disabled:opacity-50 ${decisionType === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
               >
-                {isProcessing ? 'Processing...' : 'Confirm Rejection'}
+                {isProcessing ? 'Processing...' : decisionType === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}
               </button>
             </div>
           </div>

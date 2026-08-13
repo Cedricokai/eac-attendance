@@ -256,7 +256,7 @@ const getApiBaseUrl = () => {
 
   // Handle delete driver
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this driver?')) {
+    if (await window.appConfirm('Are you sure you want to delete this driver?')) {
       try {
         const response = await fetch(`${API_BASE_URL}/api/drivers/${id}`, getFetchConfig('DELETE'));
 

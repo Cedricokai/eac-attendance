@@ -723,7 +723,7 @@ const Products = () => {
       return;
     }
 
-    const confirmed = window.confirm("Are you sure you want to delete this product?");
+    const confirmed = await window.appConfirm("Are you sure you want to delete this product?");
     if (!confirmed) return;
   
     try {

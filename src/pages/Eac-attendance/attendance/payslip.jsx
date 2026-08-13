@@ -5,8 +5,10 @@ import Header from "../../../components/Header";
 import companyLogo from "../../../assets/companyLogo.jpg";
 import html2pdf from "html2pdf.js";
 import JSZip from "jszip";
+import { useSettings } from "../context/SettingsContext";
 
 function Payslip() {
+  const { settings } = useSettings();
   const [payrollPeriods, setPayrollPeriods] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [selectedPeriod, setSelectedPeriod] = useState(null);
@@ -38,7 +40,10 @@ function Payslip() {
   const pdfRef = useRef(null);
   const bulkPayslipsRef = useRef(null);
 
-  const companyName = "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyName = settings.companyName || "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyContactLine = [settings.companyAddress, settings.companyEmail, settings.companyPhone]
+    .filter(Boolean)
+    .join(" • ");
 
   const getToken = () => localStorage.getItem("jwtToken");
 
@@ -629,7 +634,7 @@ function Payslip() {
         <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 10px;">
           <div>
             <div style="font-size: 14px; font-weight: 700; color: #1e3a8a;">${companyName}</div>
-            <div style="font-size: 9px; color: #666;">P. O. Box AB 253 Abeka-Accra Ghana</div>
+            <div style="font-size: 9px; color: #666;">${settings.companyAddress || ""}</div>
           </div>
           <div style="text-align: right;">
             <div style="font-size: 16px; font-weight: bold; color: #1e3a8a;">PAYSLIP</div>
@@ -751,7 +756,7 @@ function Payslip() {
 
         <!-- Footer -->
         <div style="font-size: 8px; color: #999; text-align: center; margin-top: 15px; padding-top: 10px;">
-          ${companyName} • P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com
+          ${companyName}${companyContactLine ? ` • ${companyContactLine}` : ""}
           <br>This is a computer-generated payslip. No signature is required for digital copies.
         </div>
       </div>
@@ -1161,7 +1166,7 @@ function Payslip() {
             </div>
             <div class="print-footer">
               <div><strong>${companyName}</strong></div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>{companyContactLine}</div>
               <div style="margin-top: 3px; font-size: 8px;">This is a computer-generated payslip. No signature is required.</div>
             </div>
           </div>
@@ -1567,7 +1572,7 @@ function Payslip() {
               }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "14px", fontWeight: 700 }}>{companyName}</div>
-                  <div style={{ fontSize: "10px", color: "#666" }}>P. O. Box AB 253 Abeka-Accra Ghana</div>
+                  <div style={{ fontSize: "10px", color: "#666" }}>{settings.companyAddress || ""}</div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0, marginLeft: "15px" }}>
                   <img
@@ -1973,7 +1978,7 @@ function Payslip() {
 
                 <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm footer">
                   <div className="font-semibold">{companyName}</div>
-                  <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+                  <div>{companyContactLine}</div>
                   <div className="text-xs mt-1 text-gray-500">This is a computer-generated payslip. No signature is required.</div>
                 </div>
               </div>

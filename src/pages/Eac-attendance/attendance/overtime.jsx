@@ -26,6 +26,10 @@ function Overtime() {
   const [employees, setEmployees] = useState([]);
   const [overtimes, setOvertimes] = useState([]);
   const [filteredOvertimes, setFilteredOvertimes] = useState([]);
+  const [overtimePage, setOvertimePage] = useState(0);
+  const [overtimePageSize, setOvertimePageSize] = useState(100);
+  const [overtimeTotalPages, setOvertimeTotalPages] = useState(0);
+  const [overtimeTotalRecords, setOvertimeTotalRecords] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const location = useLocation();
@@ -35,7 +39,6 @@ function Overtime() {
   const [isAllSelected, setIsAllSelected] = useState(false);
   const [isTogglingMultiplier, setIsTogglingMultiplier] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-const [leaveToDelete, setLeaveToDelete] = useState(null);
 const [overtimeToDelete, setOvertimeToDelete] = useState(null);
 const [isDeleting, setIsDeleting] = useState(false);
   const [searchFilters, setSearchFilters] = useState({
@@ -116,34 +119,6 @@ const [isDeleting, setIsDeleting] = useState(false);
   const getTodayDate = () => {
     return new Date().toISOString().split('T')[0];
   };
-
-  const deleteLeave = async (leaveId) => {
-  try {
-    const token = getToken();
-    const response = await fetch(`${API_BASE_URL}/api/leave/${leaveId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(errorData || 'Failed to delete leave request');
-    }
-
-    // Remove the deleted leave from state
-    setLeaves(leaves.filter(leave => leave.id !== leaveId));
-    alert('Leave request deleted successfully');
-  } catch (err) {
-    setError(err.message);
-    alert('Error deleting leave request: ' + err.message);
-  } finally {
-    setShowDeleteConfirm(false);
-    setLeaveToDelete(null);
-  }
-};
 
   const getWeekStartDate = () => {
     const today = new Date();
@@ -335,6 +310,7 @@ const [isDeleting, setIsDeleting] = useState(false);
     newSelectedIds.delete(overtimeId);
     setSelectedOvertimeIds(newSelectedIds);
     
+    await fetchOvertimes(overtimePage);
     alert('Overtime record deleted successfully');
   } catch (err) {
     console.error('Delete error:', err);
@@ -395,7 +371,7 @@ const bulkDeleteOvertimes = async () => {
     return;
   }
 
-  if (!window.confirm(`Are you sure you want to delete ${checkedOvertimeIds.length} overtime record(s)? This action cannot be undone.`)) {
+  if (!await window.appConfirm(`Are you sure you want to delete ${checkedOvertimeIds.length} overtime record(s)? This action cannot be undone.`)) {
     return;
   }
 
@@ -428,6 +404,11 @@ const bulkDeleteOvertimes = async () => {
     setSelectedOvertimeIds(new Set());
     setIsAllSelected(false);
     
+    const nextPage = filteredOvertimes.length === checkedOvertimeIds.length && overtimePage > 0
+      ? overtimePage - 1
+      : overtimePage;
+    setOvertimePage(nextPage);
+    await fetchOvertimes(nextPage);
     alert(`Successfully deleted ${result.deletedCount || checkedOvertimeIds.length} overtime record(s)`);
     
   } catch (err) {
@@ -442,245 +423,260 @@ const bulkDeleteOvertimes = async () => {
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      const [employeesResponse, overtimeResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/employee`, {
+
+      if (!newOvertime.date) {
+        setEmployees([]);
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/overtime/available-employees?date=${newOvertime.date}`,
+        {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           }
-        }),
-        fetch(`${API_BASE_URL}/api/overtime`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          }
-        })
-      ]);
-
-      if (!employeesResponse.ok) throw new Error('Failed to fetch employees');
-      const employeesData = await employeesResponse.json();
-
-      // Enrich employees with category names
-      const enrichedEmployees = employeesData.map(emp => {
-        let categoryName = 'General';
-        
-        // If employee has categoryId, map it to category name
-        if (emp.categoryId && settings.categories && settings.categories.length > 0) {
-          const categoryObj = settings.categories.find(cat => cat.id === emp.categoryId);
-          if (categoryObj) {
-            categoryName = categoryObj.name;
-          }
         }
-        // If employee already has category field, use that
-        else if (emp.category) {
-          categoryName = emp.category;
-        }
-        
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to fetch available employees');
+      }
+
+      const employeesData = await response.json();
+      const normalizedEmployees = employeesData.map((employee) => {
+        const categoryObject =
+          employee.category && typeof employee.category === 'object'
+            ? employee.category
+            : null;
+
+        const categoryId = employee.categoryId ?? categoryObject?.id ?? null;
+        const categoryName =
+          employee.categoryName ??
+          categoryObject?.name ??
+          (typeof employee.category === 'string' ? employee.category : null) ??
+          settings.categories?.find((category) => String(category.id) === String(categoryId))?.name ??
+          'General';
+
         return {
-          ...emp,
+          ...employee,
+          categoryId,
+          categoryName,
           category: categoryName
         };
       });
 
-      let overtimesData = [];
-      if (overtimeResponse.ok) {
-        overtimesData = await overtimeResponse.json();
+      setEmployees(normalizedEmployees);
+    } catch (err) {
+      console.error('Error fetching available employees:', err);
+      setError(err.message);
+      setEmployees([]);
+    }
+  };
+
+  const normalizeOvertimeDTO = (record) => {
+    if (!record) return null;
+
+    // Compatibility with the old response shape.
+    if (record.employee) {
+      const employee = normalizeEmployee(record);
+      return {
+        ...record,
+        employee,
+        overtimeHours: Number(record.overtimeHours ?? 0),
+        rawOvertimeHours: Number(record.rawOvertimeHours ?? record.overtimeHours ?? 0),
+        overtimeMultiplier: Number(
+          record.overtimeMultiplier ?? settings.defaultOvertimeMultiplier ?? 1.5
+        ),
+        calculatedOvertimePay: Number(record.calculatedOvertimePay ?? 0),
+        multiplierAppliedToHours: Boolean(record.multiplierAppliedToHours)
+      };
+    }
+
+    const categoryName = record.categoryName || 'General';
+
+    return {
+      id: record.id,
+      date: record.date,
+      startTime: record.startTime,
+      endTime: record.endTime,
+      overtimeHours: Number(record.overtimeHours ?? 0),
+      rawOvertimeHours: Number(record.rawOvertimeHours ?? record.overtimeHours ?? 0),
+      status: record.status || 'Pending',
+      notes: record.notes,
+      category: record.overtimeCategory,
+      baseHourlyRate: Number(
+        record.baseHourlyRate ?? record.employeeMinimumRate ?? settings.hourlyRate ?? 0
+      ),
+      overtimeMultiplier: Number(
+        record.overtimeMultiplier ?? settings.defaultOvertimeMultiplier ?? 1.5
+      ),
+      calculatedOvertimePay: Number(record.calculatedOvertimePay ?? 0),
+      multiplierAppliedToHours: Boolean(record.multiplierAppliedToHours),
+      attendanceId: record.attendanceId,
+      employeeId: record.employeeId,
+      employeeName: `${record.firstName || ''} ${record.lastName || ''}`.trim(),
+      employee: {
+        id: record.employeeId,
+        employeeId: record.employeeNumber,
+        firstName: record.firstName,
+        lastName: record.lastName,
+        minimumRate: Number(record.employeeMinimumRate ?? 0),
+        category: categoryName,
+        categoryId: record.categoryId,
+        categoryName: record.categoryName
+      }
+    };
+  };
+
+  const fetchOvertimes = async (requestedPage = overtimePage) => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const token = getToken();
+      const dates = calculateFilterDates();
+
+      if (!dates.startDate || !dates.endDate) {
+        throw new Error('Please select a valid overtime date range');
       }
 
-      const normalizedOvertimes = overtimesData.map(o => ({
-        id: o.id,
-        employeeId: o.employee?.id ?? o.employeeId,
-        date: o.date ? new Date(o.date).toISOString().split('T')[0] : null
-      }));
+      if (dates.endDate < dates.startDate) {
+        throw new Error('End date must be on or after start date');
+      }
 
-      const filteredEmployees = enrichedEmployees.filter(employee => {
-        if (!newOvertime.date) return true;
-        const selectedDate = newOvertime.date;
-        const hasOvertime = normalizedOvertimes.some(ot => {
-          if (!ot || !ot.employeeId) return false;
-          return String(ot.employeeId) === String(employee.id) && ot.date === selectedDate;
-        });
-        return !hasOvertime;
+      const selectedCategory = settings.categories?.find(
+        (category) =>
+          String(category.id) === String(searchFilters.category) ||
+          category.name === searchFilters.category
+      );
+
+      const categoryId = selectedCategory?.id ?? (
+        searchFilters.category && !Number.isNaN(Number(searchFilters.category))
+          ? Number(searchFilters.category)
+          : null
+      );
+
+      const params = new URLSearchParams({
+        startDate: dates.startDate,
+        endDate: dates.endDate,
+        page: String(requestedPage),
+        size: String(overtimePageSize)
       });
 
-      setEmployees(filteredEmployees);
+      const normalizedSearch = query.trim() || searchFilters.employeeName.trim();
+      if (normalizedSearch) params.set('search', normalizedSearch);
+      if (categoryId) params.set('categoryId', String(categoryId));
+      if (searchFilters.status) params.set('status', searchFilters.status);
+      if (searchFilters.minHours !== '') params.set('minHours', String(searchFilters.minHours));
+      if (searchFilters.maxHours !== '') params.set('maxHours', String(searchFilters.maxHours));
+      if (searchFilters.minAmount !== '') params.set('minAmount', String(searchFilters.minAmount));
+      if (searchFilters.maxAmount !== '') params.set('maxAmount', String(searchFilters.maxAmount));
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/overtime/page?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to fetch overtime: ${response.status}`);
+      }
+
+      const pageData = await response.json();
+      const pageRecords = Array.isArray(pageData.content)
+        ? pageData.content.map(normalizeOvertimeDTO).filter(Boolean)
+        : [];
+
+      setOvertimes(pageRecords);
+      setFilteredOvertimes(pageRecords);
+      setOvertimePage(Number(pageData.number ?? requestedPage));
+      setOvertimeTotalPages(Number(pageData.totalPages ?? 0));
+      setOvertimeTotalRecords(Number(pageData.totalElements ?? 0));
+      setSelectedOvertimeIds(new Set());
+      setIsAllSelected(false);
     } catch (err) {
-      console.error('Error fetching employees:', err);
-      setError(err.message);
+      console.error('Error fetching overtimes:', err);
+      setError(err.message || 'Failed to fetch overtime records');
+      setOvertimes([]);
+      setFilteredOvertimes([]);
+      setOvertimeTotalPages(0);
+      setOvertimeTotalRecords(0);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchOvertimes = async () => {
-  setLoading(true);
-  try {
-    const token = getToken();
-    const response = await fetch(`${API_BASE_URL}/api/overtime`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
-    });
-
-    if (!response.ok) throw new Error(`Network response was not ok: ${response.status}`);
-    const data = await response.json();
-
-    const normalized = data.map((o) => {
-      const employee = normalizeEmployee(o);
-      
-      // Debug log to see what category is being extracted
-      console.log(`Employee ${employee.firstName} ${employee.lastName} - Category:`, employee.category);
-
-      const overtimeHours = o.overtimeHours != null && o.overtimeHours !== ''
-        ? Number(o.overtimeHours)
-        : 0;
-
-      const overtimeMultiplier = o.overtimeMultiplier ?? settings.defaultOvertimeMultiplier;
-
-      const rate = employee.minimumRate ?? settings.hourlyRate;
-
-      const calculatedOvertimePay = o.calculatedOvertimePay != null
-        ? Number(o.calculatedOvertimePay)
-        : Number((rate * overtimeMultiplier * overtimeHours).toFixed(2));
-
-      return {
-        ...o,
-        employee,
-        overtimeHours,
-        overtimeMultiplier,
-        calculatedOvertimePay,
-        rawOvertimeHours: o.rawOvertimeHours || overtimeHours,
-        multiplierAppliedToHours: o.multiplierAppliedToHours || false
-      };
-    });
-
-    const validOvertimes = normalized.filter(item => item && item.id != null);
-    
-    console.log('Overtimes with categories:', validOvertimes.map(ot => ({
-      employee: ot.employee?.firstName + ' ' + ot.employee?.lastName,
-      category: ot.employee?.category
-    })));
-
-    setOvertimes(validOvertimes);
-    setFilteredOvertimes(validOvertimes);
-    setSelectedOvertimeIds(new Set());
-    setIsAllSelected(false);
-  } catch (err) {
-    console.error('Error fetching overtimes:', err);
-    setError(err.message);
-    setOvertimes([]);
-    setFilteredOvertimes([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
   useEffect(() => {
     fetchSettings();
   }, []);
 
-  // Fetch employees after settings are loaded (so categories are available)
   useEffect(() => {
-    if (settings.categories) {
-      fetchEmployees();
-      fetchOvertimes();
-    }
-  }, [settings.categories]);
+    if (!Array.isArray(settings.categories)) return;
+
+    const timer = setTimeout(() => {
+      setOvertimePage(0);
+      fetchOvertimes(0);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [
+    settings.categories,
+    query,
+    searchFilters.employeeName,
+    searchFilters.category,
+    searchFilters.dateFilterType,
+    searchFilters.singleDate,
+    searchFilters.startDate,
+    searchFilters.endDate,
+    searchFilters.status,
+    searchFilters.minHours,
+    searchFilters.maxHours,
+    searchFilters.minAmount,
+    searchFilters.maxAmount,
+    overtimePageSize
+  ]);
 
   useEffect(() => {
     if (settings?.defaultOvertimeMultiplier != null) {
-      setNewOvertime(prev => ({
-        ...prev,
-        overtimeMultiplier: prev.overtimeMultiplier ?? Number(settings.defaultOvertimeMultiplier)
+      setNewOvertime((previous) => ({
+        ...previous,
+        overtimeMultiplier:
+          previous.overtimeMultiplier ?? Number(settings.defaultOvertimeMultiplier)
       }));
     }
   }, [settings?.defaultOvertimeMultiplier]);
 
   useEffect(() => {
     fetchEmployees();
-  }, [newOvertime.date]);
+  }, [newOvertime.date, settings.categories]);
 
- const performSearch = () => {
-  if (!query.trim() && Object.values(searchFilters).every(val => !val || val === '') && searchFilters.dateFilterType === 'single') {
-    setFilteredOvertimes(overtimes);
-    return;
-  }
+  const performSearch = () => {
+    setOvertimePage(0);
+    fetchOvertimes(0);
+  };
 
-  const searchTerm = query.toLowerCase().trim();
-  const dates = calculateFilterDates();
-  
-  const filtered = overtimes.filter(overtime => {
-    const employee = overtime.employee || {};
-    const employeeName = `${employee.firstName || ''} ${employee.lastName || ''}`.toLowerCase();
-    
-    // IMPROVED: Better category matching
-    let employeeCategory = (employee.category || 'General').toLowerCase();
-    
-    // Also check if category came from a different field
-    if (overtime.category && !employeeCategory) {
-      employeeCategory = overtime.category.toLowerCase();
-    }
-    
-    const employeeId = employee.employeeId !== undefined && employee.employeeId !== null 
-      ? String(employee.employeeId).toLowerCase() 
-      : '';
-    
-    const status = (overtime.status || '').toLowerCase();
-    const date = overtime.date || '';
-    const hours = overtime.overtimeHours || 0;
-    const amount = overtime.calculatedOvertimePay || 0;
+  const goToOvertimePage = (pageNumber) => {
+    if (loading) return;
 
-    const isWithinDateRange = (!dates.startDate && !dates.endDate) || 
-      (date >= dates.startDate && date <= dates.endDate);
+    const safePage = Math.max(
+      0,
+      Math.min(pageNumber, Math.max(overtimeTotalPages - 1, 0))
+    );
 
-    const matchesMainQuery = !searchTerm || 
-      employeeName.includes(searchTerm) ||
-      employeeId.includes(searchTerm) ||
-      status.includes(searchTerm);
+    if (safePage === overtimePage) return;
+    setOvertimePage(safePage);
+    fetchOvertimes(safePage);
+  };
 
-    const matchesEmployeeName = !searchFilters.employeeName || 
-      employeeName.includes(searchFilters.employeeName.toLowerCase());
-    
-    // IMPROVED: Case-insensitive category matching
-    const matchesCategory = !searchFilters.category || 
-      employeeCategory === searchFilters.category.toLowerCase() ||
-      employeeCategory.includes(searchFilters.category.toLowerCase());
-    
-    const matchesStatus = !searchFilters.status || 
-      status === searchFilters.status.toLowerCase();
-    
-    const matchesMinHours = !searchFilters.minHours || 
-      hours >= parseFloat(searchFilters.minHours);
-    
-    const matchesMaxHours = !searchFilters.maxHours || 
-      hours <= parseFloat(searchFilters.maxHours);
-    
-    const matchesMinAmount = !searchFilters.minAmount || 
-      amount >= parseFloat(searchFilters.minAmount);
-    
-    const matchesMaxAmount = !searchFilters.maxAmount || 
-      amount <= parseFloat(searchFilters.maxAmount);
-
-    return isWithinDateRange && 
-           matchesMainQuery && 
-           matchesEmployeeName && 
-           matchesCategory &&
-           matchesStatus && 
-           matchesMinHours && 
-           matchesMaxHours && 
-           matchesMinAmount && 
-           matchesMaxAmount;
-  });
-
-  setFilteredOvertimes(filtered);
-  setSelectedOvertimeIds(new Set());
-  setIsAllSelected(false);
-};
-
-  useEffect(() => {
-    performSearch();
-  }, [query, searchFilters, overtimes]);
+  const goToPreviousOvertimePage = () => goToOvertimePage(overtimePage - 1);
+  const goToNextOvertimePage = () => goToOvertimePage(overtimePage + 1);
 
   const handleSearchInputChange = (e) => {
     const { name, value, type } = e.target;
@@ -701,6 +697,7 @@ const bulkDeleteOvertimes = async () => {
   };
 
   const resetSearch = () => {
+    setOvertimePage(0);
     setQuery('');
     setSearchFilters({
       employeeName: '',
@@ -752,7 +749,7 @@ const bulkDeleteOvertimes = async () => {
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to set Multiplier Applied to Hours to ${newValue ? 'ON (true)' : 'OFF (false)'} for ${checkedOvertimeIds.length} selected record(s)?`)) {
+    if (!await window.appConfirm(`Are you sure you want to set Multiplier Applied to Hours to ${newValue ? 'ON (true)' : 'OFF (false)'} for ${checkedOvertimeIds.length} selected record(s)?`)) {
       return;
     }
 
@@ -782,7 +779,7 @@ const bulkDeleteOvertimes = async () => {
       
       alert(result.message);
       
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
       setSelectedOvertimeIds(new Set());
       setIsAllSelected(false);
       
@@ -890,7 +887,7 @@ const bulkDeleteOvertimes = async () => {
       setSelectAllEmployees(false);
       setIsCreateMenuOpen(false);
       fetchEmployees();
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
 
     } else {
       if (!newOvertime.employee.id || !newOvertime.date || !newOvertime.startTime || !newOvertime.endTime) {
@@ -1044,7 +1041,7 @@ const bulkDeleteOvertimes = async () => {
       
       setIsBulkCreateMenuOpen(false);
       setBulkOvertimeItems([]);
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
       
     } catch (error) {
       console.error('Bulk creation error:', error);
@@ -1210,7 +1207,7 @@ const normalizeEmployee = (item) => {
       }
 
       alert(result.message);
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
     } catch (error) {
       console.error("Validation Error:", error);
       alert(`Error: ${error.message}`);
@@ -1244,7 +1241,7 @@ const normalizeEmployee = (item) => {
       }
 
       alert(result.message);
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
     } catch (error) {
       console.error("Rejection Error:", error);
       alert(`Error: ${error.message}`);
@@ -1286,7 +1283,7 @@ const normalizeEmployee = (item) => {
       }
 
       alert(`Successfully validated ${result.data.length} overtime records!`);
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
       setSelectedOvertimeIds(new Set());
       setIsAllSelected(false);
     } catch (error) {
@@ -1330,7 +1327,7 @@ const normalizeEmployee = (item) => {
       }
 
       alert(`Successfully rejected ${result.data.length} overtime records!`);
-      fetchOvertimes();
+      fetchOvertimes(overtimePage);
       setSelectedOvertimeIds(new Set());
       setIsAllSelected(false);
     } catch (error) {
@@ -1563,7 +1560,7 @@ const normalizeEmployee = (item) => {
                 >
                   <option value="">All Categories</option>
                   {settings.categories && settings.categories.map((category) => (
-                    <option key={category.id || category.name} value={category.name}>
+                    <option key={category.id || category.name} value={String(category.id)}>
                       {category.name}
                     </option>
                   ))}
@@ -2021,7 +2018,10 @@ const normalizeEmployee = (item) => {
                       const employeeFirstName = employee.firstName || 'Unknown';
                       const employeeLastName = employee.lastName || 'Employee';
                       const employeeId = employee.employeeId || 'N/A';
-                      const employeeCategory = employee.category || 'General';
+                      const employeeCategory =
+                        typeof employee.category === 'object'
+                          ? employee.category?.name || employee.categoryName || 'General'
+                          : employee.category || employee.categoryName || 'General';
                       
                       return (
                         <tr key={overtime.id} className="hover:bg-gray-50">
@@ -2163,6 +2163,53 @@ const normalizeEmployee = (item) => {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-gray-600">
+                Page <span className="font-semibold">{overtimeTotalPages === 0 ? 0 : overtimePage + 1}</span>{' '}
+                of <span className="font-semibold">{overtimeTotalPages}</span>
+                <span className="ml-2">({overtimeTotalRecords} overtime records)</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={overtimePageSize}
+                  onChange={(event) => {
+                    setOvertimePageSize(Number(event.target.value));
+                    setOvertimePage(0);
+                  }}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value={25}>25 rows</option>
+                  <option value={50}>50 rows</option>
+                  <option value={100}>100 rows</option>
+                  <option value={200}>200 rows</option>
+                  <option value={500}>500 rows</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={goToPreviousOvertimePage}
+                  disabled={loading || overtimePage <= 0}
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+
+                <button
+                  type="button"
+                  onClick={goToNextOvertimePage}
+                  disabled={
+                    loading ||
+                    overtimeTotalPages === 0 ||
+                    overtimePage >= overtimeTotalPages - 1
+                  }
+                  className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
 

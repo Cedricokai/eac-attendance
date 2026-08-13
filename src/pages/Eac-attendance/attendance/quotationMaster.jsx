@@ -4,8 +4,10 @@ import { Printer, Edit2, Plus, Trash2, Save, RefreshCw, Download, FileText, File
 import { toast } from 'react-toastify';
 import html2pdf from 'html2pdf.js';
 import * as XLSX from 'xlsx';
+import { useSettings } from '../context/SettingsContext';
 
 const QuotationMaster = () => {
+    const { settings } = useSettings();
     const [quotes, setQuotes] = useState([]);
     const [editingQuote, setEditingQuote] = useState(null);
     const [formData, setFormData] = useState({
@@ -36,10 +38,10 @@ const QuotationMaster = () => {
     // Logo and company info state
     const [companyLogo, setCompanyLogo] = useState(null);
     const [companyInfo, setCompanyInfo] = useState({
-        name: 'EAC ELECTRICAL SOLUTION LIMITED',
-        address: 'Your Company Address, City, Country',
-        phone: '(123) 456-7890',
-        email: 'info@eac-electrical.com',
+        name: settings.companyName || 'EAC ELECTRICAL SOLUTION LIMITED',
+        address: settings.companyAddress || '',
+        phone: settings.companyPhone || '',
+        email: settings.companyEmail || '',
         website: 'www.eac-electrical.com'
     });
 
@@ -61,8 +63,21 @@ const QuotationMaster = () => {
         const savedInfo = localStorage.getItem('companyInfo');
         
         if (savedLogo) setCompanyLogo(savedLogo);
-        if (savedInfo) setCompanyInfo(JSON.parse(savedInfo));
+        if (savedInfo) {
+            const localInfo = JSON.parse(savedInfo);
+            setCompanyInfo(prev => ({ ...prev, website: localInfo.website || prev.website }));
+        }
     }, []);
+
+    useEffect(() => {
+        setCompanyInfo(prev => ({
+            ...prev,
+            name: settings.companyName || 'EAC ELECTRICAL SOLUTION LIMITED',
+            address: settings.companyAddress || '',
+            phone: settings.companyPhone || '',
+            email: settings.companyEmail || ''
+        }));
+    }, [settings.companyName, settings.companyAddress, settings.companyPhone, settings.companyEmail]);
 
     // Logo upload handler
     const handleLogoUpload = (e) => {
@@ -722,6 +737,9 @@ const QuotationMaster = () => {
 
                                 {/* Company Info Form */}
                                 <div className="space-y-4">
+                                    <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                                        Company name and contact details are managed from Attendance Settings → General.
+                                    </p>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Company Name
@@ -730,8 +748,8 @@ const QuotationMaster = () => {
                                             type="text"
                                             name="name"
                                             value={companyInfo.name}
-                                            onChange={handleCompanyInfoChange}
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                            readOnly
+                                            className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-gray-600"
                                         />
                                     </div>
                                     <div>
@@ -741,9 +759,9 @@ const QuotationMaster = () => {
                                         <textarea
                                             name="address"
                                             value={companyInfo.address}
-                                            onChange={handleCompanyInfoChange}
+                                            readOnly
                                             rows="2"
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition resize-none"
+                                            className="w-full cursor-not-allowed resize-none rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-gray-600"
                                         />
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -755,8 +773,8 @@ const QuotationMaster = () => {
                                                 type="text"
                                                 name="phone"
                                                 value={companyInfo.phone}
-                                                onChange={handleCompanyInfoChange}
-                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                                readOnly
+                                                className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-gray-600"
                                             />
                                         </div>
                                         <div>
@@ -767,8 +785,8 @@ const QuotationMaster = () => {
                                                 type="email"
                                                 name="email"
                                                 value={companyInfo.email}
-                                                onChange={handleCompanyInfoChange}
-                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                                readOnly
+                                                className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-gray-600"
                                             />
                                         </div>
                                     </div>

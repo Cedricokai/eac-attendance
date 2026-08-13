@@ -430,7 +430,7 @@ const CostCenterManagement = () => {
   };
 
   const handleDeleteCostCenter = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this cost center?')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this cost center?')) return;
 
     try {
       await apiRequest(`/api/cost-centers/${id}`, {

@@ -3,8 +3,10 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "./assets/logo.png";
+import { useSettings } from "../Eac-attendance/context/SettingsContext";
 
 const Navbar = () => {
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const [userRole, setUserRole] = useState(null);
@@ -80,7 +82,7 @@ const Navbar = () => {
                 <div className="relative mb-4">
                   <img
                     src={logo}
-                    alt="EAC Electrical Company"
+                    alt={`${settings.companyName || "Company"} logo`}
                     className="w-20 h-20 rounded-2xl border-4 border-white shadow-lg"
                   />
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-400 rounded-full border-2 border-white"></div>
@@ -180,7 +182,7 @@ const Navbar = () => {
               {/* Footer */}
               <div className="p-4 border-t border-blue-600/30">
                 <p className="text-blue-300 text-xs text-center">
-                  © 2024 EAC Electrical Co.
+                  © {new Date().getFullYear()} {settings.companyName || "EAC Electrical Co."}
                   <br />
                   Transport Management
                 </p>

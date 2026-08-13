@@ -1,6 +1,8 @@
 import React from "react";
+import { useSettings } from "../Eac-attendance/context/SettingsContext";
 
 const Home = () => {
+  const { settings } = useSettings();
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 text-white mr-0"> {/* Added ml-56 to match navbar width */}
       {/* Header */}
@@ -11,7 +13,7 @@ const Home = () => {
           </div>
         </div>
         <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-          EAC Electrical Solution Limited
+          {settings.companyName || "EAC Electrical Solution Limited"}
           <span className="block text-yellow-400 mt-2 text-2xl md:text-3xl font-light">
             Transport Management System
           </span>
@@ -119,7 +121,7 @@ const Home = () => {
           <div className="w-1 h-1 bg-yellow-400 rounded-full"></div>
           <div className="w-1 h-1 bg-yellow-400 rounded-full"></div>
         </div>
-        © 2025 EAC Electrical Solution Limited — Transport Management System
+        © {new Date().getFullYear()} {settings.companyName || "EAC Electrical Solution Limited"} — Transport Management System
       </footer>
     </div>
   );

@@ -36,7 +36,71 @@ function Employee() {
   const [user, setUser] = useState(null);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
-  // ✅ Expanded newEmployee state with all fields
+  // =============================================================
+  //  NEW: Department filter state
+  // =============================================================
+  const [departments, setDepartments] = useState([]);
+  const [selectedDepartment, setSelectedDepartment] = useState("");
+
+  // =============================================================
+  //  COLUMN VISIBILITY
+  // =============================================================
+  const [columnDropdownOpen, setColumnDropdownOpen] = useState(false);
+  const columnDropdownRef = useRef(null);
+
+  const allColumns = [
+    { key: 'name', label: 'Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'jobPosition', label: 'Job Position' },
+    { key: 'grade', label: 'Grade' },
+    { key: 'category', label: 'Category' },
+    { key: 'workType', label: 'Work Type' },
+    { key: 'rate', label: 'Rate' },
+    { key: 'ssnitExempt', label: 'SSNIT Exempt' },
+    { key: 'withholding', label: 'Withholding' },
+    { key: 'status', label: 'Status' }
+  ];
+
+  const getDefaultVisibleColumns = () => {
+    const saved = localStorage.getItem('employeeTableColumns');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const allKeys = allColumns.map(c => c.key);
+        const valid = parsed.filter(k => allKeys.includes(k));
+        return valid.length ? valid : allKeys;
+      } catch { /* ignore */ }
+    }
+    return allColumns.map(c => c.key);
+  };
+
+  const [visibleColumns, setVisibleColumns] = useState(getDefaultVisibleColumns);
+
+  useEffect(() => {
+    localStorage.setItem('employeeTableColumns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (columnDropdownRef.current && !columnDropdownRef.current.contains(e.target)) {
+        setColumnDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleColumn = (key) => {
+    setVisibleColumns(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const isColumnVisible = (key) => visibleColumns.includes(key);
+
+  // =============================================================
+  //  STATE (newEmployee, etc.)
+  // =============================================================
   const [newEmployee, setNewEmployee] = useState({
     firstName: "",
     lastName: "",
@@ -82,14 +146,22 @@ function Employee() {
     tierTwoAccountName: "",
     tierTwoAccountNumber: "",
     baseNumber: "",
-    endDate: "" // optional
+    endDate: ""
   });
 
+  // =============================================================
+  //  FILTERED EMPLOYEES (including department filter)
+  // =============================================================
   const filteredEmployees = employees.filter(emp => {
+    // Category filter
     if (selectedCategory && emp.category !== selectedCategory) {
       return false;
     }
-    
+    // ===== NEW: Department filter =====
+    if (selectedDepartment && emp.department !== selectedDepartment) {
+      return false;
+    }
+    // Search query filter
     if (query.trim()) {
       const searchTerm = query.toLowerCase().trim();
       const searchableFields = [
@@ -107,12 +179,10 @@ function Employee() {
         emp.department || '',
         emp.location || ''
       ];
-      
-      return searchableFields.some(field => 
+      return searchableFields.some(field =>
         field.toLowerCase().includes(searchTerm)
       );
     }
-    
     return true;
   });
 
@@ -155,6 +225,9 @@ function Employee() {
     setSidebarOpen(!sidebarOpen);
   };
 
+  // =============================================================
+  //  EFFECTS
+  // =============================================================
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
@@ -199,7 +272,7 @@ function Employee() {
           const data = await res.json();
           setUser({
             name: data.username,
-            role: data.role.replace("ROLE_", "").toLowerCase(), 
+            role: data.role.replace("ROLE_", "").toLowerCase(),
             email: data.email
           });
         }
@@ -210,6 +283,91 @@ function Employee() {
     fetchUser();
   }, []);
 
+  useEffect(() => {
+    fetchEmployees();
+    fetchSettings();
+  }, []);
+
+  useEffect(() => {
+    if (newEmployee.usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
+      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
+      if (positionRate) {
+        setNewEmployee(prev => ({
+          ...prev,
+          minimumRate: positionRate.toString()
+        }));
+      }
+    }
+  }, [newEmployee.jobPosition, newEmployee.jobGrade, newEmployee.usePositionRate]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (openMenuId && menuRefs.current[openMenuId] && !menuRefs.current[openMenuId].contains(event.target)) {
+        setOpenMenuId(null);
+      }
+      if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
+        setIsCreateMenuOpen(false);
+      }
+      if (editMenuRef.current && !editMenuRef.current.contains(event.target)) {
+        setIsEditMenuOpen(false);
+        setEditingEmployee(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [openMenuId]);
+
+  // =============================================================
+  //  HELPERS
+  // =============================================================
+  const getGradeLabel = (positionName, gradeLevel) => {
+    if (!positionName || !gradeLevel) return '';
+    const position = settings.jobPositions?.find(p => p.name === positionName);
+    if (!position) return '';
+    const grade = position.grades?.find(g => String(g.level) === String(gradeLevel));
+    return grade?.label || '';
+  };
+
+  const getPositionGrades = (positionName) => {
+    const position = settings.jobPositions?.find(p => p.name === positionName);
+    return position?.grades || [];
+  };
+
+  const getPositionRate = (positionName, gradeLevel) => {
+    const position = settings.jobPositions?.find(p => p.name === positionName);
+    if (!position || !position.grades) return null;
+    const grade = position.grades.find(g => g.level === gradeLevel);
+    return grade ? grade.rate : null;
+  };
+
+  const getDefaultGradeForPosition = (positionName) => {
+    const grades = getPositionGrades(positionName);
+    return grades.length > 0 ? grades[0].level : "I";
+  };
+
+  const getDefaultRateForPosition = (positionName) => {
+    const grades = getPositionGrades(positionName);
+    return grades.length > 0 ? grades[0].rate : 0;
+  };
+
+  const getCategories = () => {
+    try {
+      if (settings?.categories && Array.isArray(settings.categories)) {
+        return settings.categories.map(cat => cat.name || String(cat)).filter(Boolean);
+      }
+      return ["General"];
+    } catch (error) {
+      console.error('Error getting categories:', error);
+      return ["General"];
+    }
+  };
+
+  const categories = getCategories();
+
+  // =============================================================
+  //  API CALLS
+  // =============================================================
   const handleLogout = async () => {
     try {
       const token = localStorage.getItem("jwtToken");
@@ -256,89 +414,11 @@ function Employee() {
     }
   };
 
-  const toggleEmployeeActive = async (id, currentStatus) => {
-    if (!window.confirm(`Are you sure you want to ${currentStatus ? 'deactivate' : 'activate'} this employee?`)) return;
-    
-    try {
-        const token = getToken();
-        const response = await fetch(`${API_BASE_URL}/api/employee/${id}/toggle-active`, {
-            method: "PUT",
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            }
-        });
-
-        if (!response.ok) throw new Error("Failed to toggle employee status");
-
-        const result = await response.json();
-        
-        setEmployees(employees.map(emp => 
-            emp.id === id ? { ...emp, active: result.active } : emp
-        ));
-        
-        setSuccessMessage(`Employee ${result.active ? 'activated' : 'deactivated'} successfully!`);
-        setTimeout(() => setSuccessMessage(""), 3000);
-        setOpenMenuId(null);
-    } catch (err) {
-        setError(err.message);
-    }
-  };
-
-  const getPositionGrades = (positionName) => {
-    const position = settings.jobPositions?.find(p => p.name === positionName);
-    return position?.grades || [];
-  };
-
-  const getPositionRate = (positionName, gradeLevel) => {
-    const position = settings.jobPositions?.find(p => p.name === positionName);
-    if (!position || !position.grades) return null;
-    
-    const grade = position.grades.find(g => g.level === gradeLevel);
-    return grade ? grade.rate : null;
-  };
-
-  const getDefaultGradeForPosition = (positionName) => {
-    const grades = getPositionGrades(positionName);
-    return grades.length > 0 ? grades[0].level : "I";
-  };
-
-  const getDefaultRateForPosition = (positionName) => {
-    const grades = getPositionGrades(positionName);
-    return grades.length > 0 ? grades[0].rate : 0;
-  };
-
-  useEffect(() => {
-    if (newEmployee.usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
-      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
-      if (positionRate) {
-        setNewEmployee(prev => ({
-          ...prev,
-          minimumRate: positionRate.toString()
-        }));
-      }
-    }
-  }, [newEmployee.jobPosition, newEmployee.jobGrade, newEmployee.usePositionRate]);
-
-  useEffect(() => {
-    fetchEmployees();
-    fetchSettings();
-  }, []);
-
-  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const settingsMenuRef = useRef(null); 
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setSelectedFile(file);
-  };
-
   const fetchSettings = async () => {
     try {
       setLoadingCategories(true);
       const token = getToken();
-      const [positionsRes, categoriesRes] = await Promise.all([
+      const [positionsRes, categoriesRes, departmentsRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/settings/job-positions`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -346,6 +426,13 @@ function Employee() {
           }
         }),
         fetch(`${API_BASE_URL}/api/settings/categories`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }),
+        // ===== NEW: Fetch departments =====
+        fetch(`${API_BASE_URL}/api/settings/departments`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -360,10 +447,16 @@ function Employee() {
 
       if (categoriesRes.ok) {
         const categories = await categoriesRes.json();
-        setSettings(prev => ({ 
-          ...prev, 
+        setSettings(prev => ({
+          ...prev,
           categories: categories
         }));
+      }
+
+      // ===== NEW: Set departments =====
+      if (departmentsRes.ok) {
+        const departmentsData = await departmentsRes.json();
+        setDepartments(departmentsData);
       }
     } catch (error) {
       console.error('Error fetching settings:', error);
@@ -372,52 +465,256 @@ function Employee() {
     }
   };
 
-  const getCategories = () => {
+  const toggleEmployeeActive = async (id, currentStatus) => {
+    if (!await window.appConfirm(`Are you sure you want to ${currentStatus ? 'deactivate' : 'activate'} this employee?`)) return;
+
     try {
-      if (settings?.categories && Array.isArray(settings.categories)) {
-        return settings.categories.map(cat => cat.name || String(cat)).filter(Boolean);
-      }
-      
-      return ["General"];
-    } catch (error) {
-      console.error('Error getting categories:', error);
-      return ["General"];
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}/toggle-active`, {
+        method: "PUT",
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) throw new Error("Failed to toggle employee status");
+
+      const result = await response.json();
+
+      setEmployees(employees.map(emp =>
+        emp.id === id ? { ...emp, active: result.active } : emp
+      ));
+
+      setSuccessMessage(`Employee ${result.active ? 'activated' : 'deactivated'} successfully!`);
+      setTimeout(() => setSuccessMessage(""), 3000);
+      setOpenMenuId(null);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
-  const categories = getCategories();
+  const deleteEmployee = async (id) => {
+    if (!await window.appConfirm("Are you sure you want to delete this employee?")) return;
 
-  const getCategoryIdFromName = (categoryName) => {
-    const category = settings.categories?.find(cat => cat.name === categoryName);
-    return category ? category.id : null;
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
+        method: "DELETE",
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error("Failed to delete employee");
+
+      setEmployees(employees.filter(emp => emp.id !== id));
+      setOpenMenuId(null);
+      setSuccessMessage("Employee deleted successfully!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (openMenuId && menuRefs.current[openMenuId] && !menuRefs.current[openMenuId].contains(event.target)) {
-        setOpenMenuId(null);
-      }
-      if (createMenuRef.current && !createMenuRef.current.contains(event.target)) {
-        setIsCreateMenuOpen(false);
-      }
-      if (editMenuRef.current && !editMenuRef.current.contains(event.target)) {
-        setIsEditMenuOpen(false);
-        setEditingEmployee(null);
-      }
+  // =============================================================
+  //  CREATE / UPDATE / IMPORT / EXPORT
+  // =============================================================
+  const createEmployee = async () => {
+    let finalRate = newEmployee.minimumRate;
+
+    if (newEmployee.usePositionRate) {
+      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
+      finalRate = positionRate || newEmployee.minimumRate;
+    }
+
+    const selectedCategoryObj = settings.categories?.find(cat => cat.name === newEmployee.category);
+
+    const employeeData = {
+      ...newEmployee,
+      minimumRate: finalRate,
+      jobGrade: newEmployee.jobGrade || "I",
+      numberOfChildren: newEmployee.numberOfChildren ? parseInt(newEmployee.numberOfChildren) : 0,
+      age: newEmployee.age ? parseInt(newEmployee.age) : 0,
+      hourlyRate: parseFloat(finalRate) || 0.0,
+      overtimeRate: (parseFloat(finalRate) * 1.5) || 0.0,
+      basicSalary: newEmployee.basicSalary ? parseFloat(newEmployee.basicSalary) : 0.0,
+      rentAllowance: newEmployee.rentAllowance ? parseFloat(newEmployee.rentAllowance) : 0.0,
+      transportAllowance: newEmployee.transportAllowance ? parseFloat(newEmployee.transportAllowance) : 0.0,
+      clothingAllowance: newEmployee.clothingAllowance ? parseFloat(newEmployee.clothingAllowance) : 0.0,
+      otherAllowance: newEmployee.otherAllowance ? parseFloat(newEmployee.otherAllowance) : 0.0,
+      nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 0.0,
+      accountName: newEmployee.accountName || "N/A",
+      ssnitAccountName: newEmployee.ssnitAccountName || "N/A",
+      categoryId: selectedCategoryObj ? selectedCategoryObj.id : null,
+      excludeFromSsnit: newEmployee.excludeFromSsnit || false,
+      applyWithholdingTax: newEmployee.applyWithholdingTax || false,
+      tierTwoAccountName: newEmployee.tierTwoAccountName || null,
+      tierTwoAccountNumber: newEmployee.tierTwoAccountNumber || null,
+      baseNumber: newEmployee.baseNumber || null,
+      dateOfBirth: newEmployee.dateOfBirth || null,
+      location: newEmployee.location || null,
+      ghanaCard: newEmployee.ghanaCard || null,
+      bank: newEmployee.bank || null,
+      bankBranch: newEmployee.bankBranch || null,
+      contactPerson: newEmployee.contactPerson || null,
+      relationship: newEmployee.relationship || null,
+      townOfResidence: newEmployee.townOfResidence || null,
+      houseNumber: newEmployee.houseNumber || null,
+      spouse: newEmployee.spouse || null,
+      tagNumber: newEmployee.tagNumber || null,
+      emergencyContact: newEmployee.emergencyContact || null,
+      department: newEmployee.department || null,
+      endDate: newEmployee.endDate || null
     };
-    
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [openMenuId]);
+
+    delete employeeData.usePositionRate;
+    delete employeeData.allowances;
+
+    if (!employeeData.firstName || !employeeData.lastName || !employeeData.email) {
+      setError("Please fill out all required fields (First Name, Last Name, Email).");
+      return;
+    }
+
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(employeeData),
+      });
+
+      if (!response.ok) throw new Error("Failed to create employee");
+
+      const data = await response.json();
+      setEmployees((prevEmployees) => [...prevEmployees, data]);
+
+      setNewEmployee({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        jobPosition: "",
+        jobGrade: "I",
+        workType: "",
+        minimumRate: "",
+        category: "",
+        ssnitNumber: "",
+        ssnitAccountName: "",
+        tinNumber: "",
+        startDate: "",
+        accountName: "",
+        accountNumber: "",
+        allowances: "",
+        employeeId: "",
+        usePositionRate: true,
+        numberOfChildren: 0,
+        age: 0,
+        dateOfBirth: "",
+        location: "",
+        ghanaCard: "",
+        bank: "",
+        bankBranch: "",
+        contactPerson: "",
+        relationship: "",
+        townOfResidence: "",
+        houseNumber: "",
+        spouse: "",
+        tagNumber: "",
+        emergencyContact: "",
+        department: "",
+        rentAllowance: "",
+        transportAllowance: "",
+        clothingAllowance: "",
+        otherAllowance: "",
+        nssAllowance: "",
+        excludeFromSsnit: false,
+        tierTwoAccountName: "",
+        tierTwoAccountNumber: "",
+        baseNumber: "",
+        applyWithholdingTax: false,
+        endDate: ""
+      });
+
+      setIsCreateMenuOpen(false);
+      setSuccessMessage("Employee created successfully!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const updateEmployee = async () => {
+    if (!editingEmployee) return;
+
+    try {
+      const token = getToken();
+      const selectedCategoryObj = settings.categories?.find(cat => cat.name === editingEmployee.category);
+
+      const employeeData = {
+        ...editingEmployee,
+        categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/employee/${editingEmployee.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(employeeData),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setEmployees(employees.map(emp =>
+        emp.id === editingEmployee.id ? data : emp
+      ));
+      setIsEditMenuOpen(false);
+      setEditingEmployee(null);
+      setSuccessMessage("Employee updated successfully!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleEditEmployee = (employee) => {
+    setEditingEmployee({
+      ...employee,
+      usePositionRate: employee.usePositionRate !== false,
+      jobGrade: employee.jobGrade || "I",
+      minimumRate: employee.minimumRate || 0,
+      excludeFromSsnit: employee.excludeFromSsnit || false,
+    });
+    setIsEditMenuOpen(true);
+    setOpenMenuId(null);
+  };
+
+  // =============================================================
+  //  IMPORT / EXPORT
+  // =============================================================
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSelectedFile(file);
+  };
 
   const parseExcelDate = (value) => {
     if (!value || value === '-' || value === 'null') return null;
-    
+
     if (typeof value === 'number') {
       const date = new Date((value - (25567 + 2)) * 86400 * 1000);
       return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
     }
-    
+
     const date = new Date(value);
     return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
   };
@@ -429,7 +726,7 @@ function Employee() {
     }
 
     const reader = new FileReader();
-    
+
     reader.onload = (event) => {
       try {
         const data = new Uint8Array(event.target.result);
@@ -439,12 +736,12 @@ function Employee() {
         const worksheet = workbook.Sheets[sheetName];
 
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
+
         if (jsonData.length < 2) {
           setError("Excel file doesn't contain enough data (needs at least 1 data row)");
           return;
         }
-        
+
         const headers = jsonData[0].map(header => {
           try {
             if (header === null || header === undefined) return '';
@@ -458,13 +755,13 @@ function Employee() {
 
         const employeesData = jsonData.slice(1).map((row, rowIndex) => {
           const employee = {};
-          
+
           headers.forEach((header, index) => {
             const value = row[index];
-            
+
             if (!header || value === undefined) return;
-            
-            switch(header) {
+
+            switch (header) {
               case 'firstname':
               case 'first_name':
               case 'fname':
@@ -491,7 +788,7 @@ function Employee() {
               case 'position':
               case 'jobtitle':
                 const jobPositionValue = getSafeValue(value);
-                const jobPositionExists = settings.jobPositions?.some(p => 
+                const jobPositionExists = settings.jobPositions?.some(p =>
                   p.name.toLowerCase() === jobPositionValue.toLowerCase()
                 );
                 employee.jobPosition = jobPositionExists ? jobPositionValue : 'General Worker';
@@ -501,7 +798,7 @@ function Employee() {
               case 'employee_category':
               case 'dept':
                 const categoryName = getSafeValue(value);
-                const validCategory = settings.categories?.find(cat => 
+                const validCategory = settings.categories?.find(cat =>
                   cat.name.toLowerCase() === categoryName.toLowerCase()
                 )?.name || categories[0] || "General";
                 employee.category = validCategory;
@@ -679,10 +976,10 @@ function Employee() {
                 break;
               case 'tierTwoAccountName':
                 employee.tierTwoAccountName = getSafeValue(value);
-                 break;
+                break;
               case 'tierTwoAccountNumber':
                 employee.tierTwoAccountNumber = getSafeValue(value);
-                 break;   
+                break;
               case 'numberofchildren':
               case 'number_of_children':
               case 'children':
@@ -785,19 +1082,19 @@ function Employee() {
       'Job Assigned': employee.job ? employee.job.name : 'N/A',
       'Job Code': employee.job ? employee.job.code : 'N/A',
       'Supervised Job': employee.supervisedJob ? employee.supervisedJob.name : 'N/A',
-      'Total Allowances': (employee.rentAllowance || 0) + 
-                          (employee.transportAllowance || 0) + 
-                          (employee.clothingAllowance || 0) + 
-                          (employee.nssAllowance || 0) + 
-                          (employee.otherAllowance || 0),
-      'Total Monthly Cost': (employee.basicSalary || 0) + 
-                           (employee.rentAllowance || 0) + 
-                           (employee.transportAllowance || 0) + 
-                           (employee.clothingAllowance || 0) + 
-                           (employee.nssAllowance || 0) + 
-                           (employee.otherAllowance || 0),
-      'Years of Service': employee.startDate ? 
-                         Math.floor((new Date() - new Date(employee.startDate)) / (365.25 * 24 * 60 * 60 * 1000)) : 0
+      'Total Allowances': (employee.rentAllowance || 0) +
+        (employee.transportAllowance || 0) +
+        (employee.clothingAllowance || 0) +
+        (employee.nssAllowance || 0) +
+        (employee.otherAllowance || 0),
+      'Total Monthly Cost': (employee.basicSalary || 0) +
+        (employee.rentAllowance || 0) +
+        (employee.transportAllowance || 0) +
+        (employee.clothingAllowance || 0) +
+        (employee.nssAllowance || 0) +
+        (employee.otherAllowance || 0),
+      'Years of Service': employee.startDate ?
+        Math.floor((new Date() - new Date(employee.startDate)) / (365.25 * 24 * 60 * 60 * 1000)) : 0
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -809,11 +1106,11 @@ function Employee() {
   const saveUploadedData = async () => {
     try {
       const token = getToken();
-      
+
       const employeesToSave = uploadedData.map((employee, index) => {
         const safeFirstName = employee.firstName ? String(employee.firstName).trim() : '';
         const safeLastName = employee.lastName ? String(employee.lastName).trim() : '';
-        
+
         let email = employee.email ? String(employee.email).trim() : '';
         if (!email && safeFirstName && safeLastName) {
           email = `${safeFirstName.toLowerCase()}.${safeLastName.toLowerCase()}@company.com`;
@@ -875,17 +1172,17 @@ function Employee() {
         return cleanEmployee;
       });
 
-      const invalidEmployees = employeesToSave.filter(emp => 
+      const invalidEmployees = employeesToSave.filter(emp =>
         !emp.firstName || !emp.lastName
       );
-      
+
       if (invalidEmployees.length > 0) {
         throw new Error(`Found ${invalidEmployees.length} employees with missing required fields (first name and last name)`);
       }
 
       const response = await fetch(`${API_BASE_URL}/api/employee/bulk`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           'Authorization': `Bearer ${token}`,
         },
@@ -895,7 +1192,7 @@ function Employee() {
       if (!response.ok) {
         const errorText = await response.text();
         let errorMessage = `Failed to save data: ${response.status} - ${errorText}`;
-        
+
         try {
           const errorJson = JSON.parse(errorText);
           if (errorJson.message) {
@@ -904,7 +1201,7 @@ function Employee() {
         } catch (e) {
           // If not JSON, use the text as is
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -915,7 +1212,7 @@ function Employee() {
       setSelectedFile(null);
       setSuccessMessage(`Successfully imported ${employeesToSave.length} employees!`);
       setTimeout(() => setSuccessMessage(""), 5000);
-      
+
       fetchEmployees();
     } catch (err) {
       setError(err.message);
@@ -923,197 +1220,9 @@ function Employee() {
     }
   };
 
-  // ✅ Updated createEmployee to include all fields
-  const createEmployee = async () => {
-    let finalRate = newEmployee.minimumRate;
-
-    if (newEmployee.usePositionRate) {
-      const positionRate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade);
-      finalRate = positionRate || newEmployee.minimumRate;
-    }
-
-    const selectedCategoryObj = settings.categories?.find(cat => cat.name === newEmployee.category);
-    
-    const employeeData = {
-      ...newEmployee,
-      minimumRate: finalRate,
-      jobGrade: newEmployee.jobGrade || "I",
-      numberOfChildren: newEmployee.numberOfChildren ? parseInt(newEmployee.numberOfChildren) : 0,
-      age: newEmployee.age ? parseInt(newEmployee.age) : 0,
-      hourlyRate: parseFloat(finalRate) || 0.0,
-      overtimeRate: (parseFloat(finalRate) * 1.5) || 0.0,
-      basicSalary: newEmployee.basicSalary ? parseFloat(newEmployee.basicSalary) : 0.0,
-      rentAllowance: newEmployee.rentAllowance ? parseFloat(newEmployee.rentAllowance) : 0.0,
-      transportAllowance: newEmployee.transportAllowance ? parseFloat(newEmployee.transportAllowance) : 0.0,
-      clothingAllowance: newEmployee.clothingAllowance ? parseFloat(newEmployee.clothingAllowance) : 0.0,
-      otherAllowance: newEmployee.otherAllowance ? parseFloat(newEmployee.otherAllowance) : 0.0,
-      nssAllowance: newEmployee.nssAllowance ? parseFloat(newEmployee.nssAllowance) : 0.0,
-      accountName: newEmployee.accountName || "N/A",
-      ssnitAccountName: newEmployee.ssnitAccountName || "N/A",
-      categoryId: selectedCategoryObj ? selectedCategoryObj.id : null,
-      excludeFromSsnit: newEmployee.excludeFromSsnit || false,
-      applyWithholdingTax: newEmployee.applyWithholdingTax || false,
-      tierTwoAccountName: newEmployee.tierTwoAccountName || null,
-      tierTwoAccountNumber: newEmployee.tierTwoAccountNumber || null,
-      baseNumber: newEmployee.baseNumber || null,
-      dateOfBirth: newEmployee.dateOfBirth || null,
-      location: newEmployee.location || null,
-      ghanaCard: newEmployee.ghanaCard || null,
-      bank: newEmployee.bank || null,
-      bankBranch: newEmployee.bankBranch || null,
-      contactPerson: newEmployee.contactPerson || null,
-      relationship: newEmployee.relationship || null,
-      townOfResidence: newEmployee.townOfResidence || null,
-      houseNumber: newEmployee.houseNumber || null,
-      spouse: newEmployee.spouse || null,
-      tagNumber: newEmployee.tagNumber || null,
-      emergencyContact: newEmployee.emergencyContact || null,
-      department: newEmployee.department || null,
-      endDate: newEmployee.endDate || null
-    };
-
-    delete employeeData.usePositionRate;
-    delete employeeData.allowances;
-
-    if (!employeeData.firstName || !employeeData.lastName || !employeeData.email) {
-      setError("Please fill out all required fields (First Name, Last Name, Email).");
-      return;
-    }
-
-    try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/employee`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(employeeData),
-      });
-
-      if (!response.ok) throw new Error("Failed to create employee");
-
-      const data = await response.json();
-      setEmployees((prevEmployees) => [...prevEmployees, data]);
-      
-      // Reset form with defaults (including new fields)
-      setNewEmployee({
-        firstName: "",
-        lastName: "",
-        email: "",
-        phone: "",
-        jobPosition: "",
-        jobGrade: "I",
-        workType: "",
-        minimumRate: "",
-        category: "",
-        ssnitNumber: "",
-        ssnitAccountName: "",
-        tinNumber: "",
-        startDate: "",
-        accountName: "",
-        accountNumber: "",
-        allowances: "",
-        employeeId: "",
-        usePositionRate: true,
-        numberOfChildren: 0,
-        age: 0,
-        dateOfBirth: "",
-        location: "",
-        ghanaCard: "",
-        bank: "",
-        bankBranch: "",
-        contactPerson: "",
-        relationship: "",
-        townOfResidence: "",
-        houseNumber: "",
-        spouse: "",
-        tagNumber: "",
-        emergencyContact: "",
-        department: "",
-        rentAllowance: "",
-        transportAllowance: "",
-        clothingAllowance: "",
-        otherAllowance: "",
-        nssAllowance: "",
-        excludeFromSsnit: false,
-        tierTwoAccountName: "",
-        tierTwoAccountNumber: "",
-        baseNumber: "",
-        applyWithholdingTax: false,
-        endDate: ""
-      });
-
-      setIsCreateMenuOpen(false);
-      setSuccessMessage("Employee created successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const updateEmployee = async () => {
-    if (!editingEmployee) return;
-  
-    try {
-      const token = getToken();
-      const selectedCategoryObj = settings.categories?.find(cat => cat.name === editingEmployee.category);
-      
-      const employeeData = {
-        ...editingEmployee,
-        categoryId: selectedCategoryObj ? selectedCategoryObj.id : null
-      };
-
-      const response = await fetch(`${API_BASE_URL}/api/employee/${editingEmployee.id}`, {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(employeeData),
-      });
-  
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      setEmployees(employees.map(emp => 
-        emp.id === editingEmployee.id ? data : emp
-      ));
-      setIsEditMenuOpen(false);
-      setEditingEmployee(null);
-      setSuccessMessage("Employee updated successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const deleteEmployee = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this employee?")) return;
-    
-    try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/employee/${id}`, {
-        method: "DELETE",
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) throw new Error("Failed to delete employee");
-
-      setEmployees(employees.filter(emp => emp.id !== id));
-      setOpenMenuId(null);
-      setSuccessMessage("Employee deleted successfully!");
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
+  // =============================================================
+  //  UI HELPERS
+  // =============================================================
   const closeAllModals = () => {
     setIsCreateMenuOpen(false);
     setIsEditMenuOpen(false);
@@ -1148,21 +1257,12 @@ function Employee() {
     }
   };
 
-  const handleEditEmployee = (employee) => {
-    setEditingEmployee({
-      ...employee,
-      usePositionRate: employee.usePositionRate !== false,
-      jobGrade: employee.jobGrade || "I",
-      minimumRate: employee.minimumRate || 0,
-      excludeFromSsnit: employee.excludeFromSsnit || false,
-    });
-    setIsEditMenuOpen(true);
-    setOpenMenuId(null);
-  };
-
+  // =============================================================
+  //  RENDER
+  // =============================================================
   return (
     <div className="relative min-h-screen bg-gray-50 text-gray-800 flex">
-      <div 
+      <div
         className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 sidebar-container ${
           sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:translate-x-0 md:w-16'
         }`}
@@ -1171,13 +1271,13 @@ function Employee() {
       </div>
 
       {sidebarOpen && window.innerWidth < 768 && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 z-20"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      <div 
+      <div
         className={`flex-1 transition-all duration-300 ${
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
         }`}
@@ -1217,7 +1317,7 @@ function Employee() {
                 <h1 className="text-2xl font-bold text-gray-800">Employee List</h1>
                 <p className="text-gray-600">Manage and track employee information</p>
               </div>
-              
+
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="relative flex-1">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1230,9 +1330,9 @@ function Employee() {
                       className="size-5 text-gray-400"
                     >
                       <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
                       />
                     </svg>
                   </div>
@@ -1245,6 +1345,7 @@ function Employee() {
                   />
                 </div>
 
+                {/* ===== CATEGORY FILTER ===== */}
                 <select
                   value={getSafeValue(selectedCategory)}
                   onChange={(e) => setSelectedCategory(e.target.value)}
@@ -1254,6 +1355,20 @@ function Employee() {
                   {categories.map((category) => (
                     <option key={category} value={category}>
                       {category}
+                    </option>
+                  ))}
+                </select>
+
+                {/* ===== NEW: DEPARTMENT FILTER ===== */}
+                <select
+                  value={getSafeValue(selectedDepartment)}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Departments</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.name}>
+                      {dept.name}
                     </option>
                   ))}
                 </select>
@@ -1290,6 +1405,45 @@ function Employee() {
                     Export Excel
                   </button>
 
+                  {/* COLUMNS TOGGLE */}
+                  <div className="relative" ref={columnDropdownRef}>
+                    <button
+                      onClick={() => setColumnDropdownOpen(!columnDropdownOpen)}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition duration-200 flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                      </svg>
+                      Columns
+                    </button>
+                    {columnDropdownOpen && (
+                      <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50 p-3">
+                        <div className="text-sm font-medium text-gray-700 mb-2">Toggle Columns</div>
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {allColumns.map(col => (
+                            <label key={col.key} className="flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 p-1 rounded cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isColumnVisible(col.key)}
+                                onChange={() => toggleColumn(col.key)}
+                                className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                              />
+                              {col.label}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="border-t border-gray-200 mt-2 pt-2 flex justify-end">
+                          <button
+                            onClick={() => setColumnDropdownOpen(false)}
+                            className="text-sm text-blue-600 hover:text-blue-800"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200 flex items-center gap-2"
                     onClick={() => setIsCreateMenuOpen(true)}
@@ -1312,39 +1466,18 @@ function Employee() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Employee ID
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Name
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Email
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Job Position
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Category
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Work Type
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Rate
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        SSNIT Exempt
-                      </th>
-                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Witholding
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee ID</th>
+                      {isColumnVisible('name') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>}
+                      {isColumnVisible('email') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>}
+                      {isColumnVisible('jobPosition') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Position</th>}
+                      {isColumnVisible('grade') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>}
+                      {isColumnVisible('category') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>}
+                      {isColumnVisible('workType') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Type</th>}
+                      {isColumnVisible('rate') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>}
+                      {isColumnVisible('ssnitExempt') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SSNIT Exempt</th>}
+                      {isColumnVisible('withholding') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Withholding</th>}
+                      {isColumnVisible('status') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>}
+                      <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -1356,61 +1489,104 @@ function Employee() {
                               {employee.id}
                             </Link>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {employee.firstName} {employee.lastName}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {employee.email}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {employee.jobPosition}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
-                              {employee.category || 'General'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {employee.workType}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <div>
-                              <span>GHS{employee.minimumRate}/hr</span>
-                              <span className={`ml-2 text-xs px-1 rounded ${
-                                employee.usePositionRate !== false ? 
-                                  'bg-green-100 text-green-800' : 
-                                  'bg-blue-100 text-blue-800'
-                              }`}>
-                                {employee.usePositionRate !== false ? 'Position' : 'Custom'}
+
+                          {isColumnVisible('name') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {employee.firstName} {employee.lastName}
+                            </td>
+                          )}
+
+                          {isColumnVisible('email') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {employee.email}
+                            </td>
+                          )}
+
+                          {isColumnVisible('jobPosition') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {employee.jobPosition}
+                            </td>
+                          )}
+
+                          {isColumnVisible('grade') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {employee.jobGrade ? (
+                                <>
+                                  Level {employee.jobGrade}
+                                  {getGradeLabel(employee.jobPosition, employee.jobGrade) && (
+                                    <span className="ml-1 text-xs text-gray-400">
+                                      – {getGradeLabel(employee.jobPosition, employee.jobGrade)}
+                                    </span>
+                                  )}
+                                </>
+                              ) : 'N/A'}
+                            </td>
+                          )}
+
+                          {isColumnVisible('category') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                                {employee.category || 'General'}
                               </span>
-                              {employee.usePositionRate !== false && employee.jobGrade && (
-                                <span className="ml-1 text-xs text-gray-500">(Grade {employee.jobGrade})</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              employee.excludeFromSsnit ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
-                            }`}>
-                              {employee.excludeFromSsnit ? 'Excluded' : 'Included'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-  <span className={`px-2 py-1 rounded-full text-xs ${
-    employee.applyWithholdingTax 
-      ? 'bg-orange-100 text-orange-800' 
-      : 'bg-blue-100 text-blue-800'
-  }`}>
-    {employee.applyWithholdingTax ? 'Withholding Tax' : 'Standard PAYE'}
-  </span>
-</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                                employee.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                                {employee.active ? 'Active' : 'Inactive'}
-                            </span>
-                          </td>
+                            </td>
+                          )}
+
+                          {isColumnVisible('workType') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {employee.workType}
+                            </td>
+                          )}
+
+                          {isColumnVisible('rate') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <div>
+                                <span>GHS{employee.minimumRate}/hr</span>
+                                <span className={`ml-2 text-xs px-1 rounded ${
+                                  employee.usePositionRate !== false ?
+                                    'bg-green-100 text-green-800' :
+                                    'bg-blue-100 text-blue-800'
+                                }`}>
+                                  {employee.usePositionRate !== false ? 'Position' : 'Custom'}
+                                </span>
+                                {employee.usePositionRate !== false && employee.jobGrade && (
+                                  <span className="ml-1 text-xs text-gray-500">(Grade {employee.jobGrade})</span>
+                                )}
+                              </div>
+                            </td>
+                          )}
+
+                          {isColumnVisible('ssnitExempt') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className={`px-2 py-1 rounded-full text-xs ${
+                                employee.excludeFromSsnit ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                              }`}>
+                                {employee.excludeFromSsnit ? 'Excluded' : 'Included'}
+                              </span>
+                            </td>
+                          )}
+
+                          {isColumnVisible('withholding') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className={`px-2 py-1 rounded-full text-xs ${
+                                employee.applyWithholdingTax
+                                  ? 'bg-orange-100 text-orange-800'
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {employee.applyWithholdingTax ? 'Withholding Tax' : 'Standard PAYE'}
+                              </span>
+                            </td>
+                          )}
+
+                          {isColumnVisible('status') && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span className={`px-2 py-1 rounded-full text-xs ${
+                                  employee.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                              }`}>
+                                  {employee.active ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                          )}
+
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <div className="flex justify-end items-center gap-3">
                               <button
@@ -1422,7 +1598,7 @@ function Employee() {
                                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
                                 </svg>
                               </button>
-                              
+
                               <div className="relative">
                                 <button
                                   onClick={() => setOpenMenuId(openMenuId === employee.id ? null : employee.id)}
@@ -1469,10 +1645,10 @@ function Employee() {
                             </div>
                           </td>
                         </tr>
-                        
+
                         {expandedRows[employee.id] && (
                           <tr className="bg-blue-50">
-                            <td colSpan="10" className="px-6 py-4">
+                            <td colSpan={visibleColumns.length + 2} className="px-6 py-4">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
                                   <p className="text-xs text-gray-500">Phone</p>
@@ -1514,16 +1690,15 @@ function Employee() {
                                   <p className="text-xs text-gray-500">Location</p>
                                   <p className="text-sm font-medium">{employee.location || 'N/A'}</p>
                                 </div>
-                                 <div>
+                                <div>
                                   <p className="text-xs text-gray-500">Tier Two Account Name</p>
                                   <p className="text-sm font-medium">{employee.tierTwoAccountName || 'N/A'}</p>
                                 </div>
-
                                 <div>
                                   <p className="text-xs text-gray-500">Tier Two Account Number</p>
                                   <p className="text-sm font-medium">{employee.tierTwoAccountNumber || 'N/A'}</p>
                                 </div>
-                                  <div>
+                                <div>
                                   <p className="text-xs text-gray-500">Base Number</p>
                                   <p className="text-sm font-medium">{employee.baseNumber || 'N/A'}</p>
                                 </div>
@@ -1607,6 +1782,21 @@ function Employee() {
                                   <p className="text-xs text-gray-500">Exclude from SSNIT</p>
                                   <p className="text-sm font-medium">{employee.excludeFromSsnit ? 'Yes' : 'No'}</p>
                                 </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Grade</p>
+                                  <p className="text-sm font-medium">
+                                    {employee.jobGrade ? (
+                                      <>
+                                        Level {employee.jobGrade}
+                                        {getGradeLabel(employee.jobPosition, employee.jobGrade) && (
+                                          <span className="ml-1 text-xs text-gray-400">
+                                            – {getGradeLabel(employee.jobPosition, employee.jobGrade)}
+                                          </span>
+                                        )}
+                                      </>
+                                    ) : 'N/A'}
+                                  </p>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -1621,7 +1811,7 @@ function Employee() {
         </main>
 
         {/* ============================================================ */}
-        {/* 🟢 CREATE MODAL – enhanced with all missing fields             */}
+        {/* CREATE MODAL (unchanged) */}
         {/* ============================================================ */}
         {isCreateMenuOpen && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
@@ -1637,7 +1827,7 @@ function Employee() {
                   </svg>
                 </button>
               </div>
-              
+
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
                 {/* Category */}
                 <div>
@@ -1708,9 +1898,9 @@ function Employee() {
                         const selectedPosition = e.target.value;
                         const defaultGrade = getDefaultGradeForPosition(selectedPosition);
                         const defaultRate = getDefaultRateForPosition(selectedPosition);
-                        
-                        setNewEmployee({ 
-                          ...newEmployee, 
+
+                        setNewEmployee({
+                          ...newEmployee,
                           jobPosition: selectedPosition,
                           jobGrade: defaultGrade,
                           minimumRate: newEmployee.usePositionRate ? defaultRate.toString() : newEmployee.minimumRate
@@ -1735,9 +1925,9 @@ function Employee() {
                         onChange={(e) => {
                           const selectedGrade = e.target.value;
                           const gradeRate = getPositionRate(newEmployee.jobPosition, selectedGrade) || newEmployee.minimumRate;
-                          
-                          setNewEmployee({ 
-                            ...newEmployee, 
+
+                          setNewEmployee({
+                            ...newEmployee,
                             jobGrade: selectedGrade,
                             minimumRate: newEmployee.usePositionRate ? gradeRate.toString() : newEmployee.minimumRate
                           });
@@ -1746,7 +1936,7 @@ function Employee() {
                       >
                         {getPositionGrades(newEmployee.jobPosition).map((grade) => (
                           <option key={grade.level} value={grade.level}>
-                            Grade {grade.level} (GHS{grade.rate}/hr)
+                            Grade {grade.level} – {grade.label || ''} (GHS{grade.rate}/hr)
                           </option>
                         ))}
                       </select>
@@ -1754,7 +1944,6 @@ function Employee() {
                   )}
                 </div>
 
-                {/* Work Type */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
                   <input
@@ -1766,13 +1955,12 @@ function Employee() {
                   />
                 </div>
 
-                {/* Rate Configuration */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
                     <p className="text-xs text-gray-500">
-                      {newEmployee.usePositionRate ? 
-                        `Using position rate: GHS${getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || 'N/A'}/hr` : 
+                      {newEmployee.usePositionRate ?
+                        `Using position rate: GHS${getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || 'N/A'}/hr` :
                         'Using custom rate'}
                     </p>
                   </div>
@@ -1783,13 +1971,13 @@ function Employee() {
                       onChange={(e) => {
                         const usePositionRate = e.target.checked;
                         let rate = newEmployee.minimumRate;
-                        
+
                         if (usePositionRate && newEmployee.jobPosition && newEmployee.jobGrade) {
                           rate = getPositionRate(newEmployee.jobPosition, newEmployee.jobGrade) || newEmployee.minimumRate;
                         }
-                        
-                        setNewEmployee({ 
-                          ...newEmployee, 
+
+                        setNewEmployee({
+                          ...newEmployee,
                           usePositionRate: usePositionRate,
                           minimumRate: rate.toString()
                         });
@@ -1813,7 +2001,6 @@ function Employee() {
                   </div>
                 )}
 
-                {/* Phone */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input
@@ -1825,7 +2012,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* SSNIT Account Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
                   <input
@@ -1837,7 +2023,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* SSNIT & TIN */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
@@ -1861,7 +2046,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Exclude from SSNIT Toggle */}
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Exclude from SSNIT</label>
@@ -1878,7 +2062,6 @@ function Employee() {
                   </label>
                 </div>
 
-                {/* Apply Withholding Tax Toggle */}
                 <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Apply Withholding Tax</label>
@@ -1895,7 +2078,6 @@ function Employee() {
                   </label>
                 </div>
 
-                {/* Start Date & End Date */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -1917,7 +2099,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Basic Salary & Account Number */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <div className="flex items-center justify-between mb-1">
@@ -1956,7 +2137,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Account Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
                   <input
@@ -1967,9 +2147,6 @@ function Employee() {
                   />
                 </div>
 
-                {/* ========== NEW FIELDS ========== */}
-
-                {/* Personal & Contact */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
@@ -2045,7 +2222,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Family & Residence */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
@@ -2112,7 +2288,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Allowances */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
@@ -2166,7 +2341,6 @@ function Employee() {
                   </div>
                 </div>
 
-                {/* Tier Two & Base */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Name</label>
@@ -2198,7 +2372,6 @@ function Employee() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
                 <button
                   className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -2218,7 +2391,7 @@ function Employee() {
         )}
 
         {/* ============================================================ */}
-        {/* 🟡 EDIT MODAL – unchanged (already complete)                   */}
+        {/* EDIT MODAL (unchanged) */}
         {/* ============================================================ */}
         {isEditMenuOpen && editingEmployee && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
@@ -2271,7 +2444,6 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
                     <input
@@ -2302,9 +2474,9 @@ function Employee() {
                         const selectedPosition = e.target.value;
                         const defaultGrade = getDefaultGradeForPosition(selectedPosition);
                         const defaultRate = getDefaultRateForPosition(selectedPosition);
-                        
-                        setEditingEmployee({ 
-                          ...editingEmployee, 
+
+                        setEditingEmployee({
+                          ...editingEmployee,
                           jobPosition: selectedPosition,
                           jobGrade: defaultGrade,
                           minimumRate: editingEmployee.usePositionRate !== false ? defaultRate.toString() : editingEmployee.minimumRate
@@ -2320,7 +2492,6 @@ function Employee() {
                       ))}
                     </select>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Grade</label>
                     <select
@@ -2328,9 +2499,9 @@ function Employee() {
                       onChange={(e) => {
                         const selectedGrade = e.target.value;
                         const gradeRate = getPositionRate(editingEmployee.jobPosition, selectedGrade) || editingEmployee.minimumRate;
-                        
-                        setEditingEmployee({ 
-                          ...editingEmployee, 
+
+                        setEditingEmployee({
+                          ...editingEmployee,
                           jobGrade: selectedGrade,
                           minimumRate: editingEmployee.usePositionRate !== false ? gradeRate.toString() : editingEmployee.minimumRate
                         });
@@ -2340,7 +2511,7 @@ function Employee() {
                       {editingEmployee.jobPosition ? (
                         getPositionGrades(editingEmployee.jobPosition).map((grade) => (
                           <option key={grade.level} value={grade.level}>
-                            Grade {grade.level} (GHS{grade.rate}/hr)
+                            Grade {grade.level} – {grade.label || ''} (GHS{grade.rate}/hr)
                           </option>
                         ))
                       ) : (
@@ -2364,8 +2535,8 @@ function Employee() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
                     <p className="text-xs text-gray-500">
-                      {editingEmployee.usePositionRate !== false ? 
-                        `Position rate: GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr` : 
+                      {editingEmployee.usePositionRate !== false ?
+                        `Position rate: GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr` :
                         `Custom rate: GHS${editingEmployee.minimumRate}/hr`}
                     </p>
                   </div>
@@ -2376,13 +2547,13 @@ function Employee() {
                       onChange={(e) => {
                         const usePositionRate = e.target.checked;
                         let rate = editingEmployee.minimumRate;
-                        
+
                         if (usePositionRate && editingEmployee.jobPosition && editingEmployee.jobGrade) {
                           rate = getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate;
                         }
-                        
-                        setEditingEmployee({ 
-                          ...editingEmployee, 
+
+                        setEditingEmployee({
+                          ...editingEmployee,
                           usePositionRate: usePositionRate,
                           minimumRate: rate.toString()
                         });
@@ -2407,8 +2578,8 @@ function Employee() {
 
                 <div className="p-3 bg-blue-50 rounded-lg">
                   <p className="text-sm text-blue-700">
-                    <strong>Current Rate:</strong> {editingEmployee.usePositionRate !== false ? 
-                      `GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr (Position-based)` : 
+                    <strong>Current Rate:</strong> {editingEmployee.usePositionRate !== false ?
+                      `GHS${getPositionRate(editingEmployee.jobPosition, editingEmployee.jobGrade) || editingEmployee.minimumRate}/hr (Position-based)` :
                       `GHS${editingEmployee.minimumRate}/hr (Custom)`}
                   </p>
                 </div>
@@ -2443,7 +2614,6 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
                     <input
@@ -2732,7 +2902,6 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
                     <input
@@ -2766,6 +2935,9 @@ function Employee() {
           </div>
         )}
 
+        {/* ============================================================ */}
+        {/* IMPORT PREVIEW POPUP (unchanged) */}
+        {/* ============================================================ */}
         {isPopupOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
             <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
@@ -2773,7 +2945,7 @@ function Employee() {
               <p className="text-sm text-gray-600 mb-4">
                 Found {uploadedData.length} employee(s). Employee IDs will be automatically generated.
               </p>
-              
+
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
@@ -2784,9 +2956,9 @@ function Employee() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Account Name</th>
-                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Name</th>
-                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Number</th>
-                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Base Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Base Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
@@ -2834,9 +3006,9 @@ function Employee() {
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitAccountName || 'N/A'}</td>
-                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountName || 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountNumber || 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.baseNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountName || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.baseNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
@@ -2850,7 +3022,7 @@ function Employee() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.jobPosition || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.grade || employee.jobGrade || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">Level {employee.grade || employee.jobGrade || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.workType || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.department || 'N/A'}</td>
                         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.startDate || 'Not set'}</td>
@@ -2880,7 +3052,7 @@ function Employee() {
                   </tbody>
                 </table>
               </div>
-              
+
               <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
                 <div className="text-sm text-gray-600 max-w-md">
                   <strong>Note:</strong> Employee IDs will be automatically generated by the system.
@@ -2889,7 +3061,7 @@ function Employee() {
                   <button
                     className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
                     onClick={() => setIsPopupOpen(false)}
-                  >
+                  >-
                     Cancel
                   </button>
                   <button

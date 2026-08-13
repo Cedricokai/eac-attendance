@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import EmployeePortalNavigation from "./EmployeePortalNavigation";
 import { 
   CalendarIcon, 
   UserIcon, 
@@ -618,7 +619,11 @@ const LeaveRequestForm = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4 lg:pl-72">
+      <EmployeePortalNavigation
+        employeeName={currentEmployee ? `${currentEmployee.firstName || ""} ${currentEmployee.lastName || ""}`.trim() : currentUser?.username}
+        jobPosition={currentEmployee?.jobPosition}
+      />
       <div className="max-w-2xl mx-auto">
         {/* Header Card */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">

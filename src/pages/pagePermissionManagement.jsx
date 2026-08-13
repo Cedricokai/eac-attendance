@@ -40,6 +40,7 @@ const PagePermissionManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterModule, setFilterModule] = useState('ALL');
   const [filterVisibility, setFilterVisibility] = useState('ALL');
+  const [filterQuickAction, setFilterQuickAction] = useState('ALL');
   const [pageUserAssignments, setPageUserAssignments] = useState({});
   
   // Modules from backend
@@ -56,6 +57,17 @@ const PagePermissionManagement = () => {
     { value: 'ADMIN', label: 'Administration' },
     { value: 'GENERAL', label: 'General' }
   ];
+
+  // ========== Quick Action paths (matching EmployeeDashboard) ==========
+  const quickActionPaths = [
+    '/leaveRequestForm',
+    '/inventoryRequest',
+    '/overtime-request-form',   // <--- changed to match new path
+    '/payslip',
+    '/leave-balance'
+  ];
+
+  const isQuickAction = (path) => quickActionPaths.includes(path);
 
   const [newPage, setNewPage] = useState({
     name: '',
@@ -98,7 +110,7 @@ const PagePermissionManagement = () => {
 
   useEffect(() => {
     applyFilters();
-  }, [pages, searchTerm, filterModule, filterVisibility]);
+  }, [pages, searchTerm, filterModule, filterVisibility, filterQuickAction]);
 
   const fetchPages = async () => {
     const token = localStorage.getItem('jwtToken');
@@ -115,7 +127,6 @@ const PagePermissionManagement = () => {
         setPages(data);
         setFilteredPages(data);
         
-        // Fetch user assignments for each page
         data.forEach(page => {
           fetchPageUserAssignments(page.id);
         });
@@ -191,7 +202,6 @@ const PagePermissionManagement = () => {
   const applyFilters = () => {
     let filtered = [...pages];
     
-    // Apply search filter
     if (searchTerm) {
       filtered = filtered.filter(page =>
         page.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -201,18 +211,23 @@ const PagePermissionManagement = () => {
       );
     }
     
-    // Apply module filter
     if (filterModule !== 'ALL') {
       filtered = filtered.filter(page => page.module === filterModule);
     }
     
-    // Apply visibility filter
     if (filterVisibility !== 'ALL') {
       if (filterVisibility === 'PUBLIC') {
         filtered = filtered.filter(page => page.isPublic);
       } else if (filterVisibility === 'PRIVATE') {
         filtered = filtered.filter(page => !page.isPublic);
       }
+    }
+
+    // Quick Action filter
+    if (filterQuickAction === 'SHOW') {
+      filtered = filtered.filter(page => isQuickAction(page.path));
+    } else if (filterQuickAction === 'HIDE') {
+      filtered = filtered.filter(page => !isQuickAction(page.path));
     }
     
     setFilteredPages(filtered);
@@ -284,7 +299,7 @@ const PagePermissionManagement = () => {
   };
 
   const handleDeletePage = async (pageId) => {
-    if (!window.confirm('Are you sure you want to delete this page?')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this page?')) return;
     
     const token = localStorage.getItem('jwtToken');
     try {
@@ -416,7 +431,6 @@ const PagePermissionManagement = () => {
   };
 
   const handleRemoveUserFromPage = async (pageId, userId) => {
-    // Add this validation
     if (!userId) {
         toast.error('No user selected');
         return;
@@ -440,7 +454,7 @@ const PagePermissionManagement = () => {
     } catch (err) {
         toast.error(err.message);
     }
-};
+  };
 
   const handleOpenUserAssignmentModal = (page) => {
     setSelectedPageForUserAssignment(page);
@@ -558,20 +572,17 @@ const PagePermissionManagement = () => {
               </div>
               
               <div>
-                <div className="flex items-center">
-                  <FunnelIcon className="h-5 w-5 text-gray-400 mr-2" />
-                  <select
-                    value={filterModule}
-                    onChange={(e) => setFilterModule(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    {modules.map(module => (
-                      <option key={module.value} value={module.value}>
-                        {module.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <select
+                  value={filterModule}
+                  onChange={(e) => setFilterModule(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {modules.map(module => (
+                    <option key={module.value} value={module.value}>
+                      {module.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               
               <div>
@@ -585,10 +596,23 @@ const PagePermissionManagement = () => {
                   <option value="PRIVATE">Private Only</option>
                 </select>
               </div>
+
+              {/* Quick Action filter */}
+              <div>
+                <select
+                  value={filterQuickAction}
+                  onChange={(e) => setFilterQuickAction(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="ALL">All Pages</option>
+                  <option value="SHOW">Quick Actions Only</option>
+                  <option value="HIDE">Exclude Quick Actions</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Pages Table - ENHANCED with User Assignments Column */}
+          {/* Pages Table */}
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -614,7 +638,17 @@ const PagePermissionManagement = () => {
                               <span className="text-gray-500 text-sm">{page.iconName?.charAt(0) || 'P'}</span>
                             </div>
                             <div className="ml-4">
-                              <div className="font-medium text-gray-900">{page.name}</div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-gray-900">{page.name}</span>
+                                {isQuickAction(page.path) && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                                    </svg>
+                                    Quick Action
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-sm text-gray-500 font-mono">{page.path}</div>
                               {page.description && (
                                 <div className="text-xs text-gray-400 mt-1">{page.description}</div>
@@ -1122,7 +1156,7 @@ const PagePermissionManagement = () => {
                           placeholder="Search users by name, username, or email..."
                           className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           onChange={(e) => {
-                            // Search functionality can be implemented here
+                            // Simple client-side filtering can be added here
                           }}
                         />
                       </div>

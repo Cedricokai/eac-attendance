@@ -514,7 +514,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       toast.success(`Job "${jobName}" deleted!`);
     } catch (err) {
       const assigned = await fetchJobEmployees(jobId);
-      if (assigned.length > 0 && window.confirm(`${assigned.length} employee(s) assigned. Unassign and delete?`)) {
+      if (assigned.length > 0 && await window.appConfirm(`${assigned.length} employee(s) assigned. Unassign and delete?`)) {
         if (await unassignAllEmployeesFromJob(jobId)) {
           await apiRequest(`/api/jobs/${jobId}?deleteTimesheets=${userConfirmed}`, { method: 'DELETE' });
           fetchJobs();
@@ -923,7 +923,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
   };
 
   const sendManualBillingReminder = async (jobId, jobName) => {
-    if (!window.confirm(`Send billing reminder for "${jobName}" now?`)) return;
+    if (!await window.appConfirm(`Send billing reminder for "${jobName}" now?`)) return;
     
     try {
       setLoading(true);
@@ -948,6 +948,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         fileSize: att.fileSize,
         fileType: att.fileType,
         uploadedAt: att.uploadedAt,
+        documentDate: att.documentDate,
         description: att.description
       }));
       setAttachments(formattedAttachments);
@@ -1004,7 +1005,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
   };
 
   const deleteAttachment = async (attachmentId) => {
-    if (!window.confirm('Delete this attachment?')) return;
+    if (!await window.appConfirm('Delete this attachment?')) return;
 
     try {
       await apiRequest(`/api/jobs/attachments/${attachmentId}`, { method: 'DELETE' });
@@ -1019,7 +1020,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
   const downloadAttachment = async (attachment) => {
     try {
       const token = getAuthToken();
-      const response = await fetch(`${API_BASE_URL}/files/download/${attachment.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/download/${attachment.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -3128,6 +3129,11 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                                 {new Date(attachment.uploadedAt).toLocaleDateString()} • 
                                 {(attachment.fileSize / 1024 / 1024).toFixed(2)} MB
                               </div>
+                              {attachment.documentDate && (
+                                <div className="text-sm text-gray-500">
+                                  Document date: {new Date(`${attachment.documentDate}T00:00:00`).toLocaleDateString()}
+                                </div>
+                              )}
                               {attachment.description && (
                                 <div className="text-sm text-gray-600">{attachment.description}</div>
                               )}

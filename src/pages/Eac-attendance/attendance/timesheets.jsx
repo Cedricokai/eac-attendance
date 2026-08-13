@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { 
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
+import { createPortal } from "react-dom";
+import {
   Calendar, Clock, User, Check, X, Filter, Download, Plus, ChevronLeft,
   ChevronRight, Search, MoreVertical, Edit, Trash2, RefreshCw, ChevronDown,
   ChevronUp, FileText, DollarSign, Building, Upload, File, Users, Receipt,
   CalendarRange, AlertCircle, CalendarDays, ArrowRightLeft, Settings,
   Info, HelpCircle, BarChart, Eye, EyeOff, Save, CheckCircle, XCircle, UserCheck,
-  ArrowLeftRight, Menu, Flag, AlertTriangle 
+  ArrowLeftRight, Menu, Flag, AlertTriangle
 } from "lucide-react";
 import MainSidebar from "../mainSidebar";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -45,7 +46,7 @@ function Timesheet() {
   const [overviews, setOverviews] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState({
+  const [filters] = useState({
     employee: "",
     status: "",
     department: "",
@@ -220,12 +221,14 @@ function Timesheet() {
   const [saveMessage, setSaveMessage] = useState({ type: '', text: '' });
   const [selectedCategory, setSelectedCategory] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [tablePageSize, setTablePageSize] = useState(25);
   const [tablePage, setTablePage] = useState(1);
   const [showStatsPanel, setShowStatsPanel] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState(null);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
 
   const [deleteModal, setDeleteModal] = useState({
     open: false,
@@ -698,12 +701,8 @@ function Timesheet() {
   }, [selectedJob, jobs, autoSyncWithBilling]);
 
   useEffect(() => {
-    setFilters(prev => ({ ...prev, search: searchQuery }));
-  }, [searchQuery]);
-
-  useEffect(() => {
     setTablePage(1);
-  }, [selectedCategory, searchQuery, selectedJob, selectedPeriod, currentDate, customDays.length, missingSourceFilter]);
+  }, [selectedCategory, deferredSearchQuery, selectedJob, selectedPeriod, currentDate, customDays.length, missingSourceFilter]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -774,7 +773,7 @@ function Timesheet() {
 
   const API_BASE_URL = getApiBaseUrl();
 
-  const fetchEmployeesWithJobs = async () => {
+  const fetchEmployeesWithJobs = async (preloadedJobs = [], preloadedEmployeesResponse = null) => {
     try {
       const token = localStorage.getItem("jwtToken");
       const headers = {
@@ -782,12 +781,11 @@ function Timesheet() {
         'Content-Type': 'application/json'
       };
       
-      const employeesRes = await fetch(`${API_BASE_URL}/api/employee`, { headers });
+      const employeesRes = preloadedEmployeesResponse || await fetch(`${API_BASE_URL}/api/employee`, { headers });
       if (!employeesRes.ok) throw new Error(`Failed to fetch employees: ${employeesRes.status}`);
       
       let employeesData = await employeesRes.json();
-      const jobsRes = await fetch(`${API_BASE_URL}/api/jobs`, { headers });
-      const jobsData = jobsRes.ok ? await jobsRes.json() : [];
+      const jobsData = preloadedJobs;
       const jobMap = {};
       jobsData.forEach(job => { jobMap[job.id] = job; });
       
@@ -1022,7 +1020,12 @@ function Timesheet() {
 
   const categories = useMemo(() => {
     const set = new Set();
-    employees.forEach(e => { if (e?.category) set.add(e.category); });
+    employees.forEach((employee) => {
+      const categoryName = typeof employee?.category === 'string'
+        ? employee.category
+        : employee?.category?.name;
+      if (categoryName) set.add(categoryName);
+    });
     return Array.from(set).sort();
   }, [employees]);
 
@@ -1402,6 +1405,81 @@ function Timesheet() {
     }
   };
 
+  // Convert the lightweight backend projection into the object shape already
+  // used throughout this component. This lets the matrix, editing, exports,
+  // source-document flags and bulk actions continue to work unchanged.
+  const normalizeTimesheetDTO = (row, employeesList = employees) => {
+    if (!row) return null;
+
+    const employeeFromList = employeesList.find(
+      (employee) => String(employee.id) === String(row.employeeId)
+    );
+
+    const employee = employeeFromList || {
+      id: row.employeeId,
+      employeeId: row.employeeNumber,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      categoryId: row.categoryId,
+      category: row.categoryName || '',
+      job: row.jobId
+        ? { id: row.jobId, name: row.jobName }
+        : null
+    };
+
+    // Preserve job/category information from the DTO when the employee endpoint
+    // does not include the same relationship shape.
+    const normalizedEmployee = {
+      ...employee,
+      id: row.employeeId ?? employee.id,
+      employeeId: row.employeeNumber ?? employee.employeeId,
+      firstName: row.firstName ?? employee.firstName,
+      lastName: row.lastName ?? employee.lastName,
+      categoryId: row.categoryId ?? employee.categoryId ?? employee.category?.id,
+      category:
+        row.categoryName ??
+        (typeof employee.category === 'string'
+          ? employee.category
+          : employee.category?.name) ??
+        '',
+      job: row.jobId
+        ? { id: row.jobId, name: row.jobName }
+        : employee.job || null
+    };
+
+    return {
+      id: row.id,
+      date: row.date,
+      attendanceCode: row.attendanceCode,
+      regularHours: Number(row.regularHours ?? 0),
+      overtimeHours: Number(row.overtimeHours ?? 0),
+      breakHours: Number(row.breakHours ?? 0),
+      totalHours: Number(
+        row.totalHours ??
+          (Number(row.regularHours ?? 0) + Number(row.overtimeHours ?? 0))
+      ),
+      earnings: Number(row.earnings ?? 0),
+      status: row.status,
+      notes: row.notes,
+      sourceDocumentMissing: Boolean(row.sourceDocumentMissing),
+      sourceDocumentMissingReason: row.sourceDocumentMissingReason,
+      sourceDocumentMissingFlaggedAt: row.sourceDocumentMissingFlaggedAt,
+      sourceDocumentMissingFlaggedBy: row.sourceDocumentMissingFlaggedBy,
+      sourceDocumentType: row.sourceDocumentType,
+      sourceDocumentReference: row.sourceDocumentReference,
+      verifiedAt: row.verifiedAt,
+      verifiedBy: row.verifiedBy,
+      employeeId: row.employeeId,
+      employeeNumber: row.employeeNumber,
+      employee: normalizedEmployee,
+      categoryId: row.categoryId,
+      categoryName: row.categoryName,
+      jobId: row.jobId,
+      job: row.jobId ? { id: row.jobId, name: row.jobName } : null,
+      overviewId: row.overviewId
+    };
+  };
+
   const fetchTimesheets = async (employeesList = employees) => {
     setLoading(true);
 
@@ -1409,102 +1487,155 @@ function Timesheet() {
     const hrs = {};
     const ot = {};
     const nhMap = {};
+    const missingMap = {};
 
     try {
-      const token = localStorage.getItem("jwtToken");
+      const token = localStorage.getItem('jwtToken');
       const { start, end } = getDateRange();
       const startDate = toYMD(start);
       const endDate = toYMD(end);
 
-      const res = await fetch(
-        `${API_BASE_URL}/api/timesheets/range?startDate=${startDate}&endDate=${endDate}`,
+      if (!startDate || !endDate) {
+        throw new Error('A valid timesheet date range is required');
+      }
+
+      const params = new URLSearchParams({
+        startDate,
+        endDate
+      });
+
+      // Keep the complete employee/date matrix intact while allowing the
+      // backend to narrow large datasets when these filters are active.
+      if (selectedJob && selectedJob !== 'no-job') {
+        params.set('jobId', String(selectedJob));
+      } else if (selectedJob === 'no-job') {
+        params.set('withoutJob', 'true');
+      }
+
+      if (filters.status) {
+        params.set('status', String(filters.status).toUpperCase());
+      }
+
+      if (missingSourceFilter === 'unverified') {
+        params.set('sourceMissing', 'true');
+      } else if (missingSourceFilter === 'verified') {
+        params.set('sourceMissing', 'false');
+      }
+
+      // selectedCategory is currently stored as a category name. Resolve its
+      // database ID from the already-loaded employee records when possible.
+      if (selectedCategory) {
+        const categoryEmployee = employeesList.find((employee) => {
+          const categoryName =
+            typeof employee.category === 'string'
+              ? employee.category
+              : employee.category?.name;
+          return categoryName === selectedCategory;
+        });
+
+        const categoryId =
+          categoryEmployee?.categoryId ?? categoryEmployee?.category?.id;
+
+        if (categoryId) {
+          params.set('categoryId', String(categoryId));
+        }
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/timesheets/rows?${params.toString()}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+            'Content-Type': 'application/json'
+          }
         }
       );
 
-      if (!res.ok) {
-        throw new Error(`Network error: ${res.status}`);
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(
+          responseText || `Failed to fetch timesheets: ${response.status}`
+        );
       }
 
-      const raw = await res.json();
+      const raw = await response.json();
+      const fixed = (Array.isArray(raw) ? raw : [])
+        .map((row) => normalizeTimesheetDTO(row, employeesList))
+        .filter(Boolean)
+        .map((timesheet) => {
+          const status = String(timesheet.status || '').toUpperCase();
+          const attendanceCode =
+            String(timesheet.attendanceCode || '').toUpperCase() ||
+            (status === 'WEEKEND'
+              ? 'WP'
+              : status === 'HOLIDAY'
+                ? 'HP'
+                : status === 'ABSENT'
+                  ? 'A'
+                  : status === 'LEAVE'
+                    ? 'L'
+                    : status === 'SICK'
+                      ? 'S'
+                      : status === 'PENDING' ||
+                          status === 'APPROVED' ||
+                          status === 'PAID'
+                        ? 'P'
+                        : '');
 
-      const fixed = raw.map((ts) => {
-        const status = (ts.status || "").toUpperCase();
+          return {
+            ...timesheet,
+            attendanceCode
+          };
+        });
 
-        const attendanceCode =
-          (ts.attendanceCode || "").toUpperCase() ||
-          (status === "WEEKEND" ? "WP" :
-           status === "HOLIDAY" ? "HP" :
-           status === "ABSENT" ? "A" :
-           status === "LEAVE" ? "L" :
-           status === "SICK" ? "S" :
-           status === "PENDING" || status === "APPROVED" || status === "PAID" ? "P" :
-           "");
+      fixed.forEach((timesheet) => {
+        const employeeId = timesheet.employeeId ?? timesheet.employee?.id;
+        const dateStr = String(timesheet.date || '').slice(0, 10);
 
-        const empId = ts.employeeId ?? ts.employee?.id;
+        if (!employeeId || !dateStr) return;
 
-        return {
-          ...ts,
-          attendanceCode,
-          employee: employeesList.find(e => e.id === empId) || ts.employee,
-        };
-      });
+        if (!att[employeeId]) att[employeeId] = {};
+        if (!hrs[employeeId]) hrs[employeeId] = {};
+        if (!ot[employeeId]) ot[employeeId] = {};
+        if (!nhMap[employeeId]) nhMap[employeeId] = {};
 
-      setTimesheets(fixed);
+        const regularHours = Number(timesheet.regularHours ?? 0);
+        const overtimeHours = Number(timesheet.overtimeHours ?? 0);
+        const totalHours = Number(
+          timesheet.totalHours ?? regularHours + overtimeHours
+        );
 
-      const newMissingEntries = { ...missingSourceEntries };
-      
-      fixed.forEach((ts) => {
-        const empId = ts.employeeId ?? ts.employee?.id;
-        const dateStr = String(ts.date || "").slice(0, 10);
-        if (!empId || !dateStr) return;
+        att[employeeId][dateStr] = timesheet.attendanceCode || '';
+        nhMap[employeeId][dateStr] = String(regularHours);
+        ot[employeeId][dateStr] = String(overtimeHours);
+        hrs[employeeId][dateStr] = String(totalHours);
 
-        if (!att[empId]) att[empId] = {};
-        if (!hrs[empId]) hrs[empId] = {};
-        if (!ot[empId]) ot[empId] = {};
-        if (!nhMap[empId]) nhMap[empId] = {};
-
-        const total =
-          ts.totalHours != null
-            ? Number(ts.totalHours)
-            : Number(ts.regularHours || 0) + Number(ts.overtimeHours || 0);
-
-        const otHours = Number(ts.overtimeHours || 0);
-        const nhHours = Math.max(total - otHours, 0);
-
-        att[empId][dateStr] = ts.attendanceCode || "";
-        hrs[empId][dateStr] = String(total);
-        ot[empId][dateStr] = String(otHours);
-        nhMap[empId][dateStr] = String(nhHours);
-        
-        if (ts.sourceDocumentMissing) {
-          const key = `${empId}_${dateStr}`;
-          newMissingEntries[key] = {
+        if (timesheet.sourceDocumentMissing) {
+          missingMap[`${employeeId}_${dateStr}`] = {
             flagged: true,
-            reason: ts.sourceDocumentMissingReason || "No source document",
-            flaggedAt: ts.sourceDocumentMissingFlaggedAt,
-            flaggedBy: ts.sourceDocumentMissingFlaggedBy
+            reason:
+              timesheet.sourceDocumentMissingReason || 'No source document',
+            flaggedAt: timesheet.sourceDocumentMissingFlaggedAt,
+            flaggedBy: timesheet.sourceDocumentMissingFlaggedBy
           };
         }
       });
-      
-      setMissingSourceEntries(newMissingEntries);
-      setAttendanceData(prev => ({ ...prev, ...att }));
-      setEmployeeHours(prev => ({ ...prev, ...hrs }));
-      setEmployeeOvertime(prev => ({ ...prev, ...ot }));
-      setEmployeeNormalHours(prev => ({ ...prev, ...nhMap }));
+
+      setTimesheets(fixed);
+      setAttendanceData((previous) => ({ ...previous, ...att }));
+      setEmployeeHours((previous) => ({ ...previous, ...hrs }));
+      setEmployeeOvertime((previous) => ({ ...previous, ...ot }));
+      setEmployeeNormalHours((previous) => ({ ...previous, ...nhMap }));
+      setMissingSourceEntries((previous) => ({ ...previous, ...missingMap }));
 
       return fixed;
-
-    } catch (e) {
+    } catch (error) {
+      console.error('Error fetching timesheets:', error);
       setSaveMessage({
-        type: "error",
-        text: "Failed to fetch timesheets: " + e.message,
+        type: 'error',
+        text: `Failed to fetch timesheets: ${error.message}`
       });
+      setTimesheets([]);
       return [];
     } finally {
       setLoading(false);
@@ -1762,6 +1893,8 @@ function Timesheet() {
         const startDate = toYMD(start);
         const endDate = toYMD(end);
 
+        const jobsPromise = fetch(`${API_BASE_URL}/api/jobs`, { headers });
+        const employeesResponsePromise = fetch(`${API_BASE_URL}/api/employee`, { headers });
         const [
           jobsRes,
           attendancesRes,
@@ -1770,7 +1903,7 @@ function Timesheet() {
           holidaysRes,
           specialWeekendsRes
         ] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/jobs`, { headers }),
+          jobsPromise,
           fetch(`${API_BASE_URL}/api/attendance?startDate=${startDate}&endDate=${endDate}`, { headers }),
           fetch(`${API_BASE_URL}/api/overview?startDate=${startDate}&endDate=${endDate}`, { headers }),
           fetch(`${API_BASE_URL}/api/settings/system`, { headers }),
@@ -1779,6 +1912,9 @@ function Timesheet() {
         ]);
 
         const jobsData = jobsRes.ok ? await jobsRes.json() : [];
+        const employeesPromise = employeesResponsePromise.then((employeesResponse) =>
+          fetchEmployeesWithJobs(jobsData, employeesResponse)
+        );
         const attendancesData = attendancesRes.ok ? await attendancesRes.json() : [];
         const overviewsData = overviewsRes.ok ? await overviewsRes.json() : [];
         const holidaysData = holidaysRes.ok ? await holidaysRes.json() : [];
@@ -1796,7 +1932,7 @@ function Timesheet() {
           }));
         }
         
-        const employeesData = await fetchEmployeesWithJobs();
+        const employeesData = await employeesPromise;
         
         setEmployees(employeesData);
         setJobs(jobsData);
@@ -1808,7 +1944,7 @@ function Timesheet() {
         initializeAttendanceData(employeesData);
         initializeHoursData(employeesData);
 
-        await fetchTimesheets();
+        await fetchTimesheets(employeesData);
         
         if (jobIdFromUrl) {
           const jobExists = jobsData.some(job => job.id === parseInt(jobIdFromUrl));
@@ -1867,39 +2003,41 @@ function Timesheet() {
     setEmployeeOvertime(initialOH);
   };
 
-  const getFilteredEmployees = () => {
+  const filteredEmployeesBase = useMemo(() => {
     let filtered = employees;
-    
-    if (selectedCategory && selectedCategory !== "") {
-      filtered = filtered.filter(emp => emp.category === selectedCategory);
-    }
-    
-    if (selectedJob && selectedJob !== '' && selectedJob !== 'no-job') {
-      const jobId = parseInt(selectedJob);
-      filtered = employees.filter(emp => {
-        const hasJob = emp.job && emp.job.id === jobId;
-        return hasJob;
+
+    if (selectedCategory) {
+      filtered = filtered.filter((employee) => {
+        const categoryName = typeof employee.category === 'string'
+          ? employee.category
+          : employee.category?.name;
+        return categoryName === selectedCategory;
       });
     }
 
-    if (selectedJob === 'no-job') {
-      filtered = employees.filter(emp => !emp.job || !emp.job.id);
+    if (selectedJob && selectedJob !== 'no-job') {
+      const jobId = Number(selectedJob);
+      filtered = filtered.filter((employee) => Number(employee.job?.id) === jobId);
+    } else if (selectedJob === 'no-job') {
+      filtered = filtered.filter((employee) => !employee.job?.id);
     }
-    
-    if (filters.search) {
-      const searchTerm = filters.search.toLowerCase();
-      filtered = filtered.filter(emp => 
-        emp.firstName?.toLowerCase().includes(searchTerm) ||
-        emp.lastName?.toLowerCase().includes(searchTerm) ||
-        emp.employeeId?.toLowerCase().includes(searchTerm) ||
-        emp.position?.toLowerCase().includes(searchTerm) ||
-        emp.department?.toLowerCase().includes(searchTerm) ||
-        emp.job?.name?.toLowerCase().includes(searchTerm)
-      );
+
+    const searchTerm = deferredSearchQuery.trim().toLowerCase();
+    if (searchTerm) {
+      filtered = filtered.filter((employee) => [
+        employee.firstName,
+        employee.lastName,
+        employee.employeeId,
+        employee.position,
+        employee.department,
+        employee.job?.name
+      ].some((value) => String(value || '').toLowerCase().includes(searchTerm)));
     }
-    
+
     return filtered;
-  };
+  }, [employees, selectedCategory, selectedJob, deferredSearchQuery]);
+
+  const getFilteredEmployees = () => filteredEmployeesBase;
 
   const filteredEmployees = getFilteredEmployeesWithSourceFilter();
   const totalRows = filteredEmployees.length;
@@ -2929,8 +3067,9 @@ function Timesheet() {
           sidebarOpen ? 'ml-64' : 'ml-16'
         }`}
       >
+        {/* ===== HEADER BAR – reduced height ===== */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
-          <div className="flex justify-between items-center px-6 py-3">
+          <div className="flex justify-between items-center px-6 py-2">
             <div className="flex items-center gap-4">
               {sidebarOpen && (
                 <button
@@ -2958,156 +3097,291 @@ function Timesheet() {
               <select 
                 value={missingSourceFilter} 
                 onChange={(e) => setMissingSourceFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
               >
                 <option value="all">All Entries</option>
                 <option value="verified">Verified Only (Has Source)</option>
                 <option value="unverified">Unverified Only (No Source)</option>
               </select>
 
-              <button 
-                onClick={() => setShowMissingSourceModal(true)}
-                disabled={selectedEmployeeIds.size === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
-              >
-                <Flag size={16} />
-                Mark Missing Source ({selectedEmployeeIds.size})
-              </button>
-
-              <label className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors">
-                <input 
-                  type="checkbox" 
-                  checked={autoSyncWithBilling}
-                  onChange={(e) => setAutoSyncWithBilling(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-700 whitespace-nowrap">
-                  <Calendar size={14} className="inline mr-1" />
-                  Auto-sync with billing period
-                </span>
-              </label>
-
-              <div className="relative group">
-                <button 
-                  disabled={exportLoading}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setControlsOpen((open) => !open)}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-all duration-200 shadow hover:shadow-md text-sm font-medium"
                 >
-                  {exportLoading ? (
-                    <RefreshCw size={16} className="animate-spin" />
-                  ) : (
-                    <Download size={16} />
-                  )}
-                  Export
-                  <ChevronDown size={14} />
+                  <Settings size={16} />
+                  Controls
+                  <ChevronDown
+                    size={14}
+                    className={`transition-transform ${controlsOpen ? 'rotate-180' : ''}`}
+                  />
                 </button>
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-xl border border-gray-200 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-20">
-                  <button onClick={exportToColoredExcel} className="w-full text-left px-4 py-3 hover:bg-gray-50 rounded-t-lg flex items-center gap-3 border-b border-gray-100">
-                    <FileText size={16} className="text-blue-500" />
-                    <div>
-                      <div className="font-medium text-gray-800">Template</div>
-                      <div className="text-xs text-gray-500">Export for manual filling</div>
-                    </div>
-                  </button>
-                  <button onClick={exportToProfessionalExcel} className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3">
-                    <File size={16} className="text-green-500" />
-                    <div>
-                      <div className="font-medium text-gray-800">Detailed Data</div>
-                      <div className="text-xs text-gray-500">Full timesheet with calculations</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
 
-              {selectedJob && selectedJob !== 'no-job' && (
-                <button 
-                  onClick={handleExportInvoice} 
-                  disabled={isGenerating}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-200 shadow hover:shadow-md"
-                >
-                  <Receipt size={16} />
-                  Export Invoice
-                </button>
-              )}
+                {controlsOpen && typeof document !== "undefined" && createPortal(
+                  <>
+                    <div
+                      className="fixed inset-0 z-[2147483646] bg-black/10 backdrop-blur-[1px]"
+                      onClick={() => setControlsOpen(false)}
+                      aria-hidden="true"
+                    />
 
-              <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
-                <RefreshCw size={16} />
-                Refresh
-              </button>
-              
-              <button onClick={saveAttendance} disabled={isGenerating} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50">
-                {isGenerating ? (
-                  <RefreshCw size={16} className="animate-spin" />
-                ) : (
-                  <Save size={16} />
+                    <div
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label="Timesheet controls"
+                      className="fixed right-4 top-20 z-[2147483647] w-[calc(100vw-2rem)] max-w-sm max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-2xl border border-gray-200"
+                    >
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="text-sm font-semibold text-gray-900">Timesheet controls</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Manage, save, import, export, and review records.</p>
+                      </div>
+
+                      <div className="p-2">
+                        <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Save</p>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); saveAttendance(); }}
+                          disabled={isGenerating}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-green-50 disabled:opacity-50"
+                        >
+                          {isGenerating ? <RefreshCw size={17} className="animate-spin text-green-600" /> : <Save size={17} className="text-green-600" />}
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">{isGenerating ? 'Saving...' : 'Save all'}</div>
+                            <div className="text-xs text-gray-500">Save the current timesheet period</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); saveSelectedAttendance(); }}
+                          disabled={isGenerating || selectedEmployeeIds.size === 0}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-cyan-50 disabled:opacity-50"
+                        >
+                          <Check size={17} className="text-cyan-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Save selected ({selectedEmployeeIds.size})</div>
+                            <div className="text-xs text-gray-500">Save only selected employees</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setControlsOpen(false);
+                            setSaveSpecificDate({
+                              open: true,
+                              date: days.length > 0 ? toYMD(days[0]) : "",
+                              endDate: days.length > 0 ? toYMD(days[days.length - 1]) : "",
+                              rangeMode: false,
+                              employeeIds: new Set(selectedEmployeeIds),
+                              isSaving: false
+                            });
+                          }}
+                          disabled={isGenerating || selectedEmployeeIds.size === 0}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-teal-50 disabled:opacity-50"
+                        >
+                          <Calendar size={17} className="text-teal-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Save date or range</div>
+                            <div className="text-xs text-gray-500">Save selected employees for chosen dates</div>
+                          </div>
+                        </button>
+
+                        <div className="my-2 border-t border-gray-100" />
+                        <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Manage</p>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); setBulkPanelOpen(true); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-purple-50"
+                        >
+                          <Users size={17} className="text-purple-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Bulk actions ({selectedEmployeeIds.size})</div>
+                            <div className="text-xs text-gray-500">Update multiple employees and dates</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); setShowMissingSourceModal(true); }}
+                          disabled={selectedEmployeeIds.size === 0}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          <Flag size={17} className="text-amber-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Mark missing source ({selectedEmployeeIds.size})</div>
+                            <div className="text-xs text-gray-500">Flag records without supporting documents</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); setShowSyncPanel((open) => !open); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-blue-50"
+                        >
+                          <ArrowRightLeft size={17} className="text-blue-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">{showSyncPanel ? 'Hide attendance sync' : 'Sync with attendance'}</div>
+                            <div className="text-xs text-gray-500">Create or update timesheets from attendance</div>
+                          </div>
+                        </button>
+
+                        <label className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={autoSyncWithBilling}
+                            onChange={(e) => setAutoSyncWithBilling(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Auto-sync billing period</div>
+                            <div className="text-xs text-gray-500">Follow the selected job billing cycle</div>
+                          </div>
+                        </label>
+
+                        <div className="my-2 border-t border-gray-100" />
+                        <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Import and export</p>
+
+                        <label className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-blue-50 cursor-pointer ${isProcessingImport ? 'opacity-50 pointer-events-none' : ''}`}>
+                          {isProcessingImport ? <RefreshCw size={17} className="animate-spin text-blue-600" /> : <Upload size={17} className="text-blue-600" />}
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Import Excel</div>
+                            <div className="text-xs text-gray-500">Upload XLSX, XLS, or CSV timesheets</div>
+                          </div>
+                          <input type="file" accept=".xlsx, .xls, .csv" onChange={(event) => { setControlsOpen(false); handleExcelImport(event); }} className="hidden" disabled={isProcessingImport} />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); exportToColoredExcel(); }}
+                          disabled={exportLoading}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-blue-50 disabled:opacity-50"
+                        >
+                          <FileText size={17} className="text-blue-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Export template</div>
+                            <div className="text-xs text-gray-500">Export a formatted manual-entry template</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); exportToProfessionalExcel(); }}
+                          disabled={exportLoading}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-green-50 disabled:opacity-50"
+                        >
+                          <File size={17} className="text-green-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Export detailed data</div>
+                            <div className="text-xs text-gray-500">Export calculations and employee totals</div>
+                          </div>
+                        </button>
+
+                        {selectedJob && selectedJob !== 'no-job' && (
+                          <button
+                            type="button"
+                            onClick={() => { setControlsOpen(false); handleExportInvoice(); }}
+                            disabled={isGenerating}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            <Receipt size={17} className="text-emerald-600" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-800">Export invoice</div>
+                              <div className="text-xs text-gray-500">Generate invoice with job attachments</div>
+                            </div>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); navigate('/excel-comparator'); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-indigo-50"
+                        >
+                          <ArrowLeftRight size={17} className="text-indigo-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Compare Excel files</div>
+                            <div className="text-xs text-gray-500">Open the spreadsheet comparison tool</div>
+                          </div>
+                        </button>
+
+                        <div className="my-2 border-t border-gray-100" />
+                        <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Reports and settings</p>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); generateGeneralReport(); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-indigo-50"
+                        >
+                          <BarChart size={17} className="text-indigo-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Generate report</div>
+                            <div className="text-xs text-gray-500">Build the current timesheet report</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); setShowCodeSettings((open) => !open); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-amber-50"
+                        >
+                          <Settings size={17} className="text-amber-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Attendance-code settings</div>
+                            <div className="text-xs text-gray-500">Configure normal and overtime-hour rules</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setControlsOpen(false); window.location.reload(); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50"
+                        >
+                          <RefreshCw size={17} className="text-gray-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-800">Refresh page</div>
+                            <div className="text-xs text-gray-500">Reload all current timesheet data</div>
+                          </div>
+                        </button>
+
+                        <div className="my-2 border-t border-gray-100" />
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setControlsOpen(false);
+                            setDeleteModal({
+                              open: true,
+                              scope: "selected",
+                              date: "",
+                              startDate: "",
+                              endDate: "",
+                              employeeIds: new Set(selectedEmployeeIds),
+                              isDeleting: false
+                            });
+                          }}
+                          disabled={selectedEmployeeIds.size === 0}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 size={17} className="text-red-600" />
+                          <div>
+                            <div className="text-sm font-medium text-red-700">Delete selected ({selectedEmployeeIds.size})</div>
+                            <div className="text-xs text-gray-500">Remove selected employees' timesheet records</div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </>,
+                  document.body
                 )}
-                {isGenerating ? 'Saving...' : 'Save All'}
-              </button>
-              
-              <button onClick={generateGeneralReport} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all duration-200">
-                <FileText size={16} />
-                Report
-              </button>
-
-              <button onClick={() => setBulkPanelOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all duration-200 shadow hover:shadow-md">
-                <Users size={16} />
-                Bulk ({selectedEmployeeIds.size})
-              </button>
-
-              <button onClick={() => setShowCodeSettings(!showCodeSettings)} className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all duration-200 relative">
-                <Settings size={16} />
-                Settings
-              </button>
-
-              <button onClick={saveSelectedAttendance} disabled={isGenerating || selectedEmployeeIds.size === 0} className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50">
-                <Check size={16} />
-                Save Selected ({selectedEmployeeIds.size})
-              </button>
-
-             <button 
-  onClick={() => setSaveSpecificDate({ 
-    open: true, 
-    date: days.length > 0 ? toYMD(days[0]) : "",
-    endDate: days.length > 0 ? toYMD(days[days.length - 1]) : "",
-    rangeMode: false,
-    employeeIds: new Set(selectedEmployeeIds),
-    isSaving: false
-  })} 
-  disabled={isGenerating || selectedEmployeeIds.size === 0} 
-  className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
->
-  <Calendar size={16} />
-  Save Date ({selectedEmployeeIds.size})
-</button>
-
-              <button 
-                onClick={() => navigate('/excel-comparator')} 
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all duration-200 shadow hover:shadow-md"
-              >
-                <ArrowLeftRight size={16} />
-                Compare Excel Files
-              </button>
-
-              <button 
-                onClick={() => setDeleteModal({ 
-                  open: true, 
-                  scope: "selected",
-                  date: "",
-                  startDate: "",
-                  endDate: "",
-                  employeeIds: new Set(selectedEmployeeIds),
-                  isDeleting: false
-                })} 
-                disabled={selectedEmployeeIds.size === 0} 
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 shadow hover:shadow-md disabled:opacity-50"
-              >
-                <Trash2 size={16} />
-                Delete ({selectedEmployeeIds.size})
-              </button>
+              </div>
 
               <div className="relative">
                 <button
                   onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center text-white font-semibold">
                     {user?.name?.charAt(0)?.toUpperCase() || 'U'}
@@ -3121,7 +3395,7 @@ function Timesheet() {
                 
                 {userDropdownOpen && (
                   <>
-                    <div className="fixed inset-0 z-30" onClick={() => setUserDropdownOpen(false)} />
+                    <div className="fixed inset-0 z-[9998] bg-black/5" onClick={() => setUserDropdownOpen(false)} />
                     <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-40">
                       <div className="px-4 py-3 border-b border-gray-100">
                         <p className="text-sm font-medium text-gray-800">{user?.name || 'User'}</p>
@@ -3165,20 +3439,21 @@ function Timesheet() {
             </div>
           )}
 
-          <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow border border-gray-100">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() - 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <ChevronLeft size={20} />
+          {/* ===== FILTER / ACTION BAR – reduced height ===== */}
+          <div className="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow border border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() - 7); setCurrentDate(newDate); }} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                  <ChevronLeft size={18} />
                 </button>
                 
-                <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm">
                   <option value="">All Categories</option>
                   {categories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
 
-                <div className="bg-blue-50 px-4 py-2 rounded-lg border border-blue-100">
-                  <h2 className="text-lg font-semibold text-blue-800">
+                <div className="bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100">
+                  <h2 className="text-base font-semibold text-blue-800">
                     {selectedPeriod === "week" 
                       ? `Week of ${getDateRange().start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${getDateRange().end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
                       : selectedPeriod === "month"
@@ -3187,54 +3462,54 @@ function Timesheet() {
                       ? `${customDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${customDays[customDays.length - 1].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
                       : 'Custom Range'}
                   </h2>
-                  <p className="text-xs text-blue-600 mt-1">
+                  <p className="text-xs text-blue-600 mt-0.5">
                     {days.length} days • {filteredEmployees.length} employees
                   </p>
                 </div>
                 
-                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() + 7); setCurrentDate(newDate); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <ChevronRight size={20} />
+                <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() + 7); setCurrentDate(newDate); }} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                  <ChevronRight size={18} />
                 </button>
               </div>
 
-              <button onClick={() => setViewMode(viewMode === 'timesheet' ? 'excel-template' : 'timesheet')} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-lg hover:from-indigo-600 hover:to-indigo-700 transition-all duration-200 shadow">
-                <FileText size={16} />
+              <button onClick={() => setViewMode(viewMode === 'timesheet' ? 'excel-template' : 'timesheet')} className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-lg hover:from-indigo-600 hover:to-indigo-700 transition-all duration-200 shadow text-sm">
+                <FileText size={14} />
                 {viewMode === 'timesheet' ? 'View Template' : 'Back to Timesheet'}
               </button>
 
               {selectedJob && selectedJobData && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <Building size={16} className="text-blue-600" />
-                    <h3 className="font-semibold text-blue-800">{selectedJobData.name}</h3>
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Building size={14} className="text-blue-600" />
+                    <h3 className="font-semibold text-blue-800 text-sm">{selectedJobData.name}</h3>
                   </div>
-                  <p className="text-sm text-blue-600 mt-1">
+                  <p className="text-xs text-blue-600 mt-0.5">
                     {filteredEmployees.length} employees • Standard: {selectedJobData.standardWorkHours || 8}h/day
                   </p>
-                  <button onClick={() => navigate(`/generateinvoice?jobId=${selectedJob}&startDate=${getDateRange().start.toISOString().split('T')[0]}&endDate=${getDateRange().end.toISOString().split('T')[0]}`)} className="mt-2 flex items-center gap-2 px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors">
-                    <Receipt size={14} />
+                  <button onClick={() => navigate(`/generateinvoice?jobId=${selectedJob}&startDate=${getDateRange().start.toISOString().split('T')[0]}&endDate=${getDateRange().end.toISOString().split('T')[0]}`)} className="mt-1 flex items-center gap-1.5 px-2 py-0.5 bg-green-500 text-white text-xs rounded hover:bg-green-600 transition-colors">
+                    <Receipt size={12} />
                     Quick Invoice
                   </button>
                 </div>
               )}
             </div>
             
-            <div className="flex items-center gap-4">
-              <div className="relative w-80">
+            <div className="flex items-center gap-3">
+              <div className="relative w-72">
                 <div className="relative">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search employees, positions, IDs..." className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm" />
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search employees, positions, IDs..." className="w-full pl-9 pr-9 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm" />
                   {searchQuery && (
                     <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors" title="Clear search">
-                      <X size={16} />
+                      <X size={14} />
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                <span className="text-sm text-gray-600">Show:</span>
-                <select value={tablePageSize} onChange={(e) => setTablePageSize(parseInt(e.target.value))} className="px-2 py-1 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+              <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-1.5 rounded-lg border border-gray-200">
+                <span className="text-xs text-gray-600">Show:</span>
+                <select value={tablePageSize} onChange={(e) => setTablePageSize(parseInt(e.target.value))} className="px-1.5 py-0.5 border border-gray-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value={25}>25</option>
                   <option value={50}>50</option>
                   <option value={100}>100</option>
@@ -3243,8 +3518,8 @@ function Timesheet() {
               </div>
 
               <div className="relative">
-                <button onClick={() => setShowDurationFilter(!showDurationFilter)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all duration-200 shadow">
-                  <CalendarRange size={16} />
+                <button onClick={() => setShowDurationFilter(!showDurationFilter)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all duration-200 shadow text-sm">
+                  <CalendarRange size={14} />
                   Duration
                 </button>
                 
@@ -3278,13 +3553,7 @@ function Timesheet() {
                 )}
               </div>
               
-              <label className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg hover:from-green-600 hover:to-emerald-600 cursor-pointer transition-all duration-200 shadow">
-                {isProcessingImport ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-                Import Excel
-                <input type="file" accept=".xlsx, .xls, .csv" onChange={handleExcelImport} className="hidden" disabled={isProcessingImport} />
-              </label>
-              
-              <select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm">
+              <select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-sm">
                 <option value="">All Jobs ({employees.length})</option>
                 <option value="no-job">No Job ({employees.filter(emp => !emp.job || !emp.job.id).length})</option>
                 {jobs.map(job => {
@@ -3297,8 +3566,8 @@ function Timesheet() {
                 })}
               </select>
               
-              <button onClick={() => setShowStatsPanel(!showStatsPanel)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                {showStatsPanel ? <EyeOff size={20} className="text-gray-600" /> : <Eye size={20} className="text-gray-600" />}
+              <button onClick={() => setShowStatsPanel(!showStatsPanel)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                {showStatsPanel ? <EyeOff size={18} className="text-gray-600" /> : <Eye size={18} className="text-gray-600" />}
               </button>
             </div>
           </div>
@@ -3365,14 +3634,6 @@ function Timesheet() {
           )}
 
           <div className="mb-4">
-            <button onClick={() => setShowSyncPanel(!showSyncPanel)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors mb-4">
-              <ArrowRightLeft size={16} className={`transition-transform ${showSyncPanel ? 'rotate-180' : ''}`} />
-              Sync with Attendance
-              <span className="text-xs text-gray-500 ml-1">
-                ({showSyncPanel ? 'Hide' : 'Show'})
-              </span>
-            </button>
-            
             {showSyncPanel && (
               <TimesheetAttendanceSync 
                 timesheets={timesheets}
@@ -3452,15 +3713,15 @@ function Timesheet() {
             />
           ) : (
             <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
                 <table className="min-w-full">
-                  <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                  <thead className="sticky top-0 z-20 bg-gradient-to-r from-gray-50 to-gray-100">
                     <tr>
-                      <th className="sticky left-0 z-10 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 w-12">
+                      <th className="sticky left-0 z-30 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 w-12">
                         <input type="checkbox" checked={pagedEmployees.length > 0 && pagedEmployees.every(e => selectedEmployeeIds.has(e.id))} onChange={(e) => { if (e.target.checked) selectAllOnPage(); else clearAllSelection(); }} className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500" />
                       </th>
                       
-                      <th className="sticky left-12 z-10 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[250px]">
+                      <th className="sticky left-12 z-30 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[180px]">
                         <div className="flex items-center gap-2">
                           <User size={14} />
                           Employee Details
@@ -3470,7 +3731,7 @@ function Timesheet() {
                       {days.map((day, index) => {
                         const dateType = getDateTypeBadge(day);
                         return (
-                          <th key={index} className="px-2 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[120px]">
+                          <th key={index} className="px-2 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 min-w-[100px]">
                             <div className="font-bold">{day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                             <div className="text-lg font-bold text-gray-800">{day.getDate()}</div>
                             <div className={`text-xs px-2 py-1 rounded-full ${dateType.class} font-medium mt-1`}>
@@ -3522,11 +3783,11 @@ function Timesheet() {
                         return (
                           <React.Fragment key={employee.id}>
                             <tr className="hover:bg-gray-50 transition-colors duration-150">
-                              <td className="sticky left-0 z-10 bg-white px-4 py-3 border-r border-gray-100 text-center align-top" rowSpan="2">
+                              <td className="sticky left-0 z-20 bg-white px-4 py-3 border-r border-gray-100 text-center align-top" rowSpan="2">
                                 <input type="checkbox" checked={selectedEmployeeIds.has(employee.id)} onChange={() => toggleSelectEmployee(employee.id)} className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500" />
                               </td>
                               
-                              <td className="sticky left-12 z-10 bg-white px-3 py-3 border-r border-gray-100 w-[250px] align-top" rowSpan="2">
+                              <td className="sticky left-12 z-20 bg-white px-3 py-3 border-r border-gray-100 w-[180px] align-top" rowSpan="2">
                                 <div className="font-semibold text-gray-900 text-sm leading-tight">
                                   {employee.firstName} {employee.lastName}
                                 </div>
@@ -3579,12 +3840,13 @@ function Timesheet() {
                                 const missingSource = isMissingSource(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="px-2 py-3 text-center border-r border-gray-100 align-top relative" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
+                                  <td key={dayIndex} className="px-1 py-2 text-center border-r border-gray-100 align-top relative" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
                                     <div className="flex items-center justify-center gap-1">
                                       <select 
                                         value={attendanceStatus} 
                                         onChange={(e) => handleAttendanceStatusChange(employee.id, dateStr, e.target.value)} 
-                                        className={`w-14 h-9 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 ${getAttendanceCodeColor(attendanceStatus)} focus:ring-opacity-50`}
+                                        className="w-16 h-8 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1"
+                                        style={getAttendanceCodeColor(attendanceStatus) ? { backgroundColor: 'white' } : {}}
                                       >
                                         <option value="">-</option>
                                         <option value="P">P</option>
@@ -3662,9 +3924,9 @@ function Timesheet() {
                                 const missingSource = isMissingSource(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="border-r border-gray-100 px-2 py-3" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
+                                  <td key={dayIndex} className="border-r border-gray-100 px-1 py-2" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
                                     {isPresent ? (
-                                      <div className="space-y-3">
+                                      <div className="space-y-1">
                                         <div className="flex items-center justify-between">
                                           <label className="text-xs font-medium text-gray-600">NH:</label>
                                           <input 
@@ -3693,7 +3955,7 @@ function Timesheet() {
                                                 }
                                               }));
                                             }} 
-                                            className="w-16 p-2 border border-blue-300 rounded-lg text-sm text-center bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                                            className="w-16 p-1 border border-blue-300 rounded-lg text-sm text-center bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
                                             min="0" 
                                             max="24" 
                                             step="0.5" 
@@ -3705,15 +3967,15 @@ function Timesheet() {
                                             userManuallyChangedRef.current = true;
                                             autoSyncPerformedRef.current = true;
                                             handleOvertimeChange(employee.id, dateStr, e.target.value);
-                                          }} className="w-16 p-2 border border-orange-300 rounded-lg text-sm text-center bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500" min="0" max="24" step="0.5" />
+                                          }} className="w-16 p-1 border border-orange-300 rounded-lg text-sm text-center bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500" min="0" max="24" step="0.5" />
                                         </div>
                                         
-                                        <div className="text-center text-xs font-medium text-gray-700 bg-gray-100 py-1 rounded">
+                                        <div className="text-center text-xs font-medium text-gray-700 bg-gray-100 py-0.5 rounded">
                                           Total: {totalHours.toFixed(1)}h
                                         </div>
                                       </div>
                                     ) : ( 
-                                      <div className="text-center py-4">
+                                      <div className="text-center py-2">
                                         <div className={`text-sm font-medium px-3 py-1 rounded-full ${status === 'A' ? 'bg-red-100 text-red-700' : status === 'L' ? 'bg-blue-100 text-blue-700' : status === 'H' ? 'bg-yellow-100 text-yellow-700' : status === 'S' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
                                           {status === '' ? 'Not Marked' : 
                                             status === 'A' ? 'Absent' : 
@@ -3816,6 +4078,7 @@ function Timesheet() {
         </main>
       </div>
 
+      {/* ===== MODALS (unchanged) ===== */}
       {showMissingSourceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">

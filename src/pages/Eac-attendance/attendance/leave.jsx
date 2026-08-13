@@ -29,7 +29,6 @@ import AdminLeaveBalanceView from "./AdminLeaveBalanceView";
 function Leave() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [highlightedLeaveId, setHighlightedLeaveId] = useState(null);
-  const [pendingAction, setPendingAction] = useState(null);
   
   const [query, setQuery] = useState('');
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
@@ -121,6 +120,106 @@ function Leave() {
     return localStorage.getItem('jwtToken');
   };
 
+  /**
+   * Converts backend Boolean-like values safely.
+   * false, "false", 0 and "0" are treated as false.
+   * true, "true", 1 and "1" are treated as true.
+   */
+  const normalizeBoolean = (value, fallback = true) => {
+    if (value === true || value === false) return value;
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+      if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+
+    return fallback;
+  };
+
+  /**
+   * Parses YYYY-MM-DD without UTC conversion.
+   * This prevents Saturday/Sunday from shifting in some time zones.
+   */
+  const parseLocalDate = (dateString) => {
+    if (!dateString || typeof dateString !== 'string') return null;
+
+    const [year, month, day] = dateString.split('-').map(Number);
+    if (!year || !month || !day) return null;
+
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+  };
+
+  const normalizeCategory = (employee, categoryList = []) => {
+    if (!employee) return null;
+
+    const rawCategory = employee.category;
+
+    const categoryId =
+      employee.categoryId ??
+      (typeof rawCategory === 'object' && rawCategory !== null ? rawCategory.id : null);
+
+    const categoryName =
+      employee.categoryName ??
+      (typeof rawCategory === 'string'
+        ? rawCategory
+        : rawCategory?.name);
+
+    const matchedCategory = categoryList.find(category =>
+      (categoryId != null && String(category.id) === String(categoryId)) ||
+      (categoryName && String(category.name).toLowerCase() === String(categoryName).toLowerCase())
+    );
+
+    const categorySource =
+      typeof rawCategory === 'object' && rawCategory !== null
+        ? rawCategory
+        : {};
+
+    if (!categoryId && !categoryName && !matchedCategory) {
+      return null;
+    }
+
+    return {
+      ...matchedCategory,
+      ...categorySource,
+      id: categoryId ?? matchedCategory?.id ?? categorySource.id ?? null,
+      name: categoryName ?? matchedCategory?.name ?? categorySource.name ?? 'Unassigned',
+      annualLeaveDays: Number(
+        employee.annualLeaveDays ??
+        categorySource.annualLeaveDays ??
+        matchedCategory?.annualLeaveDays ??
+        20
+      ),
+      excludeWeekendsFromLeave: normalizeBoolean(
+        employee.excludeWeekendsFromLeave ??
+        categorySource.excludeWeekendsFromLeave ??
+        matchedCategory?.excludeWeekendsFromLeave,
+        true
+      ),
+      workStartTime:
+        employee.workStartTime ??
+        categorySource.workStartTime ??
+        matchedCategory?.workStartTime ??
+        '08:00',
+      standardRateHours: Number(
+        employee.standardRateHours ??
+        categorySource.standardRateHours ??
+        matchedCategory?.standardRateHours ??
+        8
+      )
+    };
+  };
+
+  const normalizeEmployee = (employee, categoryList = []) => ({
+    ...employee,
+    category: normalizeCategory(employee, categoryList)
+  });
+
   const getUniqueCategoriesFromLeaves = () => {
     const categoriesSet = new Set();
     leaves.forEach(leave => {
@@ -137,36 +236,37 @@ function Leave() {
 
   const calculateLeaveDays = (startDate, endDate, leaveType, employeeCategory) => {
     if (!startDate || !endDate) return 0;
-    
+
     if (!isLeaveDeductible(leaveType)) {
       return 0;
     }
-    
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    let excludeWeekends = true;
-    if (employeeCategory && employeeCategory.excludeWeekendsFromLeave !== undefined) {
-      excludeWeekends = employeeCategory.excludeWeekendsFromLeave;
+
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
+
+    if (!start || !end || end < start) {
+      return 0;
     }
-    
+
+    const excludeWeekends = normalizeBoolean(
+      employeeCategory?.excludeWeekendsFromLeave,
+      true
+    );
+
     let days = 0;
     const currentDate = new Date(start);
-    
+
     while (currentDate <= end) {
       const dayOfWeek = currentDate.getDay();
-      const isWeekendDay = (dayOfWeek === 0 || dayOfWeek === 6);
-      
-      if (excludeWeekends) {
-        if (!isWeekendDay) {
-          days++;
-        }
-      } else {
+      const weekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+      if (!excludeWeekends || !weekend) {
         days++;
       }
+
       currentDate.setDate(currentDate.getDate() + 1);
     }
-    
+
     return days;
   };
 
@@ -330,7 +430,7 @@ function Leave() {
   };
 
   const deleteLeave = async (leaveId) => {
-    if (!window.confirm('Are you sure you want to delete this leave request? This action cannot be undone.')) {
+    if (!await window.appConfirm('Are you sure you want to delete this leave request? This action cannot be undone.')) {
       return;
     }
 
@@ -373,7 +473,7 @@ function Leave() {
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete ${selectedLeaves.size} leave request(s)? This action cannot be undone.`)) {
+    if (!await window.appConfirm(`Are you sure you want to delete ${selectedLeaves.size} leave request(s)? This action cannot be undone.`)) {
       return;
     }
 
@@ -487,11 +587,31 @@ function Leave() {
     return ['All', ...Array.from(types)];
   }, [leaves]);
 
+  const getSelectedEmployeeForLeave = () => {
+    return employees.find(
+      employee => String(employee.id) === String(newLeave.employee?.id)
+    ) || null;
+  };
+
+  const shouldExcludeWeekendsForSelectedEmployee = () => {
+    const selectedEmployee = getSelectedEmployeeForLeave();
+
+    return normalizeBoolean(
+      selectedEmployee?.category?.excludeWeekendsFromLeave ??
+      selectedEmployee?.excludeWeekendsFromLeave,
+      true
+    );
+  };
+
   const handleStartDateChange = (e) => {
     const { value } = e.target;
-    
-    if (value && isWeekend(value)) {
-      showToast('error', 'Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+    const excludeWeekends = shouldExcludeWeekendsForSelectedEmployee();
+
+    if (value && excludeWeekends && isWeekend(value)) {
+      showToast(
+        'error',
+        'This employee’s category excludes weekends from leave. Please select a weekday.'
+      );
       return;
     }
 
@@ -500,7 +620,11 @@ function Leave() {
       startDate: value
     };
 
-    if (updatedLeave.endDate && value && new Date(updatedLeave.endDate) < new Date(value)) {
+    if (
+      updatedLeave.endDate &&
+      value &&
+      new Date(updatedLeave.endDate) < new Date(value)
+    ) {
       updatedLeave.endDate = '';
     }
 
@@ -509,25 +633,35 @@ function Leave() {
 
   const handleEndDateChange = (e) => {
     const { value } = e.target;
-    
-    if (value && isWeekend(value)) {
-      showToast('error', 'Please select a weekday (Monday to Friday). Weekends are not allowed for leave dates.');
+    const excludeWeekends = shouldExcludeWeekendsForSelectedEmployee();
+
+    if (value && excludeWeekends && isWeekend(value)) {
+      showToast(
+        'error',
+        'This employee’s category excludes weekends from leave. Please select a weekday.'
+      );
       return;
     }
 
-    if (value && newLeave.startDate && new Date(value) < new Date(newLeave.startDate)) {
+    if (
+      value &&
+      newLeave.startDate &&
+      new Date(value) < new Date(newLeave.startDate)
+    ) {
       showToast('error', 'End date cannot be before start date.');
       return;
     }
 
-    setNewLeave({
-      ...newLeave,
+    setNewLeave(previous => ({
+      ...previous,
       endDate: value
-    });
+    }));
   };
 
   const isWeekend = (dateString) => {
-    const date = new Date(dateString);
+    const date = parseLocalDate(dateString);
+    if (!date) return false;
+
     const day = date.getDay();
     return day === 0 || day === 6;
   };
@@ -536,37 +670,82 @@ function Leave() {
     fetchLeaves();
     fetchEmployees();
     fetchLeaveSettings();
-    fetchCategories();
     fetchUser();
   }, []);
 
   const fetchEmployees = async () => {
     try {
       const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/employee`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      });
-      if (!response.ok) throw new Error('Failed to fetch employees');
-      const data = await response.json();
-      
-      const processedEmployees = data.map(emp => ({
-        ...emp,
-        category: emp.category ? { 
-          id: emp.category.id, 
-          name: emp.category.name,
-          annualLeaveDays: emp.category.annualLeaveDays || 20,
-          excludeWeekendsFromLeave: emp.category.excludeWeekendsFromLeave !== undefined ? emp.category.excludeWeekendsFromLeave : true,
-          workStartTime: emp.category.workStartTime || '08:00',
-          standardRateHours: emp.category.standardRateHours || 8
-        } : null
-      }));
-      
+
+      const [employeesResponse, categoriesResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/employee`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/settings/categories`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+      ]);
+
+      if (!employeesResponse.ok) {
+        const message = await employeesResponse.text();
+        throw new Error(message || 'Failed to fetch employees');
+      }
+
+      const employeeData = await employeesResponse.json();
+      const categoryData = categoriesResponse.ok
+        ? await categoriesResponse.json()
+        : [];
+
+      const safeCategories = Array.isArray(categoryData)
+        ? categoryData
+        : [];
+
+      const processedEmployees = (Array.isArray(employeeData) ? employeeData : [])
+        .map(employee => normalizeEmployee(employee, safeCategories));
+
+      setCategories(safeCategories);
       setEmployees(processedEmployees);
+
+      console.debug(
+        'Leave employee weekend policies:',
+        processedEmployees.map(employee => ({
+          id: employee.id,
+          name: `${employee.firstName || ''} ${employee.lastName || ''}`.trim(),
+          category: employee.category?.name,
+          excludeWeekendsFromLeave:
+            employee.category?.excludeWeekendsFromLeave
+        }))
+      );
+
+      // Refresh the selected employee object after the API data changes.
+      if (newLeave.employee?.id) {
+        const selectedEmployee = processedEmployees.find(
+          employee => String(employee.id) === String(newLeave.employee.id)
+        );
+
+        if (selectedEmployee) {
+          setNewLeave(previous => ({
+            ...previous,
+            employee: {
+              id: selectedEmployee.id,
+              firstName: selectedEmployee.firstName,
+              lastName: selectedEmployee.lastName,
+              employeeId: selectedEmployee.employeeId,
+              category: selectedEmployee.category
+            }
+          }));
+        }
+      }
     } catch (err) {
-      setError(err.message);
+      console.error('Failed to fetch employees:', err);
+      setError(err.message || 'Failed to fetch employees');
+      setEmployees([]);
     }
   };
 
@@ -617,7 +796,6 @@ function Leave() {
   useEffect(() => {
     const leaveId = searchParams.get('leaveId');
     const employeeId = searchParams.get('employeeId');
-    const action = searchParams.get('action');
     
     if (leaveId && employeeId && employees.length > 0) {
       const employee = employees.find(emp => emp.id === parseInt(employeeId));
@@ -630,10 +808,6 @@ function Leave() {
       
       setHighlightedLeaveId(parseInt(leaveId));
       
-      if (action === 'approve' || action === 'reject') {
-        setPendingAction(action);
-      }
-      
       const targetLeave = leaves.find(l => l.id === parseInt(leaveId));
       if (targetLeave) {
         setSelectedLeave(targetLeave);
@@ -645,7 +819,6 @@ function Leave() {
     setSelectedLeave(null);
     setSearchParams({});
     setHighlightedLeaveId(null);
-    setPendingAction(null);
   };
 
   const SortIcon = ({ columnKey }) => {
@@ -659,36 +832,34 @@ function Leave() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    
-    if (name === "employeeId") {
-      const selectedEmployee = employees.find(emp => emp.id === parseInt(value));
-      if (selectedEmployee) {
-        setNewLeave({
-          ...newLeave,
-          employee: {
-            id: selectedEmployee.id,
-            firstName: selectedEmployee.firstName,
-            lastName: selectedEmployee.lastName,
-            employeeId: selectedEmployee.employeeId,
-            category: selectedEmployee.category ? { 
-              id: selectedEmployee.category.id,
-              name: selectedEmployee.category.name,
-              annualLeaveDays: selectedEmployee.category.annualLeaveDays || 20,
-              excludeWeekendsFromLeave: selectedEmployee.category.excludeWeekendsFromLeave !== undefined 
-                ? selectedEmployee.category.excludeWeekendsFromLeave 
-                : true,
-              workStartTime: selectedEmployee.category.workStartTime || '08:00',
-              standardRateHours: selectedEmployee.category.standardRateHours || 8
-            } : null
-          }
-        });
-      }
-    } else {
-      setNewLeave({
-        ...newLeave,
-        [name]: value
-      });
+
+    if (name === 'employeeId') {
+      const selectedEmployee = employees.find(
+        employee => String(employee.id) === String(value)
+      );
+
+      setNewLeave(previous => ({
+        ...previous,
+        startDate: '',
+        endDate: '',
+        employee: selectedEmployee
+          ? {
+              id: selectedEmployee.id,
+              firstName: selectedEmployee.firstName,
+              lastName: selectedEmployee.lastName,
+              employeeId: selectedEmployee.employeeId,
+              category: selectedEmployee.category
+            }
+          : { id: '' }
+      }));
+
+      return;
     }
+
+    setNewLeave(previous => ({
+      ...previous,
+      [name]: value
+    }));
   };
 
   const uploadAttachment = async (leaveId, file, token) => {
@@ -722,24 +893,44 @@ function Leave() {
     }
     
     try {
-      if (!['Maternity', 'Paternity'].includes(newLeave.leaveType)) {
-        if (newLeave.startDate && isWeekend(newLeave.startDate)) {
-          showToast('error', 'Start date must be a weekday (Monday to Friday).');
-          return;
-        }
-        
-        if (newLeave.endDate && isWeekend(newLeave.endDate)) {
-          showToast('error', 'End date must be a weekday (Monday to Friday).');
-          return;
-        }
-      }
-
       if (!newLeave.employee.id || !newLeave.leaveType || !newLeave.startDate || !newLeave.reason) {
         showToast('error', 'Please fill in all required fields.');
         return;
       }
 
-      const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+      const selectedEmployee = getSelectedEmployeeForLeave();
+
+      if (!selectedEmployee) {
+        showToast('error', 'The selected employee could not be found. Please select the employee again.');
+        return;
+      }
+
+      const excludeWeekends = normalizeBoolean(
+        selectedEmployee.category?.excludeWeekendsFromLeave ??
+        selectedEmployee.excludeWeekendsFromLeave,
+        true
+      );
+
+      if (
+        !['Maternity', 'Paternity'].includes(newLeave.leaveType) &&
+        excludeWeekends
+      ) {
+        if (newLeave.startDate && isWeekend(newLeave.startDate)) {
+          showToast(
+            'error',
+            'This employee’s category excludes weekends from leave. Start date must be a weekday.'
+          );
+          return;
+        }
+
+        if (newLeave.endDate && isWeekend(newLeave.endDate)) {
+          showToast(
+            'error',
+            'This employee’s category excludes weekends from leave. End date must be a weekday.'
+          );
+          return;
+        }
+      }
       
       if (!hasSufficientLeaveBalance(selectedEmployee, newLeave.leaveType, newLeave.startDate, newLeave.endDate)) {
         const remainingBalance = getEmployeeRemainingLeave(selectedEmployee);
@@ -823,14 +1014,11 @@ function Leave() {
     }
   };
 
-  const approveLeave = async (leaveId) => {
-    const action = searchParams.get('action');
-    const isAutoAction = action === 'approve';
-    
-    if (!isAutoAction) {
-      if (!window.confirm('Are you sure you want to approve this leave request?')) {
-        return;
-      }
+  const approveLeave = async (leaveId, feedback) => {
+    const approvalFeedback = feedback?.trim();
+    if (!approvalFeedback) {
+      showToast('error', 'Please provide approval feedback before confirming.');
+      return false;
     }
     
     setProcessingLeaveId(leaveId);
@@ -844,7 +1032,7 @@ function Leave() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ feedback: "Approved by supervisor" })
+        body: JSON.stringify({ feedback: approvalFeedback })
       });
 
       if (!response.ok) {
@@ -863,25 +1051,23 @@ function Leave() {
       setSearchParams({});
       setHighlightedLeaveId(null);
       setSelectedLeave(null);
-      setPendingAction(null);
       
       await fetchLeaves();
+      return true;
       
     } catch (err) {
       showToast('error', err.message);
+      return false;
     } finally {
       setProcessingLeaveId(null);
     }
   };
 
   const rejectLeave = async (leaveId, feedback) => {
-    const action = searchParams.get('action');
-    const isAutoAction = action === 'reject';
-    
-    if (!isAutoAction) {
-      if (!window.confirm('Are you sure you want to reject this leave request?')) {
-        return;
-      }
+    const rejectionFeedback = feedback?.trim();
+    if (!rejectionFeedback) {
+      showToast('error', 'Please provide a rejection reason before confirming.');
+      return false;
     }
     
     setProcessingLeaveId(leaveId);
@@ -897,7 +1083,7 @@ function Leave() {
         },
         body: JSON.stringify({ 
           role: 'supervisor',
-          feedback: feedback || "Rejected by supervisor"
+          feedback: rejectionFeedback
         })
       });
 
@@ -917,12 +1103,13 @@ function Leave() {
       setSearchParams({});
       setHighlightedLeaveId(null);
       setSelectedLeave(null);
-      setPendingAction(null);
       
       await fetchLeaves();
+      return true;
       
     } catch (err) {
       showToast('error', err.message);
+      return false;
     } finally {
       setProcessingLeaveId(null);
     }
@@ -1138,19 +1325,25 @@ function Leave() {
   };
 
   const getSelectedEmployeeCategory = () => {
-    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
-    return selectedEmployee?.category;
+    const selectedEmployee = getSelectedEmployeeForLeave();
+    return selectedEmployee?.category || null;
   };
 
   const getSelectedEmployeeBalance = () => {
-    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
+    const selectedEmployee = getSelectedEmployeeForLeave();
     if (!selectedEmployee) return null;
+
     return getEmployeeRemainingLeave(selectedEmployee);
   };
 
   const getSelectedEmployeeAnnualDays = () => {
-    const selectedEmployee = employees.find(emp => emp.id === parseInt(newLeave.employee.id));
-    return selectedEmployee?.category?.annualLeaveDays || 20;
+    const selectedEmployee = getSelectedEmployeeForLeave();
+
+    return Number(
+      selectedEmployee?.category?.annualLeaveDays ??
+      selectedEmployee?.annualLeaveDays ??
+      20
+    );
   };
 
   // Toast Notification Component
@@ -1633,7 +1826,7 @@ function Leave() {
                                 </span>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                {leave.employee?.category?.excludeWeekendsFromLeave !== false ? (
+                                {normalizeBoolean(leave.employee?.category?.excludeWeekendsFromLeave, true) ? (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                                     Weekends Excluded
                                   </span>
@@ -1686,7 +1879,7 @@ function Leave() {
                                   {leave.status === "Pending" && (
                                     <>
                                       <button
-                                        onClick={() => approveLeave(leave.id)}
+                                        onClick={() => setSelectedLeave(leave)}
                                         disabled={isProcessingThis}
                                         className="inline-flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
                                       >
@@ -1695,7 +1888,7 @@ function Leave() {
                                         ) : (
                                           <CheckBadgeIcon className="w-4 h-4 mr-1" />
                                         )}
-                                        Approve
+                                        Review
                                       </button>
                                       <button
                                         onClick={() => deleteLeave(leave.id)}
@@ -1868,7 +2061,11 @@ function Leave() {
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
                         required
                       />
-                      <p className="text-xs text-gray-500 mt-1">Only weekdays (Mon-Fri) allowed</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {shouldExcludeWeekendsForSelectedEmployee()
+                          ? 'Weekends are excluded; select Monday to Friday.'
+                          : 'Weekends are included and may be selected.'}
+                      </p>
                     </div>
 
                     <div>
@@ -1878,7 +2075,7 @@ function Leave() {
                           (() => {
                             const employeeCategory = getSelectedEmployeeCategory();
                             const days = calculateLeaveDays(newLeave.startDate, newLeave.endDate, newLeave.leaveType, employeeCategory);
-                            const isExcluding = employeeCategory?.excludeWeekendsFromLeave !== false;
+                            const isExcluding = normalizeBoolean(employeeCategory?.excludeWeekendsFromLeave, true);
                             return `${days} ${isExcluding ? 'business' : 'total'} days`;
                           })()
                         ) : (
@@ -1900,7 +2097,11 @@ function Leave() {
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
                           required
                         />
-                        <p className="text-xs text-gray-500 mt-1">Only weekdays (Mon-Fri) allowed</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                        {shouldExcludeWeekendsForSelectedEmployee()
+                          ? 'Weekends are excluded; select Monday to Friday.'
+                          : 'Weekends are included and may be selected.'}
+                      </p>
                       </div>
                     ) : (
                       <div>
@@ -1927,7 +2128,7 @@ function Leave() {
                               type="button"
                               className="text-gray-400 hover:text-gray-600 focus:outline-none"
                               onClick={() => {
-                                const policy = getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                const policy = normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) 
                                   ? "Weekends (Saturday and Sunday) are NOT counted as leave days. Only Monday to Friday are considered."
                                   : "Weekends (Saturday and Sunday) ARE counted as leave days. All calendar days are considered.";
                                 alert(`ℹ️ Weekend Policy Info:\n\n${policy}`);
@@ -1939,13 +2140,13 @@ function Leave() {
                         </div>
                         
                         <div className={`px-4 py-3 rounded-lg border ${
-                          getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                          normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) 
                             ? 'bg-blue-50 border-blue-200' 
                             : 'bg-yellow-50 border-yellow-200'
                         }`}>
                           <div className="flex items-start gap-3">
                             <div className="flex-shrink-0 mt-0.5">
-                              {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? (
+                              {normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) ? (
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
@@ -1957,16 +2158,16 @@ function Leave() {
                             </div>
                             <div className="flex-1">
                               <div className={`font-medium ${
-                                getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? 'text-blue-800' : 'text-yellow-800'
+                                normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) ? 'text-blue-800' : 'text-yellow-800'
                               }`}>
-                                {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                {normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) 
                                   ? 'Weekends Excluded' 
                                   : 'Weekends Included'}
                               </div>
                               <div className={`text-sm mt-1 ${
-                                getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false ? 'text-blue-600' : 'text-yellow-600'
+                                normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) ? 'text-blue-600' : 'text-yellow-600'
                               }`}>
-                                {getSelectedEmployeeCategory()?.excludeWeekendsFromLeave !== false 
+                                {normalizeBoolean(getSelectedEmployeeCategory()?.excludeWeekendsFromLeave, true) 
                                   ? 'Only business days (Monday to Friday) will be counted towards your leave balance.' 
                                   : 'All calendar days including weekends will be counted towards your leave balance.'}
                               </div>
@@ -1979,7 +2180,7 @@ function Leave() {
                                       {(() => {
                                         const employeeCategory = getSelectedEmployeeCategory();
                                         const days = calculateLeaveDays(newLeave.startDate, newLeave.endDate, newLeave.leaveType, employeeCategory);
-                                        const isExcluding = employeeCategory?.excludeWeekendsFromLeave !== false;
+                                        const isExcluding = normalizeBoolean(employeeCategory?.excludeWeekendsFromLeave, true);
                                         return `${days} ${isExcluding ? 'business days' : 'total days'} will be deducted from your leave balance.`;
                                       })()}
                                     </span>
@@ -2106,7 +2307,6 @@ function Leave() {
               onClose={handleModalClose}
               onApprove={approveLeave}
               onReject={rejectLeave}
-              autoAction={pendingAction}
             />
           )}
 

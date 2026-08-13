@@ -464,7 +464,7 @@ function Profile() {
   };
 
   const handleDeleteDocument = async (documentId) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
+    if (!await window.appConfirm('Are you sure you want to delete this document?')) return;
 
     try {
       const token = getToken();

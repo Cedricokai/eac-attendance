@@ -35,6 +35,8 @@ const breadcrumbMap = {
   "/adminLeaveBalanceView": { label: "Admin Leave Balance", icon: Users },
   "/loanManagementDashboard": { label: "Loan Management", icon: CreditCard },
   "/employeeOvertimeRequest": { label: "Overtime Request", icon: Clock },
+  "/attendanceRequests": { label: "Attendance Requests", icon: Calendar },
+  "/attendanceRequestReview": { label: "Verify Attendance Requests", icon: Calendar },
   "/employeeLoanRequest": { label: "Loan Request", icon: CreditCard },
   "/excel-comparator": { label: "Excel Comparator", icon: FileText },
   "/quotationMaster": { label: "Quotation Master", icon: FileText },

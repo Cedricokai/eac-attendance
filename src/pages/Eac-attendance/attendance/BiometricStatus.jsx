@@ -503,8 +503,8 @@ function BiometricStatus() {
           Last updated: {new Date().toLocaleTimeString()}
         </div>
         <button
-          onClick={() => {
-            if (window.confirm('Clear all biometric event history?')) {
+          onClick={async () => {
+            if (await window.appConfirm('Clear all biometric event history?')) {
               setBiometricEvents([]);
               setUnreadCount(0);
             }

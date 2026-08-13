@@ -215,7 +215,7 @@ const DirectPurchaseDetail = () => {
           <div className="flex justify-between items-center mb-4">
             <Typography variant="h5">Items</Typography>
             <Typography variant="h6" className="text-green-600">
-              Total: ${(request.totalAmount || 0).toFixed(2)}
+              Total: ₵{(request.totalAmount || 0).toFixed(2)}
             </Typography>
           </div>
           <div className="overflow-x-auto">
@@ -225,8 +225,8 @@ const DirectPurchaseDetail = () => {
                   <th className="p-3 text-left text-sm font-semibold text-gray-700 border">#</th>
                   <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Description</th>
                   <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Quantity</th>
-                  <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Unit Price ($)</th>
-                  <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Total ($)</th>
+                  <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Unit Price (₵)</th>
+                  <th className="p-3 text-left text-sm font-semibold text-gray-700 border">Total (₵)</th>
                 </tr>
               </thead>
               <tbody>
@@ -236,8 +236,8 @@ const DirectPurchaseDetail = () => {
                       <td className="p-3 border text-sm">{index + 1}</td>
                       <td className="p-3 border text-sm">{item.description}</td>
                       <td className="p-3 border text-sm">{item.quantity}</td>
-                      <td className="p-3 border text-sm">${(item.unitPrice || 0).toFixed(2)}</td>
-                      <td className="p-3 border text-sm font-semibold">${(item.total || 0).toFixed(2)}</td>
+                      <td className="p-3 border text-sm">₵{(item.unitPrice || 0).toFixed(2)}</td>
+                      <td className="p-3 border text-sm font-semibold">₵{(item.total || 0).toFixed(2)}</td>
                     </tr>
                   ))
                 ) : (
@@ -250,7 +250,7 @@ const DirectPurchaseDetail = () => {
                 <tr>
                   <td colSpan="4" className="p-3 text-right font-bold">Grand Total</td>
                   <td className="p-3 font-bold text-green-600">
-                    ${(request.totalAmount || 0).toFixed(2)}
+                    ₵{(request.totalAmount || 0).toFixed(2)}
                   </td>
                 </tr>
               </tfoot>

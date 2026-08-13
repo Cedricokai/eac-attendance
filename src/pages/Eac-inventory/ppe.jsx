@@ -629,7 +629,7 @@ const PPES = () => {
   };
   
   const deletePPE = async (id) => {
-    const confirmed = window.confirm("Are you sure you want to delete this PPE item?");
+    const confirmed = await window.appConfirm("Are you sure you want to delete this PPE item?");
     if (!confirmed) return;
   
     try {

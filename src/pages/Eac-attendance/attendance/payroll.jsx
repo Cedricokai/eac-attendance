@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
 import * as XLSX from "xlsx";
 import Header from "../../../components/Header";
+import { CheckBadgeIcon } from "@heroicons/react/24/outline";
 
 function Payroll() {
   const [payrollPeriods, setPayrollPeriods] = useState([]);
@@ -21,8 +22,16 @@ const [hasActiveLoans, setHasActiveLoans] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [showProcessedPayrollModal, setShowProcessedPayrollModal] = useState(false);
   const [summary, setSummary] = useState(null);
   const location = useLocation();
+
+  useEffect(() => {
+    if (error && /(already processed|processed payroll|processed period|cannot.*processed)/i.test(error)) {
+      setShowProcessedPayrollModal(true);
+      setError("");
+    }
+  }, [error]);
   const [creditAmounts, setCreditAmounts] = useState({});
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [selectedEmployeesForCredit, setSelectedEmployeesForCredit] = useState([]);
@@ -83,6 +92,7 @@ const [exportingBankData, setExportingBankData] = useState(false);
     { type: "nssAllowance", amount: "", description: "", enabled: false },
   ]);
   const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+  const [showPayrollActions, setShowPayrollActions] = useState(false);
   const [noRecordsMessage, setNoRecordsMessage] = useState("");
 
   const [settings, setSettings] = useState({
@@ -95,7 +105,6 @@ const [exportingBankData, setExportingBankData] = useState(false);
     standardWorkHours: 8,
   });
 
-  const [includeBasicSalary, setIncludeBasicSalary] = useState(false);
   const [payrollTemporaryAllowances, setPayrollTemporaryAllowances] = useState({});
   const [recordSearch, setRecordSearch] = useState("");
   const [recordsPage, setRecordsPage] = useState(1);
@@ -931,13 +940,7 @@ const openBankExportModal = () => {
 
       const formattedTemporaryAllowances = {};
       Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-        formattedTemporaryAllowances[employeeId] = {
-          housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-          tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-          clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-          otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-          nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-        };
+        formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
       });
 
       const payload = {
@@ -953,7 +956,7 @@ const openBankExportModal = () => {
           holidays: settings.holidays || [],
           standardWorkHours: settings.standardWorkHours || 8,
         },
-        includeBasicSalary,
+        includeBasicSalary: true,
       };
 
       console.log("Sending payroll generation payload:", payload);
@@ -992,13 +995,7 @@ const openBankExportModal = () => {
 
         const formattedTemporaryAllowances = {};
         Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-            formattedTemporaryAllowances[employeeId] = {
-                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-            };
+            formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
         });
 
         const payload = {
@@ -1015,7 +1012,7 @@ const openBankExportModal = () => {
                 holidays: settings.holidays || [],
                 standardWorkHours: settings.standardWorkHours || 8,
             },
-            includeBasicSalary: includeBasicSalary,
+            includeBasicSalary: true,
         };
 
         const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
@@ -1056,13 +1053,7 @@ const openBankExportModal = () => {
 
         const formattedTemporaryAllowances = {};
         Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-            formattedTemporaryAllowances[employeeId] = {
-                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-            };
+            formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
         });
 
         const payload = {
@@ -1079,7 +1070,7 @@ const openBankExportModal = () => {
                 holidays: settings.holidays || [],
                 standardWorkHours: settings.standardWorkHours || 8,
             },
-            includeBasicSalary: includeBasicSalary,
+            includeBasicSalary: true,
         };
 
         const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
@@ -1589,16 +1580,50 @@ const openBankExportModal = () => {
     setTimeout(() => setSuccess(""), 3000);
   };
 
-  const removeTemporaryAllowances = (employeeId) => {
+  const removeTemporaryAllowances = async (employeeId) => {
+    const generatedRecord = payrollRecords.find(record =>
+      String(record.employee?.id || record.employeeId) === String(employeeId)
+    );
+
+    if (generatedRecord) {
+      if (generatedRecord.status === "Processed") {
+        setShowProcessedPayrollModal(true);
+        return;
+      }
+      if (!await window.appConfirm("Remove the temporary allowances and restore this employee's permanent allowances? Payroll totals will be recalculated.")) {
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const token = getToken();
+        const response = await fetch(
+          `${API_BASE_URL}/api/payroll/periods/${selectedPeriod}/employees/${employeeId}/temporary-allowances`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to remove temporary allowances");
+        }
+      } catch (err) {
+        setError(err.message);
+        setTimeout(() => setError(""), 5000);
+        setLoading(false);
+        return;
+      }
+    }
+
     const newTemporaryAllowances = { ...payrollTemporaryAllowances };
     delete newTemporaryAllowances[employeeId];
     setPayrollTemporaryAllowances(newTemporaryAllowances);
 
-    if (selectedPeriod) {
-      fetchPayrollRecords(selectedPeriod);
+    if (selectedPeriod && generatedRecord) {
+      await fetchPayrollRecords(selectedPeriod);
+      await fetchPayrollSummary(selectedPeriod);
     }
 
-    setSuccess("Temporary allowances removed");
+    setLoading(false);
+    setSuccess("Temporary allowances removed. Permanent employee allowances restored.");
     setTimeout(() => setSuccess(""), 3000);
   };
 
@@ -1912,7 +1937,7 @@ const openBankExportModal = () => {
 
       {/* Main content with dynamic margin */}
       <div 
-        className={`flex-1 transition-all duration-300 ${
+        className={`flex-1 min-w-0 max-w-full overflow-x-hidden transition-all duration-300 ${
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
         }`}
       >
@@ -1921,14 +1946,26 @@ const openBankExportModal = () => {
           user={user}
           onLogout={handleLogout}
         />
-        <main className="flex-1 max-w-full px-2 md:px-4 py-6">
+        <main className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden px-2 md:px-4 py-6">
           {/* Page Header */}
           <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6">
             <div>
               <h1 className="text-2xl font-bold text-gray-800">Payroll Management</h1>
               <p className="text-gray-600">Manage employee payroll and compensation</p>
             </div>
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-col items-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPayrollActions((visible) => !visible)}
+                aria-expanded={showPayrollActions}
+                className="flex items-center rounded-lg bg-slate-800 px-4 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-slate-900"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="mr-2 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.598 0 2.977a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.286.947c.38 1.562 2.6 1.562 2.98 0a1.532 1.532 0 012.286-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.598 0-2.977a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.286-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                </svg>
+                {showPayrollActions ? "Hide payroll actions" : "Show payroll actions"}
+              </button>
+              {showPayrollActions && <div className="flex flex-wrap justify-end gap-2">
               <button
                 onClick={() => setShowAllowanceModal(true)}
                 className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg flex items-center"
@@ -1959,6 +1996,7 @@ const openBankExportModal = () => {
                   Payslip Generator
                 </button>
               </Link>
+              </div>}
             </div>
           </section>
 
@@ -2008,7 +2046,7 @@ const openBankExportModal = () => {
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 mt-4 flex-wrap">
+          {showPayrollActions && <div className="mt-4 flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {selectedPeriod && (
               <>
                 <button
@@ -2120,7 +2158,7 @@ const openBankExportModal = () => {
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
           {/* Payroll Summary */}
           {summary && (
@@ -2233,18 +2271,12 @@ const openBankExportModal = () => {
             </button>
           </div>
 
-          {/* Include Basic Salary Toggle */}
+          {/* Basic salary is always included */}
           <div className="mb-3 bg-white rounded-lg shadow-sm border border-gray-200 p-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4"
-                checked={includeBasicSalary}
-                onChange={(e) => setIncludeBasicSalary(e.target.checked)}
-              />
-              <span className="font-medium">Use Monthly Basic Salary (Prorated by Paid Days)</span>
-              <span className="text-xs text-gray-500">(applies when you click Generate)</span>
-            </label>
+            <div className="flex items-center gap-2 text-sm text-gray-700">
+              <CheckBadgeIcon className="h-5 w-5 text-green-600" />
+              <span className="font-medium">Monthly basic salary is included automatically when payroll is generated.</span>
+            </div>
           </div>
 
           {/* Payroll Periods - Grouped by Month */}
@@ -2385,7 +2417,7 @@ const openBankExportModal = () => {
 
           {/* Payroll Records Table */}
           {selectedPeriod && (
-            <div className="mt-6 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="mt-6 min-w-0 w-full max-w-full overflow-hidden bg-white rounded-lg shadow-sm border border-gray-200">
               {loading ? (
                 <div className="flex justify-center items-center h-32">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -2469,10 +2501,10 @@ const openBankExportModal = () => {
                       </button>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto" style={{ overflowX: 'auto', overflowY: 'visible' }}>
-                      <table className="min-w-full text-left text-sm text-gray-700">
-                        <thead>
-                          <tr className="bg-gray-100">
+                    <div className="block w-full max-w-full max-h-[70vh] overflow-auto overscroll-contain">
+                      <table className="w-max min-w-full whitespace-nowrap text-left text-sm text-gray-700">
+                        <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+                          <tr>
                             <th className="px-4 py-3 font-medium">Employee</th>
                             <th className="px-4 py-3 font-medium">Total Days</th>
                             <th className="px-4 py-3 font-medium">Leave Days</th>
@@ -2677,6 +2709,46 @@ const openBankExportModal = () => {
           )}
         </main>
       </div>
+
+      {/* Processed Payroll Notice */}
+      {showProcessedPayrollModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-amber-50 px-6 py-5 border-b border-amber-100">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01M10.29 3.86l-7.82 13.5A2 2 0 004.2 20h15.6a2 2 0 001.73-3l-7.82-13.5a2 2 0 00-3.42 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Payroll Already Processed</h2>
+                  <p className="text-sm text-amber-800">This payroll has already been finalized.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5">
+              <p className="text-sm leading-6 text-gray-600">
+                To protect finalized payroll figures, you cannot generate it again or change its temporary allowances.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-gray-600">
+                If a correction is required, clear or reopen the payroll period first, then regenerate it after reviewing the records.
+              </p>
+            </div>
+
+            <div className="flex justify-end border-t border-gray-100 bg-gray-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowProcessedPayrollModal(false)}
+                className="rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Month Export Modal */}
       {showMonthExportModal && (

@@ -29,6 +29,19 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import MainSidebar from "./mainSidebar";
 import Header from "../../components/Header";
 
+const PRESENT_STATUSES = new Set(['present', 'weekend present', 'holiday present']);
+const normalizeStatus = (status) => String(status || '').trim().toLowerCase();
+const isPresent = (record) => PRESENT_STATUSES.has(normalizeStatus(record?.status));
+const isLate = (record) => normalizeStatus(record?.status) === 'late';
+const isAbsent = (record) => normalizeStatus(record?.status) === 'absent';
+const unwrapList = (value) => Array.isArray(value) ? value : (Array.isArray(value?.content) ? value.content : []);
+const toLocalDateString = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Helper component
 function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loading, color, trend, trendValue }) {
   const colorVariants = {
@@ -48,7 +61,7 @@ function StatsCard({ icon, title, value, secondaryValue, linkText, linkTo, loadi
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={`bg-white rounded-xl shadow-sm border ${colorVariants[color].border} p-6 hover:shadow-md transition-all duration-200 ${colorVariants[color].hover}`}
+      className={`bg-white rounded-xl shadow-sm border ${colorVariants[color].border} p-4 sm:p-5 lg:p-6 hover:shadow-md transition-all duration-200 ${colorVariants[color].hover}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex-1">
@@ -123,22 +136,22 @@ function ActivityItem({ activity }) {
 // Helper component
 function TimeRangeSelector({ timeRange, setTimeRange }) {
   return (
-    <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg">
+    <div className="flex w-full sm:w-auto items-center gap-1 bg-gray-50 p-1 rounded-lg overflow-x-auto">
       <button 
         onClick={() => setTimeRange('week')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'week' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`flex-1 sm:flex-none px-3 py-1 text-sm whitespace-nowrap rounded-md transition-colors ${timeRange === 'week' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Week
       </button>
       <button 
         onClick={() => setTimeRange('month')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'month' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`flex-1 sm:flex-none px-3 py-1 text-sm whitespace-nowrap rounded-md transition-colors ${timeRange === 'month' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Month
       </button>
       <button 
         onClick={() => setTimeRange('quarter')}
-        className={`px-3 py-1 text-sm rounded-md transition-colors ${timeRange === 'quarter' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+        className={`flex-1 sm:flex-none px-3 py-1 text-sm whitespace-nowrap rounded-md transition-colors ${timeRange === 'quarter' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
       >
         Quarter
       </button>
@@ -167,6 +180,7 @@ function AttendanceDashboard() {
   const [chartData, setChartData] = useState([]);
   const [attendanceRate, setAttendanceRate] = useState(0);
   const [user, setUser] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
   
   const navigate = useNavigate();
 
@@ -235,8 +249,8 @@ function AttendanceDashboard() {
         startDate.setDate(today.getDate() - 90);
       }
 
-      const formattedStartDate = startDate.toISOString().split('T')[0];
-      const formattedEndDate = today.toISOString().split('T')[0];
+      const formattedStartDate = toLocalDateString(startDate);
+      const formattedEndDate = toLocalDateString(today);
 
       const res = await fetch(`${API_BASE_URL}/api/attendance?startDate=${formattedStartDate}&endDate=${formattedEndDate}`, {
         headers: { 
@@ -246,20 +260,18 @@ function AttendanceDashboard() {
       });
 
       if (res.ok) {
-        const data = await res.json();
+        const data = unwrapList(await res.json());
         
         if (timeRange === 'week') {
           const weekData = Array.from({ length: 7 }, (_, i) => {
             const date = new Date();
             date.setDate(today.getDate() - (6 - i));
-            const dateStr = date.toISOString().split('T')[0];
+            const dateStr = toLocalDateString(date);
             
             const dayAttendance = data.filter(att => att.date === dateStr);
-            const presentCount = dayAttendance.filter(att => 
-              att.status === 'Present' || att.status === 'Weekend Present' || att.status === 'Holiday Present'
-            ).length;
-            const lateCount = dayAttendance.filter(att => att.status === 'Late').length;
-            const absentCount = dayAttendance.filter(att => att.status === 'Absent').length;
+            const presentCount = dayAttendance.filter(isPresent).length;
+            const lateCount = dayAttendance.filter(isLate).length;
+            const absentCount = dayAttendance.filter(isAbsent).length;
             
             return {
               name: date.toLocaleDateString('en-US', { weekday: 'short' }),
@@ -284,16 +296,14 @@ function AttendanceDashboard() {
               return attDate >= weekStart && attDate <= weekEnd;
             });
             
-            const presentCount = weekAttendance.filter(att => 
-              att.status === 'Present' || att.status === 'Weekend Present' || att.status === 'Holiday Present'
-            ).length;
-            const lateCount = weekAttendance.filter(att => att.status === 'Late').length;
-            const absentCount = weekAttendance.filter(att => att.status === 'Absent').length;
+            const presentCount = weekAttendance.filter(isPresent).length;
+            const lateCount = weekAttendance.filter(isLate).length;
+            const absentCount = weekAttendance.filter(isAbsent).length;
             
             weeks.push({
               name: `Week ${4 - i}`,
-              startDate: weekStart.toISOString().split('T')[0],
-              endDate: weekEnd.toISOString().split('T')[0],
+              startDate: toLocalDateString(weekStart),
+              endDate: toLocalDateString(weekEnd),
               present: presentCount,
               late: lateCount,
               absent: absentCount,
@@ -312,16 +322,14 @@ function AttendanceDashboard() {
               return attDate >= monthStart && attDate <= monthEnd;
             });
             
-            const presentCount = monthAttendance.filter(att => 
-              att.status === 'Present' || att.status === 'Weekend Present' || att.status === 'Holiday Present'
-            ).length;
-            const lateCount = monthAttendance.filter(att => att.status === 'Late').length;
-            const absentCount = monthAttendance.filter(att => att.status === 'Absent').length;
+            const presentCount = monthAttendance.filter(isPresent).length;
+            const lateCount = monthAttendance.filter(isLate).length;
+            const absentCount = monthAttendance.filter(isAbsent).length;
             
             months.push({
               name: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-              startDate: monthStart.toISOString().split('T')[0],
-              endDate: monthEnd.toISOString().split('T')[0],
+              startDate: toLocalDateString(monthStart),
+              endDate: toLocalDateString(monthEnd),
               present: presentCount,
               late: lateCount,
               absent: absentCount,
@@ -337,8 +345,8 @@ function AttendanceDashboard() {
     }
   };
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchDashboardData = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const token = localStorage.getItem('jwtToken');
       if (!token) {
@@ -351,18 +359,17 @@ function AttendanceDashboard() {
         'Content-Type': 'application/json',
       };
 
-      const employeesRes = await fetch(`${API_BASE_URL}/api/employee`, { headers });
+      const todayStr = toLocalDateString(new Date());
+      const [employeesRes, attendanceRes, leavesRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/employee`, { headers }),
+        fetch(`${API_BASE_URL}/api/attendance?startDate=${todayStr}&endDate=${todayStr}`, { headers }),
+        fetch(`${API_BASE_URL}/api/leave/current`, { headers })
+      ]);
       if (!employeesRes.ok) throw new Error(`Failed to fetch employees: ${employeesRes.status}`);
-      const employees = await employeesRes.json();
-
-      const todayStr = new Date().toISOString().split('T')[0];
-      const attendanceRes = await fetch(`${API_BASE_URL}/api/attendance?date=${todayStr}`, { headers });
-      let attendanceToday = [];
-      if (attendanceRes.ok) attendanceToday = await attendanceRes.json();
-
-      const leavesRes = await fetch(`${API_BASE_URL}/api/leave/current`, { headers });
-      let leaves = [];
-      if (leavesRes.ok) leaves = await leavesRes.json();
+      if (!attendanceRes.ok) throw new Error(`Failed to fetch today's attendance: ${attendanceRes.status}`);
+      const employees = unwrapList(await employeesRes.json());
+      const attendanceToday = unwrapList(await attendanceRes.json());
+      const leaves = leavesRes.ok ? unwrapList(await leavesRes.json()) : [];
 
       await fetchAttendanceStats();
 
@@ -375,28 +382,28 @@ function AttendanceDashboard() {
         )
       ).length;
 
-      const presentCount = attendanceToday.filter(a => 
-        a.status === 'Present' || a.status === 'Weekend Present' || a.status === 'Holiday Present'
-      ).length;
-      const lateCount = attendanceToday.filter(a => a.status === 'Late').length;
-      const absentCount = attendanceToday.filter(a => a.status === 'Absent').length;
-      const pendingCount = attendanceToday.filter(a => a.status === 'Pending').length;
+      const presentCount = attendanceToday.filter(isPresent).length;
+      const lateCount = attendanceToday.filter(isLate).length;
+      const absentCount = attendanceToday.filter(isAbsent).length;
+      const pendingCount = attendanceToday.filter(a => normalizeStatus(a.status) === 'pending').length;
 
-      const expectedEmployees = employees.length - onLeaveToday;
-      const attendanceRateValue = expectedEmployees > 0 ? (presentCount / expectedEmployees) * 100 : 0;
+      const activeEmployeeCount = employees.filter(employee => employee.active !== false).length;
+      const expectedEmployees = Math.max(0, activeEmployeeCount - onLeaveToday);
+      const attendanceRateValue = expectedEmployees > 0 ? ((presentCount + lateCount) / expectedEmployees) * 100 : 0;
 
       setStats({
         totalEmployees: employees.length,
-        activeEmployees: employees.length - onLeaveToday,
+        activeEmployees: activeEmployeeCount,
         onLeave: onLeaveToday,
         pendingApprovals: pendingCount,
-        absentCount: Math.max(0, expectedEmployees - presentCount - lateCount),
+        absentCount,
         totalPresent: presentCount,
         totalLate: lateCount
       });
 
       setAttendanceData(attendanceToday);
       setAttendanceRate(attendanceRateValue);
+      setLastUpdated(new Date());
 
       const generateActivities = () => {
         const activities = [
@@ -461,7 +468,7 @@ function AttendanceDashboard() {
         }
       ]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -505,11 +512,9 @@ function AttendanceDashboard() {
   const pieChartData = useMemo(() => {
     if (attendanceData.length === 0) return [];
     
-    const presentCount = attendanceData.filter(a => 
-      a.status === 'Present' || a.status === 'Weekend Present' || a.status === 'Holiday Present'
-    ).length;
-    const lateCount = attendanceData.filter(a => a.status === 'Late').length;
-    const absentCount = attendanceData.filter(a => a.status === 'Absent').length;
+    const presentCount = attendanceData.filter(isPresent).length;
+    const lateCount = attendanceData.filter(isLate).length;
+    const absentCount = attendanceData.filter(isAbsent).length;
     
     const onLeaveCount = stats.onLeave || 0;
     
@@ -524,9 +529,7 @@ function AttendanceDashboard() {
   const calculatedAttendanceRate = useMemo(() => {
     if (attendanceData.length === 0 || stats.totalEmployees === 0) return 0;
     
-    const presentCount = attendanceData.filter(a => 
-      a.status === 'Present' || a.status === 'Late' || a.status === 'Weekend Present' || a.status === 'Holiday Present'
-    ).length;
+    const presentCount = attendanceData.filter(a => isPresent(a) || isLate(a)).length;
     
     const expectedEmployees = stats.totalEmployees - stats.onLeave;
     return expectedEmployees > 0 ? (presentCount / expectedEmployees) * 100 : 0;
@@ -608,8 +611,18 @@ function AttendanceDashboard() {
   // Main data fetching effect
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 300000);
-    return () => clearInterval(interval);
+    const refresh = () => fetchDashboardData({ silent: true });
+    const interval = setInterval(refresh, 15000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [timeRange]);
 
   // ========== RENDER ==========
@@ -638,7 +651,7 @@ function AttendanceDashboard() {
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
         }`}
       >
-        <main className="flex-1 mx-auto px-4 md:px-6 py-6">
+        <main className="w-full max-w-[1600px] flex-1 mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 overflow-x-hidden">
           {/* Header Component */}
           <Header
             toggleSidebar={toggleSidebar}
@@ -651,9 +664,9 @@ function AttendanceDashboard() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="mt-6 mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white"
+            className="mt-4 sm:mt-6 mb-6 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-4 sm:p-6 text-white"
           >
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
               <div>
                 <h1 className="text-2xl font-bold">Welcome back, {user?.name || 'Admin'}!</h1>
                 <p className="text-blue-100 mt-1">Here's what's happening with your attendance today.</p>
@@ -674,7 +687,7 @@ function AttendanceDashboard() {
           </motion.div>
 
           {/* Stats Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 mb-6">
             <StatsCard 
               icon={<Users size={20} />}
               title="Total Employees"
@@ -717,7 +730,7 @@ function AttendanceDashboard() {
 
           {/* Quick Actions Bar */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 rounded-lg">
                   <Zap size={20} className="text-blue-600" />
@@ -727,7 +740,7 @@ function AttendanceDashboard() {
                   <p className="text-xs text-gray-500">Frequently used operations</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-3">
+              <div className="grid w-full sm:w-auto grid-cols-1 xs:grid-cols-2 lg:flex gap-2 sm:gap-3">
                 <Link 
                   to="/attendance"
                   className="flex items-center gap-2 px-4 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-all group border border-green-200"
@@ -756,10 +769,10 @@ function AttendanceDashboard() {
           </div>
 
           {/* Main Content Grid - 2 columns for charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6 mb-6">
             {/* Attendance Trend - Takes 2/3 of the space */}
-            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
+            <div className="xl:col-span-2 min-w-0 bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Attendance Trend</h2>
                   <p className="text-sm text-gray-500 mt-1">Daily attendance overview</p>
@@ -773,7 +786,7 @@ function AttendanceDashboard() {
                 </div>
               ) : chartData.length > 0 ? (
                 <>
-                  <div className="h-80">
+                  <div className="h-64 sm:h-80 min-w-0">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart 
                         data={chartData}
@@ -860,11 +873,13 @@ function AttendanceDashboard() {
             </div>
 
             {/* Today's Status Card */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="min-w-0 bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Today's Status</h2>
-                  <p className="text-sm text-gray-500 mt-1">Real-time attendance snapshot</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Live snapshot{lastUpdated ? ` · updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+                  </p>
                 </div>
                 <Filter size={18} className="text-gray-400" />
               </div>

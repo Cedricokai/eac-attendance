@@ -422,7 +422,7 @@ const getApiBaseUrl = () => {
 
   // Delete attachment
   const handleDeleteAttachment = async (attachmentId) => {
-    if (window.confirm('Are you sure you want to delete this attachment?')) {
+    if (await window.appConfirm('Are you sure you want to delete this attachment?')) {
       try {
         const token = getAuthToken();
         const response = await fetch(`${API_BASE_URL}/api/vehicles/attachments/${attachmentId}`, {
@@ -559,7 +559,7 @@ const getApiBaseUrl = () => {
 
   // Handle delete vehicle
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this vehicle?')) {
+    if (await window.appConfirm('Are you sure you want to delete this vehicle?')) {
       try {
         const token = getAuthToken();
         const response = await fetch(`${API_BASE_URL}/api/vehicles/${id}`, {
