@@ -98,6 +98,19 @@ import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx
 import ThemeToggle from "./components/ThemeToggle";
 import { useTheme } from "./context/ThemeContext";
 
+import LunchLayout from './layouts/LunchLayout';
+
+import LunchDashboard from "./pages/Lunch/Dashboard";
+import WeeklyLunchAssignment from "./pages/Lunch/WeeklyLunchAssignment";
+import EmployeeLunchAssignment from "./pages/Lunch/EmployeeLunchAssignment";
+import DailyLunchServing from "./pages/Lunch/DailyLunchServing";
+import AttendanceVerification from "./pages/Lunch/AttendanceVerification";
+import KitchenReport from "./pages/Lunch/KitchenReport";
+import LunchReports from "./pages/Lunch/LunchReports";
+import LunchSettings from "./pages/Lunch/LunchSettings";
+import MealManagement from "./pages/Lunch/MealManagement";
+import EmployeeMealSelection from "./pages/Lunch/EmployeeMealSelection";
+
 function App() {
   const { theme } = useTheme();
 
@@ -124,6 +137,92 @@ function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/must-change-password" element={<MustChangePasswordPage />} />
         <Route path="/hospital/portal/:token" element={<HospitalPublicForm />} />
+
+        {/* ============================================================
+    LUNCH MODULE - uses LunchLayout (dedicated sidebar)
+    ============================================================ */}
+<Route element={<LunchLayout />}>
+  <Route
+    path="/lunch/dashboard"
+    element={
+      <ProtectedRoute>
+        <LunchDashboard />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/weekly-assignment"
+    element={
+      <ProtectedRoute>
+        <WeeklyLunchAssignment />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/employee-assignment"
+    element={
+      <ProtectedRoute>
+        <EmployeeLunchAssignment />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/daily-serving"
+    element={
+      <ProtectedRoute>
+        <DailyLunchServing />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/attendance-verification"
+    element={
+      <ProtectedRoute>
+        <AttendanceVerification />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/kitchen-report"
+    element={
+      <ProtectedRoute>
+        <KitchenReport />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/reports"
+    element={
+      <ProtectedRoute>
+        <LunchReports />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/meals"
+    element={
+      <ProtectedRoute>
+        <MealManagement />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/settings"
+    element={
+      <ProtectedRoute>
+        <LunchSettings />
+      </ProtectedRoute>
+    }
+  />
+</Route>
 
         {/* Protected routes - wrapped in MainLayout with sidebar and header */}
         <Route>
