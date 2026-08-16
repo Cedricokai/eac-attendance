@@ -206,6 +206,15 @@ function App() {
   />
 
   <Route
+  path="/lunch/meal-selection"
+  element={
+    <ProtectedRoute>
+      <EmployeeMealSelection />
+    </ProtectedRoute>
+  }
+/>
+
+  <Route
     path="/lunch/meals"
     element={
       <ProtectedRoute>
