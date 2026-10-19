@@ -1,11 +1,13 @@
 // src/layouts/LunchLayout.jsx
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import LunchSidebar from '../pages/Lunch/components/LunchSidebar';
 import Header from '../components/Header';
 
 const LunchLayout = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const isEmployeeMealSelection = location.pathname.startsWith('/lunch/meal-selection');
+  const [sidebarOpen, setSidebarOpen] = useState(!isEmployeeMealSelection);
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
@@ -19,7 +21,7 @@ const LunchLayout = () => {
       {/* Main content */}
       <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-16'}`}>
         <Header toggleSidebar={toggleSidebar} showSidebarToggle={true} />
-        <main className="p-6">
+        <main className={isEmployeeMealSelection ? 'p-2 sm:p-4' : 'p-4 sm:p-6'}>
           <Outlet />
         </main>
       </div>

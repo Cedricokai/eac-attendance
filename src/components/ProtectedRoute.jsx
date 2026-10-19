@@ -9,6 +9,7 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
   const [loading, setLoading] = useState(true);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [attemptedPath, setAttemptedPath] = useState("");
+  const [needsLogin, setNeedsLogin] = useState(false);
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
@@ -32,6 +33,9 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
     const checkAccess = async () => {
       const token = localStorage.getItem("jwtToken");
       if (!token) {
+        const destination = `${location.pathname}${location.search}`;
+        sessionStorage.setItem("postLoginRedirect", destination);
+        setNeedsLogin(true);
         setIsAuthorized(false);
         setLoading(false);
         return;
@@ -130,6 +134,11 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
   // If mustChangePassword, always force route without modal
   if (mustChangePassword && location.pathname !== "/must-change-password") {
     return <Navigate to="/must-change-password" replace />;
+  }
+
+  if (needsLogin) {
+    const destination = `${location.pathname}${location.search}`;
+    return <Navigate to={`/?redirect=${encodeURIComponent(destination)}`} replace />;
   }
 
   // Show permission denied modal if not authorized

@@ -449,7 +449,7 @@ const Userpage = () => {
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete the role "${formatRoleForDisplay(roleName)}"?`)) {
+    if (!await window.appConfirm(`Are you sure you want to delete the role "${formatRoleForDisplay(roleName)}"?`)) {
       return;
     }
 

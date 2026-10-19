@@ -1,7 +1,9 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useSettings } from "./context/SettingsContext";
 
 function Home() {
+  const { settings } = useSettings();
   const navigate = useNavigate(); // useNavigate is used in React Router v6
 
   useEffect(() => {
@@ -17,7 +19,7 @@ function Home() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
       <h1 className="text-4xl font-bold text-blue-600 mb-4">
-        Welcome to EAC Electrical Solution
+        Welcome to {settings.companyName || "EAC Electrical Solution"}
       </h1>
       <p className="text-gray-600 mb-8">You will be redirected to the attendance page shortly...</p>
       <Link

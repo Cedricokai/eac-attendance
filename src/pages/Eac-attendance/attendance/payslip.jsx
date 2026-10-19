@@ -5,8 +5,10 @@ import Header from "../../../components/Header";
 import companyLogo from "../../../assets/companyLogo.jpg";
 import html2pdf from "html2pdf.js";
 import JSZip from "jszip";
+import { useSettings } from "../context/SettingsContext";
 
 function Payslip() {
+  const { settings } = useSettings();
   const [payrollPeriods, setPayrollPeriods] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [selectedPeriod, setSelectedPeriod] = useState(null);
@@ -38,7 +40,10 @@ function Payslip() {
   const pdfRef = useRef(null);
   const bulkPayslipsRef = useRef(null);
 
-  const companyName = "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyName = settings.companyName || "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyContactLine = [settings.companyAddress, settings.companyEmail, settings.companyPhone]
+    .filter(Boolean)
+    .join(" • ");
 
   const getToken = () => localStorage.getItem("jwtToken");
 
@@ -147,6 +152,38 @@ function Payslip() {
       currency: "GHS",
       minimumFractionDigits: 2,
     }).format(toNumber(amount));
+
+
+  const getOldPayrollRate = (payroll, employee) =>
+    toNumber(
+      payroll?.appliedMinimumRate ??
+      payroll?.appliedHourlyRate ??
+      employee?.minimumRate ??
+      employee?.hourlyRate ??
+      0
+    );
+
+  const getNewPayrollRate = (payroll) =>
+    payroll?.appliedEffectivePayrollRate != null
+      ? toNumber(payroll.appliedEffectivePayrollRate)
+      : null;
+
+  const getAppliedOvertimeRate = (payroll, employee) =>
+    toNumber(
+      payroll?.appliedOvertimeRate ??
+      payroll?.appliedMinimumRate ??
+      payroll?.appliedHourlyRate ??
+      employee?.minimumRate ??
+      employee?.hourlyRate ??
+      0
+    );
+
+  const formatShortDate = (dateString) => {
+    if (!dateString) return "";
+    const date = new Date(`${String(dateString).slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return String(dateString);
+    return date.toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" });
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return "";
@@ -621,6 +658,13 @@ function Payslip() {
     const loanDeduction = toNumber(payroll.loanDeduction);
     const totalDeductions = ssnitDeduction + payeTax + loanDeduction;
     const netSalary = toNumber(payroll.netSalary);
+
+    const oldPayrollRate = getOldPayrollRate(payroll, employee);
+    const newPayrollRate = getNewPayrollRate(payroll);
+    const hasEffectivePayrollRate = newPayrollRate != null;
+    const normalRateHours = toNumber(payroll.normalRateHours);
+    const effectiveRateHours = toNumber(payroll.effectiveRateHours);
+    const appliedOtRate = getAppliedOvertimeRate(payroll, employee);
     
     return `
       <div style="width: 100%; font-family: Arial, sans-serif; font-size: 11px; color: #111; background: #fff;">
@@ -629,7 +673,7 @@ function Payslip() {
         <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 10px;">
           <div>
             <div style="font-size: 14px; font-weight: 700; color: #1e3a8a;">${companyName}</div>
-            <div style="font-size: 9px; color: #666;">P. O. Box AB 253 Abeka-Accra Ghana</div>
+            <div style="font-size: 9px; color: #666;">${settings.companyAddress || ""}</div>
           </div>
           <div style="text-align: right;">
             <div style="font-size: 16px; font-weight: bold; color: #1e3a8a;">PAYSLIP</div>
@@ -650,13 +694,53 @@ function Payslip() {
             <td style="padding: 4px 0; width: 50%;">
               <table style="width: 100%; border-collapse: collapse;">
                 <tr><td style="padding: 3px 0; width: 100px;"><strong>E-mail:</strong></td><td style="border-bottom: 1px solid #ccc; padding: 3px 5px;">${employee?.email || 'N/A'}</td></tr>
-                <tr><td style="padding: 3px 0; width: 100px;"><strong>Employee Rate:</strong></td><td style="border-bottom: 1px solid #ccc; padding: 3px 5px;">${employee?.minimumRate || 'N/A'} GHS / Hrs</td></tr>
+                <tr><td style="padding: 3px 0; width: 100px;"><strong>Old Rate:</strong></td><td style="border-bottom: 1px solid #ccc; padding: 3px 5px;">GHS ${oldPayrollRate.toFixed(2)} / Hr</td></tr>
                 <tr><td style="padding: 3px 0; width: 100px;"><strong>Designation:</strong></td><td style="border-bottom: 1px solid #ccc; padding: 3px 5px;">${employee?.jobPosition || 'N/A'}</td></tr>
                 <tr><td style="padding: 3px 0; width: 100px;"><strong>Pay Period:</strong></td><td style="border-bottom: 1px solid #ccc; padding: 3px 5px;">${payroll.period?.name || 'N/A'}</td></tr>
               </tr>
             </td>
           </tr>
         </table>
+
+        ${hasEffectivePayrollRate ? `
+        <!-- Effective Payroll Rate Information -->
+        <div style="border: 1px solid #bfdbfe; background-color: #eff6ff; padding: 8px 10px; margin-bottom: 12px; font-size: 9px;">
+          <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 5px;">RATE INFORMATION</div>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 2px 0; width: 25%;"><strong>Old Rate:</strong></td>
+              <td style="padding: 2px 0; width: 25%;">GHS ${oldPayrollRate.toFixed(2)} / Hr</td>
+              <td style="padding: 2px 0; width: 25%;"><strong>New Rate:</strong></td>
+              <td style="padding: 2px 0; width: 25%; color: #047857; font-weight: 700;">GHS ${newPayrollRate.toFixed(2)} / Hr</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;"><strong>Effective From:</strong></td>
+              <td style="padding: 2px 0;">${formatShortDate(payroll.appliedEffectivePayrollRateFrom) || 'N/A'}</td>
+              <td style="padding: 2px 0;"><strong>Effective To:</strong></td>
+              <td style="padding: 2px 0;">${payroll.appliedEffectivePayrollRateTo ? formatShortDate(payroll.appliedEffectivePayrollRateTo) : 'Ongoing'}</td>
+            </tr>
+            ${(normalRateHours > 0 || effectiveRateHours > 0) ? `
+            <tr>
+              <td style="padding: 2px 0;"><strong>Hours at Old Rate:</strong></td>
+              <td style="padding: 2px 0;">${normalRateHours.toFixed(2)} hrs</td>
+              <td style="padding: 2px 0;"><strong>Hours at New Rate:</strong></td>
+              <td style="padding: 2px 0;">${effectiveRateHours.toFixed(2)} hrs</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding: 2px 0;"><strong>OT Hours at Old Rate:</strong></td>
+              <td style="padding: 2px 0;">${toNumber(payroll.normalRateOvertimeHours).toFixed(2)} hrs</td>
+              <td style="padding: 2px 0;"><strong>OT Hours at New Rate:</strong></td>
+              <td style="padding: 2px 0;">${toNumber(payroll.effectiveRateOvertimeHours).toFixed(2)} hrs</td>
+            </tr>
+            <tr>
+              <td style="padding: 2px 0;"><strong>Total OT Hours:</strong></td>
+              <td style="padding: 2px 0;">${overtimeHours.toFixed(2)} hrs</td>
+              <td style="padding: 2px 0;"><strong>OT Pay:</strong></td>
+              <td style="padding: 2px 0;">${formatCurrency(overtimePay)}</td>
+            </tr>
+          </table>
+        </div>
+        ` : ''}
 
         <!-- Hours Row -->
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 10px;">
@@ -751,7 +835,7 @@ function Payslip() {
 
         <!-- Footer -->
         <div style="font-size: 8px; color: #999; text-align: center; margin-top: 15px; padding-top: 10px;">
-          ${companyName} • P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com
+          ${companyName}${companyContactLine ? ` • ${companyContactLine}` : ""}
           <br>This is a computer-generated payslip. No signature is required for digital copies.
         </div>
       </div>
@@ -1161,7 +1245,7 @@ function Payslip() {
             </div>
             <div class="print-footer">
               <div><strong>${companyName}</strong></div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>{companyContactLine}</div>
               <div style="margin-top: 3px; font-size: 8px;">This is a computer-generated payslip. No signature is required.</div>
             </div>
           </div>
@@ -1567,7 +1651,7 @@ function Payslip() {
               }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "14px", fontWeight: 700 }}>{companyName}</div>
-                  <div style={{ fontSize: "10px", color: "#666" }}>P. O. Box AB 253 Abeka-Accra Ghana</div>
+                  <div style={{ fontSize: "10px", color: "#666" }}>{settings.companyAddress || ""}</div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0, marginLeft: "15px" }}>
                   <img
@@ -1764,9 +1848,19 @@ function Payslip() {
                           <span className="font-medium">{employeeDetails.jobPosition || "N/A"}</span>
                         </div>
                         <div className="flex justify-between detail-row">
-                          <span className="text-gray-600">Employee Rate:</span>
-                          <span className="font-medium">{employeeDetails.minimumRate || "N/A"}GHS/hr</span>
+                          <span className="text-gray-600">Old Payroll Rate:</span>
+                          <span className="font-medium">
+                            GHS {getOldPayrollRate(payrollRecord, employeeDetails).toFixed(2)}/hr
+                          </span>
                         </div>
+                        {getNewPayrollRate(payrollRecord) != null && (
+                          <div className="flex justify-between detail-row">
+                            <span className="text-gray-600">New Payroll Rate:</span>
+                            <span className="font-semibold text-green-700">
+                              GHS {getNewPayrollRate(payrollRecord).toFixed(2)}/hr
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1799,6 +1893,62 @@ function Payslip() {
                     </div>
                   </div>
                 </div>
+
+                {getNewPayrollRate(payrollRecord) != null && (
+                  <div className="p-6 border-b border-gray-200">
+                    <h3 className="font-semibold text-gray-700 mb-3 section-title">Rate Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">Old Rate:</span>
+                        <span className="font-medium">GHS {getOldPayrollRate(payrollRecord, employeeDetails).toFixed(2)}/hr</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">New Rate:</span>
+                        <span className="font-semibold text-green-700">GHS {getNewPayrollRate(payrollRecord).toFixed(2)}/hr</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">Effective From:</span>
+                        <span className="font-medium">{formatShortDate(payrollRecord.appliedEffectivePayrollRateFrom) || "N/A"}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">Effective To:</span>
+                        <span className="font-medium">{payrollRecord.appliedEffectivePayrollRateTo ? formatShortDate(payrollRecord.appliedEffectivePayrollRateTo) : "Ongoing"}</span>
+                      </div>
+                      {(toNumber(payrollRecord.normalRateHours) > 0 || toNumber(payrollRecord.effectiveRateHours) > 0) && (
+                        <>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Hours at Old Rate:</span>
+                            <span className="font-medium">{formatHours(payrollRecord.normalRateHours)}</span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-600">Hours at New Rate:</span>
+                            <span className="font-medium">{formatHours(payrollRecord.effectiveRateHours)}</span>
+                          </div>
+                        </>
+                      )}
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">OT Hours at Old Rate:</span>
+                        <span className="font-medium">
+                          {formatHours(payrollRecord.normalRateOvertimeHours)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">OT Hours at New Rate:</span>
+                        <span className="font-medium text-green-700">
+                          {formatHours(payrollRecord.effectiveRateOvertimeHours)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">Total OT Hours:</span>
+                        <span className="font-medium">{formatHours(payrollRecord.overtimeHours)}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-gray-600">OT Pay:</span>
+                        <span className="font-semibold">{formatCurrency(payrollRecord.overtimePay)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="p-6 border-b border-gray-200">
                   <h3 className="font-semibold text-gray-700 mb-4 text-lg section-title">Salary Breakdown</h3>
@@ -1973,7 +2123,7 @@ function Payslip() {
 
                 <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm footer">
                   <div className="font-semibold">{companyName}</div>
-                  <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+                  <div>{companyContactLine}</div>
                   <div className="text-xs mt-1 text-gray-500">This is a computer-generated payslip. No signature is required.</div>
                 </div>
               </div>

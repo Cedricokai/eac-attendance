@@ -1,9 +1,29 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ArrowPathIcon, PencilIcon, PlusIcon } from '@heroicons/react/24/outline';
 import EmployeeWeeklyAssignmentModal from './components/EmployeeWeeklyAssignmentModal';
+import { attendanceService, lunchApi } from './services/lunchApi';
+
+const toLocalIsoDate = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const unwrapList = (response) =>
+  Array.isArray(response) ? response : response?.data || response?.content || [];
+
+const getEmployeeId = (record) =>
+  record?.employee?.id || record?.employeeDto?.id || record?.employeeId;
+
+const getMealName = (assignment) => {
+  const meal = assignment?.meal || assignment?.mealDto || assignment?.mealDetails;
+  return typeof meal === 'string'
+    ? meal
+    : meal?.name || assignment?.mealName || assignment?.meal?.mealName || null;
+};
 
 const AttendanceVerification = () => {
-  const [attendances, setAttendances] = useState([]);
   const [filteredAttendances, setFilteredAttendances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -11,151 +31,54 @@ const AttendanceVerification = () => {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [lunchAssignmentMap, setLunchAssignmentMap] = useState({});
-  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(toLocalIsoDate());
 
-  // ===== API CONFIG (copied exactly from Attendance.jsx) =====
-  const getApiBaseUrl = () => {
-    const hostname = window.location.hostname;
-    const port = window.location.port;
-
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:8080";
-    }
-
-    if (hostname.startsWith("192.168.")) {
-      return import.meta.env.VITE_API_BASE_URL_LOCAL;
-    }
-
-    if (hostname === "100.114.178.13") {
-      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-    }
-
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  };
-
-  const API_BASE_URL = getApiBaseUrl();
-
-  const getToken = () => {
-    return localStorage.getItem('jwtToken');
-  };
-
-  // ===== Fetch attendance records (same as Attendance.jsx) =====
-  const fetchAttendance = async () => {
+  // Fetch only the selected date. Loading the full attendance history makes this page slow.
+  const fetchAttendance = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/attendance`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
+      const [attendanceResponse, assignmentsResponse] = await Promise.all([
+        attendanceService.getAttendancesByDate(selectedDate),
+        lunchApi.getAssignmentsForDate(selectedDate),
+      ]);
+      const records = unwrapList(attendanceResponse);
+      const assignments = unwrapList(assignmentsResponse);
+      setFilteredAttendances(records);
+
+      const assignmentMap = {};
+      assignments.forEach((assignment) => {
+        const employeeId = getEmployeeId(assignment);
+        if (!employeeId) return;
+        assignmentMap[String(employeeId)] = {
+          assigned: Boolean(getMealName(assignment)),
+          mealName: getMealName(assignment),
+        };
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch attendance');
-      }
-
-      const data = await response.json();
-      setAttendances(data);
-
-      // Filter today's records
-      const today = new Date().toISOString().split('T')[0];
-      const todayRecords = data.filter(rec => rec.date === today);
-      setFilteredAttendances(todayRecords);
-
-      // Fetch lunch assignments for today's present employees
-      const presentEmployees = todayRecords.filter(rec => rec.status === 'Present' || rec.status === 'Late');
-      if (presentEmployees.length > 0) {
-        fetchLunchStatuses(presentEmployees);
-      } else {
-        setLunchAssignmentMap({});
-      }
+      setLunchAssignmentMap(assignmentMap);
     } catch (err) {
       setError(err.message);
       console.error('Error fetching attendance:', err);
     } finally {
       setLoading(false);
     }
-  };
-
-  // ===== Fetch lunch assignments for a list of attendance records =====
-  const fetchLunchStatuses = async (presentRecords) => {
-    if (!presentRecords || presentRecords.length === 0) {
-      setLunchAssignmentMap({});
-      return;
-    }
-
-    setLoadingStatus(true);
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const token = getToken();
-
-      const promises = presentRecords.map(async (record) => {
-        const employeeId = record.employee?.id;
-        if (!employeeId) return { employeeId: null, assigned: false, mealName: null };
-
-        try {
-          const response = await fetch(
-            `${API_BASE_URL}/api/lunch/assignments/employee/${employeeId}/active?date=${today}`,
-            {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              }
-            }
-          );
-
-          if (!response.ok) {
-            return { employeeId, assigned: false, mealName: null };
-          }
-
-          const data = await response.json();
-          return {
-            employeeId,
-            assigned: !!data,
-            mealName: data?.meal?.name || null
-          };
-        } catch (error) {
-          return { employeeId, assigned: false, mealName: null };
-        }
-      });
-
-      const results = await Promise.all(promises);
-      const map = {};
-      results.forEach(r => {
-        if (r.employeeId) {
-          map[r.employeeId] = {
-            assigned: r.assigned,
-            mealName: r.mealName
-          };
-        }
-      });
-      setLunchAssignmentMap(map);
-    } catch (error) {
-      console.error('Error fetching lunch assignments:', error);
-    } finally {
-      setLoadingStatus(false);
-    }
-  };
+  }, [selectedDate]);
 
   // ===== Refresh all data =====
-  const refreshData = useCallback(() => {
-    fetchAttendance();
-  }, []);
+  const refreshData = useCallback(() => fetchAttendance(), [fetchAttendance]);
 
   // ===== Initial load and auto-refresh =====
   useEffect(() => {
     fetchAttendance();
 
     let interval;
-    if (autoRefresh) {
+    if (autoRefresh && selectedDate === toLocalIsoDate()) {
       interval = setInterval(() => {
         fetchAttendance();
       }, 10000);
     }
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, fetchAttendance, selectedDate]);
 
   // ===== Open modal to assign/edit lunch =====
   const handleAssignLunch = (employee) => {
@@ -190,9 +113,16 @@ const AttendanceVerification = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Attendance Verification</h1>
-          <p className="text-gray-500">Today's attendance and lunch assignments</p>
+          <p className="text-gray-500">Attendance and lunch assignments for the selected date</p>
         </div>
         <div className="flex items-center gap-3">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+            aria-label="Attendance date"
+          />
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`px-3 py-1 rounded-lg text-sm ${autoRefresh ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
@@ -217,7 +147,7 @@ const AttendanceVerification = () => {
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Attendance</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Today's Meal</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Today&apos;s Meal</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
             </tr>
           </thead>
@@ -230,14 +160,14 @@ const AttendanceVerification = () => {
               </tr>
             ) : filteredAttendances.length === 0 ? (
               <tr>
-                <td colSpan="4" className="px-6 py-4 text-center text-gray-500">No attendance records for today</td>
+                <td colSpan="4" className="px-6 py-4 text-center text-gray-500">No attendance records for {selectedDate}</td>
               </tr>
             ) : (
               filteredAttendances.map(record => {
                 const employee = getEmployeeFromRecord(record);
                 const status = getStatusDisplay(record);
                 const present = isPresent(record);
-                const assignment = lunchAssignmentMap[employee.id];
+                const assignment = lunchAssignmentMap[String(employee.id)];
                 const hasLunch = assignment?.assigned || false;
                 const mealName = assignment?.mealName || null;
 
@@ -266,9 +196,7 @@ const AttendanceVerification = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {loadingStatus ? (
-                        <span className="text-xs text-gray-400">Checking...</span>
-                      ) : present ? (
+                      {present ? (
                         hasLunch ? (
                           <span className="text-sm text-gray-900">{mealName}</span>
                         ) : (

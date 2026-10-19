@@ -27,3 +27,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Local work and generated artifacts
+.codex-tmp/
+outputs/
+config.inc.php
+.env.*
+!.env.example

@@ -26,6 +26,7 @@ import {
   UsersIcon
 } from "@heroicons/react/24/outline";
 import { useNavigate, useLocation } from "react-router-dom";
+import { getUserRole } from '../../utils/auth';
 
 export function SidebarWithBurgerMenu({ onToggle }) {
   const [open, setOpen] = React.useState(0);
@@ -79,8 +80,37 @@ export function SidebarWithBurgerMenu({ onToggle }) {
   };
 
   // Get user role from localStorage (if exists)
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const userRole = user?.role?.toLowerCase() || "";
+  let user = {};
+  try {
+    user = JSON.parse(localStorage.getItem("userData") || "{}");
+  } catch {
+    user = {};
+  }
+
+  const storedRole = String(
+    getUserRole() || user?.role?.name || user?.role || ""
+  ).trim().toUpperCase().replace(/^ROLE_/, "");
+
+  const userRole = {
+    ADMIN: "admin",
+    PROCUREMENT_OFFICER: "procurementmanager",
+    PROCUREMENT_MANAGER: "procurementmanager",
+    INVENTORY: "storekeeper",
+    STOREKEEPER: "storekeeper",
+    STORE_OFFICER: "storeofficer",
+    PLANNER: "planner",
+    EMPLOYEE: "employee"
+  }[storedRole] || storedRole.toLowerCase();
+  const roleLabel = {
+    admin: "Administrator",
+    procurementmanager: "Procurement",
+    procurement_officer: "Procurement",
+    role_procurement_officer: "Procurement",
+    storekeeper: "Storekeeper",
+    storeofficer: "Store Officer",
+    planner: "Planner",
+    employee: "Employee"
+  }[userRole] || (userRole ? userRole.replace(/^role_/, "").replaceAll("_", " ") : "");
   
   // Determine if user has inventory access
   const hasInventoryAccess = userRole === "storekeeper" || 
@@ -130,7 +160,7 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                     Inventory System
                   </h5>
                   <p className="text-xs text-gray-500">
-                    {userRole ? `Role: ${userRole.charAt(0).toUpperCase() + userRole.slice(1)}` : 'Not logged in'}
+                    {roleLabel ? `Role: ${roleLabel}` : 'Not logged in'}
                   </p>
                 </div>
               </div>
@@ -177,10 +207,12 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                         className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors ${
                           isActiveRoute("/InventoryDashboard") || 
                           isActiveRoute("/products") ||
+                          isActiveRoute("/search") ||
                           isActiveRoute("/received") ||
                           isActiveRoute("/outgoing") ||
                           isActiveRoute("/ppe") ||
-                          isActiveRoute("/costCenter") ||
+                          isActiveRoute("/ReportsDashboard") ||
+                          isActiveRoute("/CostCenterManagement") ||
                           isActiveRoute("/history")
                             ? "bg-blue-100 text-blue-700" 
                             : "hover:bg-blue-50 text-gray-700 hover:text-blue-700"
@@ -228,20 +260,7 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                           </li>
                           <li>
                             <button 
-                              onClick={() => handleNavigation("/ppe")}
-                              className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
-                                isActiveRoute("/ppe") 
-                                  ? "bg-blue-50 text-blue-700" 
-                                  : "hover:bg-blue-50 text-gray-600 hover:text-blue-700"
-                              }`}
-                            >
-                              <ShieldCheckIcon className="h-3 w-3" />
-                              <span>PPE Items</span>
-                            </button>
-                          </li>
-                          <li>
-                            <button 
-                              onClick={() => handleNavigation("/received")}
+                              onClick={() => handleNavigation("/received?tab=transfer")}
                               className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
                                 isActiveRoute("/received") 
                                   ? "bg-blue-50 text-blue-700" 
@@ -249,7 +268,7 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                               }`}
                             >
                               <DocumentArrowDownIcon className="h-3 w-3" />
-                              <span>Received Items</span>
+                              <span>Receive / Transfer Stock</span>
                             </button>
                           </li>
                           <li>
@@ -266,16 +285,42 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                             </button>
                           </li>
                           <li>
-                            <button 
-                              onClick={() => handleNavigation("/costCenter")}
+                            <button
+                              onClick={() => handleNavigation("/ppe")}
                               className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
-                                isActiveRoute("/costCenter") 
+                                isActiveRoute("/ppe")
+                                  ? "bg-blue-50 text-blue-700"
+                                  : "hover:bg-blue-50 text-gray-600 hover:text-blue-700"
+                              }`}
+                            >
+                              <ShieldCheckIcon className="h-3 w-3" />
+                              <span>PPE Inventory</span>
+                            </button>
+                          </li>
+                          <li>
+                            <button 
+                              onClick={() => handleNavigation("/search")}
+                              className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
+                                isActiveRoute("/search") 
                                   ? "bg-blue-50 text-blue-700" 
                                   : "hover:bg-blue-50 text-gray-600 hover:text-blue-700"
                               }`}
                             >
-                              <BuildingLibraryIcon className="h-3 w-3" />
-                              <span>Cost Centers</span>
+                              <MagnifyingGlassIcon className="h-3 w-3" />
+                              <span>Search</span>
+                            </button>
+                          </li>
+                          <li>
+                            <button 
+                              onClick={() => handleNavigation("/ReportsDashboard")}
+                              className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
+                                isActiveRoute("/ReportsDashboard") 
+                                  ? "bg-blue-50 text-blue-700" 
+                                  : "hover:bg-blue-50 text-gray-600 hover:text-blue-700"
+                              }`}
+                            >
+                              <ChartBarIcon className="h-3 w-3" />
+                              <span>Reports</span>
                             </button>
                           </li>
                           <li>
@@ -288,7 +333,20 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                               }`}
                             >
                               <ClockIcon className="h-3 w-3" />
-                              <span>History</span>
+                              <span>Product History</span>
+                            </button>
+                          </li>
+                          <li>
+                            <button
+                              onClick={() => handleNavigation("/CostCenterManagement")}
+                              className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
+                                isActiveRoute("/CostCenterManagement")
+                                  ? "bg-blue-50 text-blue-700"
+                                  : "hover:bg-blue-50 text-gray-600 hover:text-blue-700"
+                              }`}
+                            >
+                              <BuildingLibraryIcon className="h-3 w-3" />
+                              <span>Cost Centers</span>
                             </button>
                           </li>
                         </ul>
@@ -296,16 +354,18 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                     </li>
                   )}
 
+                  {["admin", "accountant", "accounts", "finance"].includes(userRole.replace(/^role_/, "")) && <li><button onClick={() => handleNavigation("/accountsFundingReview")} className="flex w-full items-center gap-3 rounded-lg p-3 text-left hover:bg-green-50"><ClipboardDocumentCheckIcon className="h-5 w-5" /><span>Accounts Funding Review</span></button></li>}
                   {/* Transactions/Requests Accordion */}
-                  {(userRole === "employee" || userRole === "planner" || userRole === "procurementmanager" || userRole === "storeofficer") && (
+                  {(userRole === "employee" || userRole === "planner" || userRole === "procurementmanager" || userRole === "storekeeper" || userRole === "storeofficer" || userRole === "admin") && (
                     <li>
                       <button 
                         className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors ${
-                          isActiveRoute("/product-request-form") ||
                           isActiveRoute("/InventoryRequest") ||
-                          isActiveRoute("/storeKeeperRequests") ||
+                          (isActiveRoute("/received") && location.search.includes("tab=requests")) ||
                           isActiveRoute("/plannerProductsReview") ||
                           isActiveRoute("/procurementManagerReview") ||
+                          isActiveRoute("/procurementPurchases") ||
+                          isActiveRoute("/DirectPurchase") ||
                           isActiveRoute("/StoreOfficerApproval")
                             ? "bg-green-100 text-green-700" 
                             : "hover:bg-green-50 text-gray-700 hover:text-green-700"
@@ -330,19 +390,6 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                             <>
                               <li>
                                 <button 
-                                  onClick={() => handleNavigation("/product-request-form")}
-                                  className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
-                                    isActiveRoute("/product-request-form") 
-                                      ? "bg-green-50 text-green-700" 
-                                      : "hover:bg-green-50 text-gray-600 hover:text-green-700"
-                                  }`}
-                                >
-                                  <DocumentTextIcon className="h-3 w-3" />
-                                  <span>Request Product</span>
-                                </button>
-                              </li>
-                              <li>
-                                <button 
                                   onClick={() => handleNavigation("/InventoryRequest")}
                                   className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
                                     isActiveRoute("/InventoryRequest") 
@@ -350,26 +397,26 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                                       : "hover:bg-green-50 text-gray-600 hover:text-green-700"
                                   }`}
                                 >
-                                  <InboxIcon className="h-3 w-3" />
-                                  <span>My Requests</span>
+                                  <DocumentTextIcon className="h-3 w-3" />
+                                  <span>Submit Inventory Request</span>
                                 </button>
                               </li>
                             </>
                           )}
 
                           {/* Storekeeper routes */}
-                          {userRole === "storekeeper" && (
+                          {(userRole === "storekeeper" || userRole === "storeofficer") && (
                             <li>
                               <button 
-                                onClick={() => handleNavigation("/storeKeeperRequests")}
+                                onClick={() => handleNavigation("/received?tab=requests")}
                                 className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
-                                  isActiveRoute("/storeKeeperRequests") 
+                                  isActiveRoute("/received") && location.search.includes("tab=requests")
                                     ? "bg-green-50 text-green-700" 
                                     : "hover:bg-green-50 text-gray-600 hover:text-green-700"
                                 }`}
                               >
                                 <ClipboardDocumentCheckIcon className="h-3 w-3" />
-                                <span>Review Requests</span>
+                                <span>Manage Approved Requests</span>
                               </button>
                             </li>
                           )}
@@ -386,13 +433,14 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                                 }`}
                               >
                                 <DocumentCheckIcon className="h-3 w-3" />
-                                <span>Review Products</span>
+                              <span>Review Inventory Requests</span>
                               </button>
                             </li>
                           )}
 
                           {/* Procurement Manager routes */}
-                          {userRole === "procurementmanager" && (
+                          {(userRole === "procurementmanager" || userRole === "admin") && (
+                            <>
                             <li>
                               <button 
                                 onClick={() => handleNavigation("/procurementManagerReview")}
@@ -406,6 +454,33 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                                 <span>Approval Queue</span>
                               </button>
                             </li>
+                            <li>
+                              <button
+                                onClick={() => handleNavigation("/procurementPurchases")}
+                                className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
+                                  isActiveRoute("/procurementPurchases")
+                                    ? "bg-green-50 text-green-700"
+                                    : "hover:bg-green-50 text-gray-600 hover:text-green-700"
+                                }`}
+                              >
+                                <ShoppingCartIcon className="h-3 w-3" />
+                                <span>Procurement Purchases</span>
+                              </button>
+                            </li>
+                            <li>
+                              <button
+                                onClick={() => handleNavigation("/DirectPurchase")}
+                                className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-sm ${
+                                  isActiveRoute("/DirectPurchase")
+                                    ? "bg-green-50 text-green-700"
+                                    : "hover:bg-green-50 text-gray-600 hover:text-green-700"
+                                }`}
+                              >
+                                <ShoppingBagIcon className="h-3 w-3" />
+                                <span>Direct Purchases</span>
+                              </button>
+                            </li>
+                            </>
                           )}
 
                           {/* Store Officer routes */}
@@ -426,23 +501,6 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                           )}
                         </ul>
                       )}
-                    </li>
-                  )}
-
-                  {/* Reports Accordion */}
-                  {(userRole === "admin" || userRole === "storekeeper" || userRole === "procurementmanager") && (
-                    <li>
-                      <button 
-                        className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                          isActiveRoute("/inventory-reports") 
-                            ? "bg-purple-100 text-purple-700" 
-                            : "hover:bg-purple-50 text-gray-700 hover:text-purple-700"
-                        }`}
-                        onClick={() => handleNavigation("/inventory-reports")}
-                      >
-                        <ChartBarIcon className="h-5 w-5" />
-                        <span className="font-medium">Reports</span>
-                      </button>
                     </li>
                   )}
 
@@ -508,7 +566,7 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                     <div className="space-y-2">
                       {userRole === "employee" && (
                         <button 
-                          onClick={() => handleNavigation("/product-request-form")}
+                          onClick={() => handleNavigation("/InventoryRequest")}
                           className="w-full text-xs bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 transition-colors flex items-center gap-2"
                         >
                           <PlusIcon className="h-3 w-3" />
@@ -524,13 +582,6 @@ export function SidebarWithBurgerMenu({ onToggle }) {
                           View All Products
                         </button>
                       )}
-                      <button 
-                        onClick={() => handleNavigation("/ppe")}
-                        className="w-full text-xs bg-orange-600 text-white px-3 py-2 rounded hover:bg-orange-700 transition-colors flex items-center gap-2"
-                      >
-                        <ShieldCheckIcon className="h-3 w-3" />
-                        PPE Inventory
-                      </button>
                     </div>
                   </div>
                 </div>

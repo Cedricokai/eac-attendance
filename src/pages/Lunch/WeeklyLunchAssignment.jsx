@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { CheckIcon, XMarkIcon, PlusIcon, UsersIcon } from '@heroicons/react/24/outline';
-import { lunchApi } from './services/lunchApi';
+import { employeeCategory, exportAssignments } from './utils/assignmentExport';
+import { useState, useEffect, useMemo } from 'react';
+import { CheckIcon, XMarkIcon, UsersIcon } from '@heroicons/react/24/outline';
+import { lunchApi } from './Services/lunchApi';
+import { applyMealToEmployees, weekMonday } from './utils/assignmentDisplay';
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
 const DAY_LABELS = {
@@ -17,35 +18,36 @@ const WeeklyLunchAssignment = () => {
   const [meals, setMeals] = useState([]);
   const [weekStart, setWeekStart] = useState(getMondayOfCurrentWeek());
   const [assignments, setAssignments] = useState({}); // key: employeeId, value: { day: mealId }
+  const [savedAssignments, setSavedAssignments] = useState({});
+  const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedEmployees, setSelectedEmployees] = useState(new Set());
   const [bulkMealId, setBulkMealId] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const categories = [...new Set(employees.map(employeeCategory))].sort();
 
-  function getMondayOfCurrentWeek() {
-    const today = new Date();
-    const day = today.getDay(); // 0=Sun, 1=Mon
-    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(today);
-    monday.setDate(diff);
-    return monday.toISOString().split('T')[0];
-  }
+  function getMondayOfCurrentWeek() { return weekMonday(); }
 
   // Fetch employees, meals, and existing assignments
   useEffect(() => {
+    let cancelled = false;
     const fetchAll = async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         // Get all employees
         const empRes = await lunchApi.getAllEmployees();
         const empData = empRes.data || empRes || [];
+        if (cancelled) return;
         setEmployees(empData);
 
         // Get all meals
         const mealRes = await lunchApi.getMeals();
         const mealData = mealRes.data || mealRes || [];
+        if (cancelled) return;
         setMeals(mealData);
 
         // Fetch assignments for each employee for this week
@@ -53,10 +55,10 @@ const WeeklyLunchAssignment = () => {
         // But we can optimize by fetching only for employees that have assignments.
         const assignmentPromises = empData.map(emp =>
           lunchApi.getEmployeeWeeklyAssignment(emp.id, weekStart)
-            .then(res => ({ employeeId: emp.id, data: res.data || null }))
-            .catch(() => ({ employeeId: emp.id, data: null }))
+            .then(res => ({ employeeId: emp.id, data: res.data || res }))
         );
         const results = await Promise.all(assignmentPromises);
+        if (cancelled) return;
         const assignmentMap = {};
         results.forEach(({ employeeId, data }) => {
           if (data && data.days) {
@@ -64,14 +66,18 @@ const WeeklyLunchAssignment = () => {
           }
         });
         setAssignments(assignmentMap);
+        setSavedAssignments(assignmentMap);
       } catch (error) {
+        if (cancelled) return;
         console.error('Error loading data:', error);
+        setLoadError(true);
         alert('Failed to load data. Please refresh.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchAll();
+    return () => { cancelled = true; };
   }, [weekStart]);
 
   // Handle individual day change
@@ -94,7 +100,7 @@ const WeeklyLunchAssignment = () => {
   };
 
   const toggleAllEmployees = () => {
-    if (selectedEmployees.size === filteredEmployees.length) {
+    if (filteredEmployees.every(emp => selectedEmployees.has(emp.id))) {
       setSelectedEmployees(new Set());
     } else {
       setSelectedEmployees(new Set(filteredEmployees.map(emp => emp.id)));
@@ -112,28 +118,26 @@ const WeeklyLunchAssignment = () => {
       return;
     }
     const mealId = parseInt(bulkMealId);
-    setAssignments(prev => {
-      const newAssign = { ...prev };
-      selectedEmployees.forEach(empId => {
-        const current = newAssign[empId] || {};
-        DAYS.forEach(day => {
-          current[day] = mealId;
-        });
-        newAssign[empId] = current;
-      });
-      return newAssign;
-    });
+    setAssignments(prev => applyMealToEmployees(prev, selectedEmployees, DAYS, mealId));
     setShowBulkModal(false);
     setBulkMealId('');
   };
 
   // Save all assignments for the week
   const saveWeek = async () => {
+    if (loading || loadError || saving) return;
     setSaving(true);
     try {
       // Prepare payload: for each employee, send their days map
       const promises = employees.map(emp => {
-        const days = assignments[emp.id] || {};
+        const employeeDays = assignments[emp.id] || {};
+        const days = DAYS.reduce((result, day) => {
+          if ((employeeDays[day] ?? null) !== (savedAssignments[emp.id]?.[day] ?? null)) {
+            result[day] = employeeDays[day] ?? null;
+          }
+          return result;
+        }, {});
+        if (!Object.keys(days).length) return Promise.resolve();
         const payload = {
           employeeId: emp.id,
           startDate: weekStart,
@@ -142,6 +146,7 @@ const WeeklyLunchAssignment = () => {
         return lunchApi.createOrUpdateWeeklyAssignment(payload);
       });
       await Promise.all(promises);
+      setSavedAssignments(assignments);
       alert('Weekly assignments saved successfully!');
     } catch (error) {
       console.error('Error saving:', error);
@@ -153,20 +158,14 @@ const WeeklyLunchAssignment = () => {
 
   // Filter employees by search
   const filteredEmployees = useMemo(() => {
-    if (!search) return employees;
+
     const term = search.toLowerCase();
     return employees.filter(emp => {
       const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.toLowerCase();
       const empId = (emp.employeeId || '').toLowerCase();
-      return fullName.includes(term) || empId.includes(term);
+      return (!category || employeeCategory(emp) === category) && (fullName.includes(term) || empId.includes(term));
     });
-  }, [employees, search]);
-
-  const getMealName = (mealId) => {
-    if (!mealId) return '—';
-    const meal = meals.find(m => m.id === mealId);
-    return meal ? meal.name : 'Unknown';
-  };
+  }, [employees, search, category]);
 
   return (
     <div className="p-6">
@@ -179,12 +178,13 @@ const WeeklyLunchAssignment = () => {
           <input
             type="date"
             value={weekStart}
-            onChange={(e) => setWeekStart(e.target.value)}
+            disabled={saving}
+            onChange={(e) => { if (e.target.value) setWeekStart(weekMonday(e.target.value)); }}
             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
           />
           <button
             onClick={saveWeek}
-            disabled={saving}
+            disabled={saving || loading || loadError}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
           >
             {saving ? 'Saving...' : <><CheckIcon className="h-5 w-5" /> Save Week</>}
@@ -192,12 +192,22 @@ const WeeklyLunchAssignment = () => {
         </div>
       </div>
 
+      <div className="my-4 flex flex-wrap items-end gap-3">
+        <label className="text-sm font-medium text-gray-700">Category
+          <select aria-label="Filter by category" value={category} onChange={e => { setCategory(e.target.value); setSelectedEmployees(new Set()); }} className="mt-1 block rounded-lg border px-3 py-2">
+            <option value="">All categories</option>{categories.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+        <button disabled={loading || loadError || !filteredEmployees.length} onClick={() => exportAssignments(filteredEmployees, weekStart, (employee, day) => meals.find(meal => String(meal.id) === String(assignments[employee.id]?.[day]))?.name || (assignments[employee.id]?.[day] ? `Meal #${assignments[employee.id][day]}` : 'No meal'), 'Weekly lunch assignments')}
+          className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">Export Excel ({filteredEmployees.length})</button>
+        <p className="text-xs text-gray-500">Exports the filtered displayed meals, including unsaved edits for this week.</p>
+      </div>
       {/* Bulk Actions */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
-            checked={selectedEmployees.size === filteredEmployees.length && filteredEmployees.length > 0}
+            checked={filteredEmployees.length > 0 && filteredEmployees.every(emp => selectedEmployees.has(emp.id))}
             onChange={toggleAllEmployees}
             className="h-4 w-4 text-indigo-600 rounded border-gray-300"
           />
@@ -282,7 +292,7 @@ const WeeklyLunchAssignment = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     <input
                       type="checkbox"
-                      checked={selectedEmployees.size === filteredEmployees.length && filteredEmployees.length > 0}
+                      checked={filteredEmployees.length > 0 && filteredEmployees.every(emp => selectedEmployees.has(emp.id))}
                       onChange={toggleAllEmployees}
                       className="h-4 w-4 text-indigo-600 rounded border-gray-300"
                     />

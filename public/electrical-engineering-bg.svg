@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <linearGradient id="fade" x1="80" y1="40" x2="1500" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset=".5" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" stroke="#4F46E5" stroke-opacity=".12"/>
+      <circle cx="0" cy="0" r="2.5" fill="#4F46E5" fill-opacity=".2"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#grid)"/>
+
+  <!-- circuit-board traces -->
+  <g stroke="url(#fade)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity=".5">
+    <path d="M0 172h178l48 48h175l50-50h190"/>
+    <path d="M0 758h132l62-62h174l53 53h174"/>
+    <path d="M1600 142h-155l-58 58h-192l-47-47h-138"/>
+    <path d="M1600 790h-172l-47-47h-168l-62 62H995"/>
+    <path d="M282 0v108l47 47v120"/>
+    <path d="M1334 1000V862l-55-55V672"/>
+  </g>
+  <g fill="#3730A3" opacity=".62">
+    <circle r="7"><animateMotion dur="7s" repeatCount="indefinite" path="M0 172h178l48 48h175l50-50h190"/></circle><circle cx="401" cy="220" r="7"/><circle cx="132" cy="758" r="7"/>
+    <circle cx="368" cy="696" r="7"/><circle cx="1445" cy="142" r="7"/><circle cx="1195" cy="200" r="7"/>
+    <circle cx="1428" cy="790" r="7"/><circle cx="1213" cy="743" r="7"/>
+  </g>
+
+  <!-- Animated signal dots travel along the circuit-board traces. -->
+  <g fill="#818CF8" filter="url(#glow)">
+    <circle r="9">
+      <animateMotion dur="8s" begin="-3s" repeatCount="indefinite" path="M0 758h132l62-62h174l53 53h174"/>
+    </circle>
+    <circle r="9">
+      <animateMotion dur="7.5s" begin="-5s" repeatCount="indefinite" path="M1600 142h-155l-58 58h-192l-47-47h-138"/>
+    </circle>
+    <circle r="9">
+      <animateMotion dur="8.5s" begin="-1.5s" repeatCount="indefinite" path="M1600 790h-172l-47-47h-168l-62 62H995"/>
+    </circle>
+  </g>
+
+  <!-- transmission tower -->
+  <g transform="translate(120 260)" stroke="#312E81" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".48">
+    <path d="M160 24 61 428M160 24l99 404M92 302h136M77 362h166M110 227h100M126 163h68M47 102h226M75 102l85-78 85 78M114 102l46 61 46-61M110 227l50-64 50 64M92 302l68-75 68 75M77 362l83-60 83 60M61 428h198"/>
+    <path d="M47 102-8 139M273 102l55 37"/>
+    <circle cx="-8" cy="139" r="8" fill="#3730A3"/><circle cx="328" cy="139" r="8" fill="#3730A3"/>
+  </g>
+
+  <!-- generator / motor -->
+  <g transform="translate(1220 280)" stroke="#4C1D95" stroke-width="5" opacity=".46">
+    <circle cx="130" cy="130" r="112"/>
+    <circle cx="130" cy="130" r="72"/>
+    <path d="M76 105v50h32M76 105h32M76 130h26M116 155l18-50 18 50M122 139h24M190 113c-7-6-14-9-22-9-17 0-29 11-29 26s12 26 29 26c8 0 15-3 22-9M18 130h-46M288 130h-46" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M51 51 18 18M209 51l33-33M51 209l-33 33M209 209l33 33" stroke-linecap="round"/>
+  </g>
+
+  <!-- sine wave and oscilloscope baseline -->
+  <g transform="translate(535 710)" opacity=".5">
+    <path d="M0 92h530" stroke="#4338CA" stroke-width="3"/>
+    <path d="M0 92c44-118 88-118 132 0s88 118 132 0 88-118 132 0 88 118 134 0" stroke="url(#fade)" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+    <path d="M0 38v108M530 38v108" stroke="#4338CA" stroke-width="3"/>
+  </g>
+
+  <!-- central schematic: resistor, capacitor and lightning bolt -->
+  <g transform="translate(570 220)" stroke="url(#fade)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity=".52">
+    <circle cx="230" cy="230" r="174"/>
+    <path d="M56 230H0m460 0h56M110 230h35l18-28 34 56 34-56 34 56 34-56 18 28h53"/>
+    <path d="M230 56V0m0 460v56M198 93v52m64-52v52M171 145h118"/>
+    <path d="m246 172-57 94h48l-25 90 73-116h-51l12-68Z" fill="url(#fade)" stroke="none"/>
+  </g>
+
+  <!-- EAC drawn as part of the engineering linework -->
+  <g opacity=".5" stroke="#312E81" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M570 610V760H690M570 610h120M570 682h96"/>
+    <path d="M735 760 800 610l65 150M760 704h80"/>
+    <path d="M1045 638c-23-22-49-33-78-33-58 0-99 33-99 80s41 80 99 80c29 0 55-11 78-33"/>
+    <circle cx="570" cy="610" r="7" fill="#312E81"/>
+    <circle cx="690" cy="760" r="7" fill="#312E81"/>
+    <circle cx="800" cy="610" r="7" fill="#312E81"/>
+    <circle cx="865" cy="760" r="7" fill="#312E81"/>
+    <circle cx="1045" cy="638" r="7" fill="#312E81"/>
+    <circle cx="1045" cy="732" r="7" fill="#312E81"/>
+  </g>
+
+  <!-- engineering labels -->
+  <g fill="#312E81" fill-opacity=".42" font-family="Arial, sans-serif" font-weight="700" letter-spacing="4">
+    <text x="86" y="920" font-size="24">POWER • CONTROL • AUTOMATION</text>
+    <text x="1180" y="918" font-size="22">V = I × R</text>
+  </g>
+</svg>

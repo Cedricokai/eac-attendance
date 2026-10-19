@@ -172,7 +172,7 @@ const CentralSidebar = ({
     },
      { 
       id: "JobsManagement", 
-      name: "JobsManagement", 
+      name: "Project Management", 
       icon: <Cog6ToothIcon className="h-5 w-5" />, 
       roles: ["admin"],
       path: "/JobsManagement"

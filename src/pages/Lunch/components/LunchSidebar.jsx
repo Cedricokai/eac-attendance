@@ -11,23 +11,30 @@ import {
   ChartBarIcon,
   Cog6ToothIcon,
   ShoppingBagIcon,
+  ClipboardDocumentListIcon,
 } from '@heroicons/react/24/outline';
 
 const LunchSidebar = ({ isCollapsed }) => {
   const location = useLocation();
   const isActive = (path) => location.pathname.startsWith(path);
 
-  const menuItems = [
+  const managementMenuItems = [
     { path: '/lunch/dashboard', label: 'Dashboard', icon: HomeIcon },
     { path: '/lunch/weekly-assignment', label: 'Weekly Assignment', icon: CalendarIcon },
     { path: '/lunch/employee-assignment', label: 'Employee Assignment', icon: UserGroupIcon }, 
     { path: '/lunch/daily-serving', label: 'Daily Serving', icon: ClipboardDocumentCheckIcon },
     { path: '/lunch/attendance-verification', label: 'Attendance Verification', icon: CheckCircleIcon },
     { path: '/lunch/kitchen-report', label: 'Kitchen Report', icon: FireIcon },
+    { path: '/lunch/meal-planning', label: 'Next-day Meals', icon: ClipboardDocumentListIcon },
     { path: '/lunch/reports', label: 'Reports', icon: ChartBarIcon },
     { path: '/lunch/meals', label: 'Meals', icon: ShoppingBagIcon },
     { path: '/lunch/settings', label: 'Settings', icon: Cog6ToothIcon },
   ];
+
+  const isEmployeeMealSelection = location.pathname.startsWith('/lunch/meal-selection');
+  const menuItems = isEmployeeMealSelection
+    ? [{ path: '/lunch/meal-selection', label: 'My Meals', icon: ClipboardDocumentListIcon }]
+    : managementMenuItems;
 
   return (
     <div className={`h-full bg-gradient-to-b from-indigo-800 to-indigo-900 text-white flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'}`}>
@@ -37,7 +44,9 @@ const LunchSidebar = ({ isCollapsed }) => {
           L
         </div>
         {!isCollapsed && (
-          <span className="ml-3 text-lg font-semibold text-white">Lunch Manager</span>
+          <span className="ml-3 text-lg font-semibold text-white">
+            {isEmployeeMealSelection ? 'My Lunch' : 'Lunch Manager'}
+          </span>
         )}
       </div>
 
@@ -61,7 +70,7 @@ const LunchSidebar = ({ isCollapsed }) => {
 
       {/* Footer */}
       <div className="p-4 border-t border-indigo-700 text-center text-xs text-indigo-300">
-        {!isCollapsed && 'Lunch Management v1.0'}
+        {!isCollapsed && (isEmployeeMealSelection ? 'Employee meal selection' : 'Lunch Management v1.0')}
       </div>
     </div>
   );

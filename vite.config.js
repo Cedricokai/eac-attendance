@@ -8,54 +8,66 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    base: "./",
+
+    base: './',
+
     css: {
       postcss: {
         plugins: [tailwindcss(), autoprefixer()],
       },
     },
+
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx'],
     },
-    define: {
-      global: 'window',
-    },
 
-    // ✅ DEV SERVER FIX
+    // Only keep if you really need it
+    // define: {
+    //   global: 'window',
+    // },
+
     server: {
-     host: '0.0.0.0', // Listen on all interfaces
-  port: 5173,
-  strictPort: true,
-  headers: {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    'Access-Control-Allow-Headers': '*',
-  },
+      host: '0.0.0.0',
+      port: 5173,
+      strictPort: true,
+
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods':
+          'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      },
+
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL_LOCAL, // from .env
+          target: env.VITE_API_BASE_URL_LOCAL,
           changeOrigin: true,
           secure: false,
-          rewrite: (path) => path.replace(/^\/api/, '/api'), // keep /api prefix
         },
       },
     },
 
-    // ✅ BUILD FIX
     build: {
       outDir: 'dist',
       assetsDir: 'static',
+      emptyOutDir: true,
+
       rollupOptions: {
         output: {
-          manualChunks: undefined,
+          // Use hashed filenames for cache busting
+          entryFileNames: 'static/[name]-[hash].js',
+          chunkFileNames: 'static/[name]-[hash].js',
+          assetFileNames: 'static/[name]-[hash].[ext]',
+          // If you need to separate CSS, you can keep a custom function
+          // but still use [hash] to ensure uniqueness
         },
       },
     },
 
-    // ✅ PREVIEW FIX
     preview: {
-      host: true,
+      host: '0.0.0.0',
       port: 4173,
+
       proxy: {
         '/api': {
           target: env.VITE_API_BASE_URL_LOCAL,

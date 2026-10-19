@@ -1,3 +1,4 @@
+import InventoryFulfilment from '../../components/InventoryFulfilment';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
@@ -39,6 +40,7 @@ import {
   XCircleIcon
 } from "@heroicons/react/24/outline";
 import { REQUEST_STATUS, STATUS_LABELS, STATUS_COLORS } from '../../config/dataModels';
+import { getUserRole } from '../../utils/auth';
 
 // === API Base URL detection (same as LoginPage) ===
 const getApiBaseUrl = () => {
@@ -56,8 +58,44 @@ const getHeaders = () => ({
   'Authorization': `Bearer ${localStorage.getItem('jwtToken')}`
 });
 
+const getRequestedQuantity = (request) => {
+  if (request.quantity != null && Number.isFinite(Number(request.quantity))) {
+    return Number(request.quantity);
+  }
+  return (request.items || []).reduce(
+    (total, item) => total + Number(item.requestedQuantity ?? item.quantity ?? 0),
+    0
+  );
+};
+
+const getEstimatedCost = (request) => {
+  if (request.estimatedCost != null && Number.isFinite(Number(request.estimatedCost))) {
+    return Number(request.estimatedCost);
+  }
+  return (request.items || []).reduce((total, item) => {
+    const itemTotal = Number(item.totalCost);
+    if (item.totalCost != null && Number.isFinite(itemTotal) && itemTotal > 0) {
+      return total + itemTotal;
+    }
+    return total + Number(item.requestedQuantity ?? item.quantity ?? 0) * Number(item.unitCost ?? 0);
+  }, 0);
+};
+
+const getProductNames = (request) => {
+  const names = (request.items || []).map(item => item.productName).filter(Boolean);
+  return names.length ? names.join(', ') : 'N/A';
+};
+
+const getPurpose = (request) =>
+  request.jobDescription || request.projectName || request.notes || 'N/A';
+
+const formatCedis = (amount) => `GH₵ ${Number(amount || 0).toFixed(2)}`;
+
 const ProcurementManagerReview = () => {
   const navigate = useNavigate();
+  const normalizedRole = String(getUserRole() || '').trim().toUpperCase();
+  const isAdministrator = normalizedRole === 'ROLE_ADMIN' || normalizedRole === 'ADMIN';
+  const reviewerLabel = isAdministrator ? 'Administrator' : 'Procurement';
   
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -80,8 +118,8 @@ const ProcurementManagerReview = () => {
   const [filterStatus, setFilterStatus] = useState('all');
 
   // Fetch product requests using native fetch
-  const fetchRequests = async () => {
-    setLoading(true);
+  const fetchRequests = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/api/inventory-requests/for-procurement`, {
         headers: getHeaders()
@@ -91,13 +129,13 @@ const ProcurementManagerReview = () => {
         throw new Error(errorText || `HTTP ${response.status}`);
       }
       const data = await response.json();
-      setRequests(data);
+      setRequests(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err.message || 'Failed to load requests');
       toast.error(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -110,7 +148,7 @@ const ProcurementManagerReview = () => {
     setCurrentRequest(request);
     setReviewAction(action);
     setReviewForm({
-      quantity_approved: request.quantity_requested || request.quantityRequested || 0,
+      quantity_approved: getRequestedQuantity(request),
       comments: ''
     });
     setIsReviewModalOpen(true);
@@ -139,9 +177,15 @@ const ProcurementManagerReview = () => {
     setIsSubmitting(true);
     try {
       const qty = parseInt(reviewForm.quantity_approved);
-      const unitCost = currentRequest.unit_cost || currentRequest.unitCost || 0;
-      const estimatedCost = qty * unitCost;
-      const deliveryDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 7 days from now
+      const requestedQuantity = getRequestedQuantity(currentRequest);
+      const requestCost = getEstimatedCost(currentRequest);
+      const estimatedCost = requestedQuantity > 0
+        ? (requestCost / requestedQuantity) * qty
+        : requestCost;
+      // LocalDateTime on the backend requires both the date and time.
+      const deliveryDate = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000
+      ).toISOString().slice(0, 19);
 
       const payload = {
         estimatedCost: estimatedCost,
@@ -219,10 +263,11 @@ const ProcurementManagerReview = () => {
 
   // Filter requests
   const filteredRequests = requests.filter(req => {
+    const searchableProducts = getProductNames(req);
     const matchesSearch = 
-      (req.request_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (req.employee_id || '').toString().includes(searchTerm) ||
-      (req.product_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (req.requestNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (req.requestedBy || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      searchableProducts.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = filterStatus === 'all' || req.status === filterStatus;
     
@@ -230,8 +275,18 @@ const ProcurementManagerReview = () => {
   });
 
   // Group requests by status
-  const pendingRequests = filteredRequests.filter(r => r.status === REQUEST_STATUS.PENDING);
-  const approvedRequests = filteredRequests.filter(r => r.status === REQUEST_STATUS.APPROVED_BY_PROCUREMENT);
+  const pendingStatuses = [
+    REQUEST_STATUS.PENDING,
+    REQUEST_STATUS.PROCUREMENT_PENDING,
+    REQUEST_STATUS.APPROVED_BY_PLANNER
+  ];
+  const pendingRequests = filteredRequests.filter(r => pendingStatuses.includes(r.status));
+  const approvedRequests = filteredRequests.filter(r =>
+    r.status === REQUEST_STATUS.APPROVED_BY_PROCUREMENT ||
+    r.status === REQUEST_STATUS.PROCURED ||
+    r.status === REQUEST_STATUS.STORE_REVIEW ||
+    ['APPROVED_BY_STORE', 'PARTIALLY_ISSUED', 'ISSUED', 'RECEIVED_IN_STORE'].includes(r.status)
+  );
   const rejectedRequests = filteredRequests.filter(r => r.status === REQUEST_STATUS.REJECTED_BY_PROCUREMENT);
 
   const RequestsTable = ({ requestList, showActions = true }) => (
@@ -274,39 +329,42 @@ const ProcurementManagerReview = () => {
                   <tr key={req.id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Chip 
-                        value={req.request_number} 
+                        value={req.requestNumber || `Request ${req.id}`} 
                         color="blue" 
                         variant="outlined"
                       />
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small" className="font-medium">
-                        Employee #{req.employee_id}
+                        {req.requestedBy || 'Unknown requester'}
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small">
-                        {req.product_name || 'N/A'}
+                        {getProductNames(req)}
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small" className="font-semibold">
-                        {req.quantity_requested} units
+                        {getRequestedQuantity(req)} units
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small">
-                        ${parseFloat(req.unit_cost).toFixed(2)}
+                        {formatCedis((() => {
+                          const quantity = getRequestedQuantity(req);
+                          return quantity > 0 ? getEstimatedCost(req) / quantity : 0;
+                        })())}
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small" className="font-semibold text-blue-600">
-                        ${(req.quantity_requested * req.unit_cost).toFixed(2)}
+                        {formatCedis(getEstimatedCost(req))}
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
                       <Typography variant="small" className="truncate max-w-xs">
-                        {req.purpose}
+                        {getPurpose(req)}
                       </Typography>
                     </td>
                     <td className="p-4 border-b border-blue-gray-50">
@@ -319,7 +377,7 @@ const ProcurementManagerReview = () => {
                     {showActions && (
                       <td className="p-4 border-b border-blue-gray-50">
                         <div className="flex gap-2">
-                          {req.status === REQUEST_STATUS.PENDING && (
+                          {pendingStatuses.includes(req.status) && (
                             <>
                               <Tooltip content="Approve">
                                 <IconButton
@@ -391,15 +449,16 @@ const ProcurementManagerReview = () => {
           </Tooltip>
           <div>
             <Typography variant="h3" color="blue-gray">
-              Procurement Manager Review
+              {reviewerLabel} Review
             </Typography>
             <Typography variant="small" color="gray">
-              Review and approve/reject product requests from employees
+              Signed in as {reviewerLabel}. Review and approve or reject inventory requests.
             </Typography>
           </div>
         </div>
       </div>
 
+      <InventoryFulfilment apiBase={API_BASE_URL} onChanged={() => fetchRequests(true)} />
       {/* Error Alert */}
       {error && (
         <Alert color="red" className="mb-6 flex items-center gap-3">
@@ -555,37 +614,39 @@ const ProcurementManagerReview = () => {
                 <div>
                   <Typography variant="small" color="gray">Request Number</Typography>
                   <Typography variant="small" className="font-semibold">
-                    {currentRequest.request_number}
+                    {currentRequest.requestNumber || `Request ${currentRequest.id}`}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="small" color="gray">Product</Typography>
                   <Typography variant="small" className="font-semibold">
-                    {currentRequest.product_name}
+                    {getProductNames(currentRequest)}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="small" color="gray">Quantity Requested</Typography>
                   <Typography variant="small" className="font-semibold">
-                    {currentRequest.quantity_requested} units
+                    {getRequestedQuantity(currentRequest)} units
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="small" color="gray">Unit Cost</Typography>
                   <Typography variant="small" className="font-semibold">
-                    ${parseFloat(currentRequest.unit_cost).toFixed(2)}
+                    {formatCedis(getRequestedQuantity(currentRequest) > 0
+                      ? getEstimatedCost(currentRequest) / getRequestedQuantity(currentRequest)
+                      : 0)}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="small" color="gray">Total Cost</Typography>
                   <Typography variant="small" className="font-semibold text-green-600">
-                    ${(currentRequest.quantity_requested * currentRequest.unit_cost).toFixed(2)}
+                    {formatCedis(getEstimatedCost(currentRequest))}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="small" color="gray">Purpose</Typography>
                   <Typography variant="small" className="font-semibold">
-                    {currentRequest.purpose}
+                    {getPurpose(currentRequest)}
                   </Typography>
                 </div>
               </div>
@@ -606,7 +667,7 @@ const ProcurementManagerReview = () => {
                   onChange={handleInputChange}
                   label="Enter approved quantity"
                   min="1"
-                  max={currentRequest?.quantity_requested}
+                  max={currentRequest ? getRequestedQuantity(currentRequest) : undefined}
                   className="bg-white"
                 />
               </div>
@@ -637,11 +698,14 @@ const ProcurementManagerReview = () => {
             Cancel
           </Button>
           <Button
-            variant="gradient"
-            color={reviewAction === 'approve' ? 'green' : 'red'}
+            variant="filled"
             onClick={reviewAction === 'approve' ? handleApprove : handleReject}
             disabled={isSubmitting}
-            className="flex items-center gap-2"
+            className={`flex items-center gap-2 text-white shadow-md disabled:opacity-60 ${
+              reviewAction === 'approve'
+                ? 'bg-green-600 hover:bg-green-700 focus:bg-green-700 active:bg-green-800'
+                : 'bg-red-600 hover:bg-red-700 focus:bg-red-700 active:bg-red-800'
+            }`}
           >
             {isSubmitting ? (
               <>

@@ -1,12 +1,13 @@
 // src/pages/Lunch/KitchenReport.jsx
 
-import React, { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDaysIcon,
   DocumentArrowDownIcon,
   MagnifyingGlassIcon,
   PrinterIcon,
 } from '@heroicons/react/24/outline';
+import { jsPDF } from 'jspdf';
 import { attendanceService, lunchApi } from './services/lunchApi';
 
 const DAY_NAMES = [
@@ -70,10 +71,13 @@ const unwrapList = (response) => {
 };
 
 const getEmployeeFromRecord = (record) =>
-  record?.employee || record?.employeeDto || null;
+  record?.employee || record?.employeeDto || record?.employeeDetails || null;
 
-const getMealFromAssignment = (assignment) =>
-  assignment?.meal || assignment?.mealDto || null;
+const getMealFromAssignment = (assignment) => {
+  const meal = assignment?.meal || assignment?.mealDto || assignment?.mealDetails;
+  if (typeof meal === 'string') return { id: assignment?.mealId, name: meal };
+  return meal || (assignment?.mealName ? { id: assignment.mealId, name: assignment.mealName } : null);
+};
 
 const isPresentAttendance = (attendance) => {
   const status = String(attendance?.status || '').toLowerCase();
@@ -101,7 +105,7 @@ const KitchenReport = () => {
   const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart]);
   const weekEnd = weekDates[6]?.date || weekStart;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -133,11 +137,11 @@ const KitchenReport = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [weekDates]);
 
   useEffect(() => {
     fetchData();
-  }, [weekStart]);
+  }, [fetchData]);
 
   const allRows = useMemo(() => {
     return weeklyRecords.flatMap((dailyRecord) => {
@@ -283,6 +287,24 @@ const KitchenReport = () => {
     });
   }, [reportData, weekDates]);
 
+  const dailyMealBreakdown = useMemo(() => {
+    return dailySummary.map((day) => {
+      const mealCounts = new Map();
+      reportData
+        .filter((row) => row.date === day.date && row.mealAssigned !== 'Not Assigned')
+        .forEach((row) => {
+          mealCounts.set(row.mealAssigned, (mealCounts.get(row.mealAssigned) || 0) + 1);
+        });
+
+      return {
+        ...day,
+        meals: Array.from(mealCounts.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+      };
+    });
+  }, [dailySummary, reportData]);
+
   const departments = useMemo(() => {
     return Array.from(
       new Set(
@@ -385,6 +407,90 @@ const KitchenReport = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportPdf = () => {
+    const document = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = document.internal.pageSize.getWidth();
+    const pageHeight = document.internal.pageSize.getHeight();
+    const margin = 15;
+    let y = 18;
+
+    const addPageIfNeeded = (height = 12) => {
+      if (y + height <= pageHeight - 16) return;
+      document.addPage();
+      y = 18;
+    };
+
+    const writeText = (text, x, width, options = {}) => {
+      const lines = document.splitTextToSize(String(text || '-'), width);
+      document.text(lines, x, y, options);
+      return lines.length * 5;
+    };
+
+    document.setFont('helvetica', 'bold');
+    document.setFontSize(16);
+    document.text('Kitchen Meal Report', margin, y);
+    y += 7;
+    document.setFont('helvetica', 'normal');
+    document.setFontSize(10);
+    document.text(`Week: ${weekStart} to ${weekEnd}`, margin, y);
+    y += 5;
+    document.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+    y += 10;
+
+    document.setFillColor(30, 64, 175);
+    document.rect(margin, y, pageWidth - margin * 2, 8, 'F');
+    document.setTextColor(255, 255, 255);
+    document.setFont('helvetica', 'bold');
+    document.setFontSize(9);
+    document.text('Date', margin + 2, y + 5.3);
+    document.text('Employees present', margin + 42, y + 5.3);
+    document.text('Meal portions required', margin + 85, y + 5.3);
+    document.setTextColor(0, 0, 0);
+    y += 8;
+
+    dailyMealBreakdown.forEach((day, index) => {
+      const mealText = day.meals.length
+        ? day.meals.map((meal) => `${meal.name}: ${meal.count}`).join(' | ')
+        : 'No assigned meals';
+      const rowHeight = Math.max(9, document.splitTextToSize(mealText, 88).length * 5 + 4);
+      addPageIfNeeded(rowHeight);
+
+      if (index % 2 === 0) {
+        document.setFillColor(248, 250, 252);
+        document.rect(margin, y, pageWidth - margin * 2, rowHeight, 'F');
+      }
+      document.setFont('helvetica', 'normal');
+      document.setFontSize(9);
+      document.text(`${day.dayName}\n${day.date}`, margin + 2, y + 4.5);
+      document.text(String(day.present), margin + 59, y + 5.5, { align: 'center' });
+      writeText(mealText, margin + 85, 88);
+      y += rowHeight;
+    });
+
+    addPageIfNeeded(28);
+    y += 7;
+    document.setDrawColor(203, 213, 225);
+    document.line(margin, y, pageWidth - margin, y);
+    y += 7;
+    document.setFont('helvetica', 'bold');
+    document.setFontSize(10);
+    document.text(`Week totals - present entries: ${totalPresentEntries} | meal portions: ${totalAssigned} | served: ${totalServed}`, margin, y);
+    y += 8;
+    document.setFont('helvetica', 'normal');
+    document.setFontSize(8);
+    document.text('Portion totals are based on saved employee meal assignments for each date.', margin, y);
+
+    const totalPages = document.getNumberOfPages();
+    for (let page = 1; page <= totalPages; page += 1) {
+      document.setPage(page);
+      document.setFontSize(8);
+      document.setTextColor(100, 116, 139);
+      document.text(`Page ${page} of ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
+    }
+
+    document.save(`kitchen_meal_report_${weekStart}_to_${weekEnd}.pdf`);
+  };
+
   return (
     <div className="p-4 md:p-6">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -406,6 +512,15 @@ const KitchenReport = () => {
           >
             <DocumentArrowDownIcon className="h-5 w-5" />
             Export CSV
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-white transition hover:bg-red-700"
+          >
+            <DocumentArrowDownIcon className="h-5 w-5" />
+            Download PDF
           </button>
 
           <button

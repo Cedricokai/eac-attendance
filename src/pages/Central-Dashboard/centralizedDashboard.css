@@ -1,0 +1,21 @@
+.central-dashboard-content {
+  margin-left: 0;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 768px) {
+  .central-dashboard-content {
+    margin-left: var(--central-sidebar-width);
+  }
+}
+
+/* Fit the space remaining beside the sidebar, rather than the whole viewport. */
+.central-dashboard .central-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+
+.central-dashboard .central-modules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}

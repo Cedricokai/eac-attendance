@@ -62,7 +62,14 @@ const fetchWithAuth = async (endpoint, options = {}) => {
     return null;
   }
 
-  return response.json();
+  try {
+    return await response.json();
+  } catch (cause) {
+    const path = endpoint.split('?')[0];
+    const error = new Error(`The server returned an invalid response for ${path}. Please contact your administrator if this continues.`);
+    error.cause = cause;
+    throw error;
+  }
 };
 
 // ============================================================
@@ -188,7 +195,7 @@ export const lunchApi = {
     safeFetch(() => get('/api/lunch/assignments/active'), { data: [] }),
 
   getAssignmentsForDate: (date) =>
-    safeFetch(() => get('/api/lunch/assignments/date', { date }), { data: [] }),
+    get('/api/lunch/assignments/date', { date }),
 
   getAssignmentsForEmployee: (employeeId) =>
     safeFetch(() => get(`/api/lunch/assignments/employee/${employeeId}`), { data: [] }),
@@ -221,7 +228,7 @@ export const lunchApi = {
   // ==========================================================
 
   getEmployeeWeeklyAssignment: (employeeId, startDate) =>
-    safeFetch(() => get('/api/lunch/assignments/weekly', { employeeId, startDate }), { data: [] }),
+    get('/api/lunch/assignments/weekly', { employeeId, startDate }),
 
   createOrUpdateWeeklyAssignment: (data) =>
     post('/api/lunch/assignments/weekly', data),
@@ -230,7 +237,10 @@ export const lunchApi = {
     post('/api/lunch/assignments/my-weekly', data),
 
   getMyWeeklyAssignment: (startDate) =>
-    safeFetch(() => get('/api/lunch/assignments/my-weekly', { startDate }), { data: [] }),
+    get('/api/lunch/assignments/my-weekly', { startDate }),
+
+  getMealPlanning: (date) =>
+    get('/api/lunch/reports/meal-planning', { date }),
 
   // ==========================================================
   // DAILY MEAL OPTIONS
@@ -251,7 +261,7 @@ export const lunchApi = {
 
   // This endpoint may not exist yet - use safeFetch with fallback
   getTodayServed: (date) =>
-    safeFetch(() => get('/api/lunch/serve/today', { date }), { data: [] }),
+    get('/api/lunch/serve/today', { date }),
 
   getEmployeeServing: (employeeId, date) =>
     safeFetch(() => get(`/api/lunch/serve/employee/${employeeId}`, { date }), null),
@@ -347,7 +357,7 @@ export const lunchApi = {
   // ==========================================================
 
   getMeals: () =>
-    safeFetch(() => get('/api/lunch/meals'), { data: [] }),
+    get('/api/lunch/meals'),
 
   getActiveMeals: () =>
     safeFetch(() => get('/api/lunch/meals/active'), { data: [] }),
@@ -366,7 +376,7 @@ export const lunchApi = {
   // ==========================================================
 
   getSettings: () =>
-    safeFetch(() => get('/api/lunch/settings'), { data: {} }),
+    get('/api/lunch/settings'),
 
   updateSettings: (data) =>
     put('/api/lunch/settings', data),
@@ -382,7 +392,7 @@ export const lunchApi = {
   // ==========================================================
 
   getAllEmployees: () =>
-    safeFetch(() => get('/api/employee'), []),
+    get('/api/employee'),
 
   getEligibleForLunch: () =>
     safeFetch(() => get('/api/lunch/eligible'), { data: [] }),
@@ -423,7 +433,7 @@ export const attendanceService = {
     safeFetch(() => get('/api/attendance'), { data: [] }),
 
   getAttendancesByDate: (date) =>
-    safeFetch(() => get(`/api/attendance/date/${date}`), { data: [] }),
+    get(`/api/attendance/date/${date}`),
 
   // Fetch attendance for every day in a selected week
   getAttendancesForDateRange: async (startDate, endDate) => {

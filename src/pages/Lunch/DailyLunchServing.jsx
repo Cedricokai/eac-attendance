@@ -1,10 +1,11 @@
 // src/pages/Lunch/DailyLunchServing.jsx
 
-import React, {
+import {
   useState,
   useEffect,
   useMemo,
   useCallback,
+  useRef,
 } from 'react';
 
 import { motion, AnimatePresence } from 'framer-motion';
@@ -31,7 +32,8 @@ import {
 import {
   lunchApi,
   attendanceService,
-} from './services/lunchApi';
+} from './Services/lunchApi';
+import { unwrapList, getEmployeeId, assignedMeal as getAssignedMeal, assignmentsByEmployee, isAttendancePresent } from './utils/assignmentDisplay';
 
 // ============================================================
 // LOCATION OPTIONS
@@ -85,17 +87,18 @@ const DailyLunchServing = () => {
     new Date().toISOString().split('T')[0]
   );
 
+  const requestVersion = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
 
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const [dailyStats, setDailyStats] = useState(null);
   const [apiErrors, setApiErrors] = useState({});
 
   // ==========================================================
@@ -137,36 +140,12 @@ const DailyLunchServing = () => {
   const [bulkResults, setBulkResults] = useState([]);
 
   // ==========================================================
-  // FETCH DAILY STATS
-  // ==========================================================
-
-  const fetchDailyStats = useCallback(async () => {
-    try {
-      const result = await lunchApi.getDailyServingStats(date);
-
-      if (result?.data) {
-        setDailyStats(result.data);
-      } else if (result) {
-        setDailyStats(result);
-      } else {
-        setDailyStats(null);
-      }
-    } catch (err) {
-      console.warn(
-        'Daily stats endpoint not available, using fallback:',
-        err.message
-      );
-
-      setDailyStats(null);
-    }
-  }, [date]);
-
-  // ==========================================================
   // FETCH PAGE DATA
   // ==========================================================
 
   const fetchData = useCallback(
     async (showLoading = true) => {
+      const version = ++requestVersion.current;
       if (showLoading) {
         setLoading(true);
       } else {
@@ -174,98 +153,50 @@ const DailyLunchServing = () => {
       }
 
       setError(null);
-      setApiErrors({});
 
       try {
-        const employeeResponse = await lunchApi.getAllEmployees();
+        // These requests are independent. Run them together so daily serving does not
+        // wait for every endpoint in sequence before showing employees.
+        const [employeesResult, attendanceResult, assignmentsResult, servedResult] =
+          await Promise.allSettled([
+            lunchApi.getAllEmployees(),
+            attendanceService.getAttendancesByDate(date),
+            lunchApi.getAssignmentsForDate(date),
+            lunchApi.getTodayServed(date),
+          ]);
 
-        const employeeList = Array.isArray(employeeResponse)
-          ? employeeResponse
-          : employeeResponse?.data || [];
+        if (version !== requestVersion.current) return;
+        const requestResults = [
+          ['employees', employeesResult, setAllEmployees],
+          ['attendance', attendanceResult, setAttendanceRecords],
+          ['assignments', assignmentsResult, setAssignments],
+          ['served', servedResult, setServedRecords],
+        ];
 
-        setAllEmployees(employeeList);
-
-        try {
-          const attendanceResponse =
-            await attendanceService.getAttendancesByDate(date);
-
-          const attendanceList = Array.isArray(attendanceResponse)
-            ? attendanceResponse
-            : attendanceResponse?.data || [];
-
-          setAttendanceRecords(attendanceList);
-        } catch (attendanceError) {
-          console.warn(
-            'Attendance fetch failed:',
-            attendanceError.message
-          );
-
-          setApiErrors((previous) => ({
-            ...previous,
-            attendance: true,
-          }));
-
-          setAttendanceRecords([]);
-        }
-
-        try {
-          const assignmentResponse =
-            await lunchApi.getAssignmentsForDate(date);
-
-          const assignmentList = Array.isArray(assignmentResponse)
-            ? assignmentResponse
-            : assignmentResponse?.data || [];
-
-          setAssignments(assignmentList);
-        } catch (assignmentError) {
-          console.warn(
-            'Assignments fetch failed:',
-            assignmentError.message
-          );
-
-          setApiErrors((previous) => ({
-            ...previous,
-            assignments: true,
-          }));
-
-          setAssignments([]);
-        }
-
-        try {
-          const servedResponse =
-            await lunchApi.getTodayServed(date);
-
-          const servedList = Array.isArray(servedResponse)
-            ? servedResponse
-            : servedResponse?.data || [];
-
-          setServedRecords(servedList);
-        } catch (servedError) {
-          console.warn(
-            'Served records fetch failed:',
-            servedError.message
-          );
-
-          setApiErrors((previous) => ({
-            ...previous,
-            served: true,
-          }));
-
-          setServedRecords([]);
-        }
-
-        await fetchDailyStats();
+        const failedRequests = {};
+        requestResults.forEach(([key, result, setData]) => {
+          if (result.status === 'fulfilled') {
+            setData(unwrapList(result.value));
+          } else {
+            console.warn(`${key} fetch failed:`, result.reason);
+            failedRequests[key] = true;
+            setData([]);
+          }
+        });
+        setApiErrors(failedRequests);
 
         setLastUpdated(new Date().toLocaleTimeString());
       } catch (fetchError) {
         console.error(fetchError);
         setError('Failed to load data. Please refresh.');
       } finally {
+        if (version === requestVersion.current) {
         setLoading(false);
         setIsRefreshing(false);
+        }
       }
     },
-    [date, fetchDailyStats]
+    [date]
   );
 
   // ==========================================================
@@ -283,7 +214,7 @@ const DailyLunchServing = () => {
       }, 30000);
     }
 
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); requestVersion.current++; };
   }, [date, autoRefresh, fetchData]);
 
   // Clear selected employees whenever the date changes.
@@ -299,30 +230,20 @@ const DailyLunchServing = () => {
 
   const employeeData = useMemo(() => {
     const attendanceMap = {};
-    const assignmentMap = {};
+    const assignmentMap = assignmentsByEmployee(assignments, date);
     const servedMap = {};
 
     attendanceRecords.forEach((attendance) => {
-      const employeeId =
-        attendance.employee?.id || attendance.employeeId;
+      const employeeId = getEmployeeId(attendance);
 
       if (employeeId) {
-        attendanceMap[String(employeeId)] = attendance;
+        if (!attendanceMap[String(employeeId)] || isAttendancePresent(attendance)) attendanceMap[String(employeeId)] = attendance;
       }
     });
 
-    assignments.forEach((assignment) => {
-      const employeeId =
-        assignment.employee?.id || assignment.employeeId;
-
-      if (employeeId) {
-        assignmentMap[String(employeeId)] = assignment;
-      }
-    });
 
     servedRecords.forEach((servedRecord) => {
-      const employeeId =
-        servedRecord.employee?.id || servedRecord.employeeId;
+      const employeeId = getEmployeeId(servedRecord);
 
       if (employeeId) {
         servedMap[String(employeeId)] = servedRecord;
@@ -339,31 +260,22 @@ const DailyLunchServing = () => {
       const attendanceStatus =
         attendance?.status || 'Absent';
 
-      const hasCheckIn =
-        attendance?.checkIn &&
-        attendance.checkIn !== '--:--' &&
-        attendance.checkIn !== null;
+      const isPresent = isAttendancePresent(attendance);
 
-      const isPresent =
-        Boolean(hasCheckIn) ||
-        attendanceStatus === 'Present' ||
-        attendanceStatus === 'Late' ||
-        attendanceStatus === 'Holiday Present' ||
-        attendanceStatus === 'Weekend Present';
-
-      let mealName = null;
-
-      if (assignment?.meal) {
-        mealName =
-          typeof assignment.meal === 'object'
-            ? assignment.meal.name
-            : assignment.meal;
-      }
+      const assignedMeal = getAssignedMeal(assignment);
+      const mealName = assignedMeal.name;
 
       const canServe =
+        Object.keys(apiErrors).length === 0 &&
         isPresent &&
+        assignedMeal.id != null &&
         Boolean(mealName) &&
         !servedRecord;
+
+      const category =
+        (typeof employee.category === 'object'
+          ? employee.category?.name
+          : employee.category) || 'Uncategorized';
 
       return {
         id: employee.id,
@@ -378,6 +290,7 @@ const DailyLunchServing = () => {
           employee.department ||
           employee.category?.name ||
           'N/A',
+        category,
 
         checkIn: attendance?.checkIn || '--:--',
         attendanceStatus,
@@ -386,9 +299,7 @@ const DailyLunchServing = () => {
 
         mealAssigned: mealName,
         mealId:
-          assignment?.meal?.id ||
-          assignment?.mealId ||
-          null,
+          assignedMeal.id,
 
         isServed: Boolean(servedRecord),
         servedTime: servedRecord?.servingTime || null,
@@ -403,14 +314,34 @@ const DailyLunchServing = () => {
     attendanceRecords,
     assignments,
     servedRecords,
+    date,
+    apiErrors,
   ]);
 
   // ==========================================================
   // FILTER DATA
   // ==========================================================
 
+  const categories = useMemo(
+    () =>
+      Array.from(
+        new Set(employeeData.map((employee) => employee.category))
+      ).sort((first, second) => first.localeCompare(second)),
+    [employeeData]
+  );
+
+  const categoryFilteredData = useMemo(() => {
+    if (filterCategory === 'all') {
+      return employeeData;
+    }
+
+    return employeeData.filter(
+      (employee) => employee.category === filterCategory
+    );
+  }, [employeeData, filterCategory]);
+
   const filteredData = useMemo(() => {
-    let data = employeeData;
+    let data = categoryFilteredData;
 
     if (search.trim()) {
       const searchTerm = search.toLowerCase().trim();
@@ -424,6 +355,9 @@ const DailyLunchServing = () => {
             .toLowerCase()
             .includes(searchTerm) ||
           employee.department
+            .toLowerCase()
+            .includes(searchTerm) ||
+          employee.category
             .toLowerCase()
             .includes(searchTerm)
       );
@@ -463,7 +397,7 @@ const DailyLunchServing = () => {
     }
 
     return data;
-  }, [employeeData, search, filterStatus]);
+  }, [categoryFilteredData, search, filterStatus]);
 
   // Employees currently visible and eligible to be served.
   const visibleEligibleEmployees = useMemo(
@@ -544,23 +478,23 @@ const DailyLunchServing = () => {
   // SUMMARY STATISTICS
   // ==========================================================
 
-  const totalEmployees = employeeData.length;
+  const totalEmployees = categoryFilteredData.length;
 
-  const presentCount = employeeData.filter(
+  const presentCount = categoryFilteredData.filter(
     (employee) => employee.isPresent
   ).length;
 
   const absentCount = totalEmployees - presentCount;
 
-  const servedCount = employeeData.filter(
+  const servedCount = categoryFilteredData.filter(
     (employee) => employee.isServed
   ).length;
 
-  const assignedCount = employeeData.filter(
+  const assignedCount = categoryFilteredData.filter(
     (employee) => employee.mealAssigned
   ).length;
 
-  const pendingCount = employeeData.filter(
+  const pendingCount = categoryFilteredData.filter(
     (employee) => employee.canServe
   ).length;
 
@@ -1149,13 +1083,34 @@ const DailyLunchServing = () => {
 
             <input
               type="text"
-              placeholder="Search employee name, ID or department"
+              placeholder="Search employee name, ID, department or category"
               value={search}
               onChange={(event) =>
                 setSearch(event.target.value)
               }
               className="h-11 w-full rounded-xl border border-gray-300 bg-white pl-10 pr-4 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
+          </div>
+
+          <div className="relative min-w-[230px]">
+            <select
+              value={filterCategory}
+              onChange={(event) => {
+                setFilterCategory(event.target.value);
+                setSelectedEmployeeIds([]);
+              }}
+              aria-label="Filter employees by category"
+              className="h-11 w-full appearance-none rounded-xl border border-gray-300 bg-white px-4 pr-10 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            >
+              <option value="all">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+
+            <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           </div>
 
           <div className="relative min-w-[230px]">

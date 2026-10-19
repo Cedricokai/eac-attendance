@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSettings } from "./context/SettingsContext";
 import { Link, useLocation } from "react-router-dom";
 import { 
   ChevronDown, 
@@ -58,9 +59,11 @@ import {
   Home as HomeIcon,
   UserCircle,
   PieChart
+  ,Stethoscope
 } from "lucide-react";
 
 function MainSidebar({ isCollapsed = false }) {
+  const { settings } = useSettings();
   const location = useLocation();
   const [accessiblePages, setAccessiblePages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +79,7 @@ function MainSidebar({ isCollapsed = false }) {
     transport: false,
     hr: false,
     admin: false
+    ,medical: false
   });
 
   const getApiBaseUrl = () => {
@@ -110,6 +114,7 @@ function MainSidebar({ isCollapsed = false }) {
       transport: location.pathname.startsWith("/transport"),
       hr: location.pathname.startsWith("/hr") || location.pathname === "/leave" || location.pathname === "/leaveRequestForm",
       admin: location.pathname.startsWith("/userpage") || location.pathname === "/pagePermissionManagement" || location.pathname === "/centralizedDashboard" || location.pathname === "/settingspage"
+      ,medical: location.pathname.startsWith("/medical-visits") || location.pathname === "/hospitals" || location.pathname === "/my-medical-visits"
     });
   }, [location.pathname]);
 
@@ -161,6 +166,7 @@ function MainSidebar({ isCollapsed = false }) {
           !page.path.includes("/signin") &&
           !page.path.includes("/signup") &&
           !page.path.includes("/register") &&
+          !page.path.includes("/actions/") &&
           page.name &&
           !page.name.toLowerCase().includes("signin") &&
           !page.name.toLowerCase().includes("signup") &&
@@ -200,7 +206,8 @@ function MainSidebar({ isCollapsed = false }) {
 
   // Helper function to get pages by module
   const getPagesByModule = (moduleName) => {
-    return accessiblePages.filter(page => page.module === moduleName);
+    // Project Management has its own permission-controlled navigation entry.
+    return accessiblePages.filter(page => page.module === moduleName && page.path !== "/JobsManagement");
   };
 
   // Get icon component based on icon name or path
@@ -223,6 +230,8 @@ function MainSidebar({ isCollapsed = false }) {
     if (path === "/settingspage" || name.includes("setting")) return <Settings size={16} />;
     if (path === "/attendanceDashboard" || path === "/attendanceDashboard" || name.includes("dashboard")) return <Home size={16} />;
     if (path === "/loanManagementDashboard" || name.includes("loan")) return <DollarSign size={16} />;
+    if (path === "/pettyCash" || name.includes("petty cash")) return <CreditCard size={16} />;
+    if (path.includes("medical") || path === "/hospitals" || name.includes("hospital")) return <Stethoscope size={16} />;
     
     return <FileText size={16} />;
   };
@@ -230,6 +239,8 @@ function MainSidebar({ isCollapsed = false }) {
   // Define menu structure based on accessible pages
   const getMenuStructure = () => {
     const menuItems = [];
+
+
     
     // Dashboard - always show if accessible
     if (hasPageAccess("/attendanceDashboard") || hasPageAccess("/attendanceDashboard") || userRole === "admin") {
@@ -241,40 +252,59 @@ function MainSidebar({ isCollapsed = false }) {
       });
     }
     
+    if (hasPageAccess("/JobsManagement")) {
+      menuItems.push({
+        type: "link",
+        to: "/JobsManagement",
+        icon: <Briefcase size={18} />,
+        label: "Project Management"
+      });
+    }
+
     // Employees Section
-    if (hasModuleAccess("HR") || hasPageAccess("/employee") || userRole === "admin") {
+    if (hasModuleAccess("HR") || hasPageAccess("/employee") || hasPageAccess("/employee-issued-items") || userRole === "admin") {
       const employeePages = getPagesByModule("HR").filter(p => p.path === "/employee" || p.name?.toLowerCase().includes("employee"));
       menuItems.push({
         type: "dropdown",
         id: "employees",
         icon: <Users size={18} />,
         label: "Employees",
-        items: employeePages.length > 0 ? employeePages.map(page => ({
+        items: [
+          ...(hasPageAccess("/employee") ? [
+            { to: "/employee", icon: <User size={16} />, label: "Employee List" }
+          ] : []),
+          ...(hasPageAccess("/employee-issued-items") ? [
+            { to: "/employee-issued-items", icon: <Package size={16} />, label: "Employee Issued Items" }
+          ] : []),
+          ...employeePages.filter(page => page.path !== "/employee" && page.path !== "/employee-issued-items").map(page => ({
           to: page.path,
           icon: getIconForPage(page),
-          label: page.name
-        })) : [
-          { to: "/employee", icon: <User size={16} />, label: "Employee List" }
+          label: page.path === "/JobsManagement" ? "Project Management" : page.name
+          }))
         ]
       });
     }
     
     // Attendance Section
-    if (hasModuleAccess("ATTENDANCE") || hasPageAccess("/attendance") || hasPageAccess("/timesheets") || hasPageAccess("/overtime") || userRole === "admin") {
+    if (hasModuleAccess("ATTENDANCE") || hasPageAccess("/attendance") || hasPageAccess("/attendanceRequests") || hasPageAccess("/timesheets") || hasPageAccess("/overtime") || userRole === "admin") {
       const attendancePages = getPagesByModule("ATTENDANCE");
       menuItems.push({
         type: "dropdown",
         id: "attendance",
         icon: <CalendarCheck size={18} />,
         label: "Attendance",
-        items: attendancePages.length > 0 ? attendancePages.map(page => ({
-          to: page.path,
-          icon: getIconForPage(page),
-          label: page.name
-        })) : [
+        items: [
+          ...(attendancePages.length > 0 ? attendancePages.map(page => ({
+            to: page.path,
+            icon: getIconForPage(page),
+            label: page.path === "/JobsManagement" ? "Project Management" : page.name
+          })) : [
           { to: "/attendance", icon: <ClipboardList size={16} />, label: "Daily Log" },
+          { to: "/attendanceRequests", icon: <FileCheck size={16} />, label: "Attendance Requests" },
           { to: "/timesheets", icon: <Clock size={16} />, label: "Timesheets" },
           { to: "/overtime", icon: <Clock size={16} />, label: "Overtime" }
+          ]),
+          ...(userRole === "admin" ? [{ to: "/weekly-attendance-email", icon: <FileText size={16} />, label: "Send Attendance Reports" }] : [])
         ]
       });
     }
@@ -287,6 +317,15 @@ function MainSidebar({ isCollapsed = false }) {
         icon: <Calendar size={18} />,
         label: "Leave Management"
       });
+    }
+
+    // Payroll Section - ADDED PAYROLL REPORTS LINK
+    if (hasModuleAccess("MEDICAL") || hasPageAccess("/medical-visits") || hasPageAccess("/my-medical-visits") || userRole === "admin" || userRole === "hr") {
+      const medicalItems = [];
+      if (userRole === "admin" || userRole === "hr" || hasPageAccess("/medical-visits")) medicalItems.push({ to: "/medical-visits", icon: <FileCheck size={16} />, label: "HR Review" });
+      if (userRole === "admin" || hasPageAccess("/hospitals")) medicalItems.push({ to: "/hospitals", icon: <Building size={16} />, label: "Hospital Partners" });
+      medicalItems.push({ to: "/my-medical-visits", icon: <Stethoscope size={16} />, label: "My Medical Visits" });
+      menuItems.push({ type: "dropdown", id: "medical", icon: <Stethoscope size={18} />, label: "Medical / Excuse Duty", items: medicalItems });
     }
 
     // Payroll Section - ADDED PAYROLL REPORTS LINK
@@ -330,7 +369,7 @@ function MainSidebar({ isCollapsed = false }) {
             payrollItems.push({
               to: page.path,
               icon: getIconForPage(page),
-              label: page.name
+              label: page.path === "/JobsManagement" ? "Project Management" : page.name
             });
           }
         });
@@ -365,6 +404,19 @@ function MainSidebar({ isCollapsed = false }) {
         to: "/loanManagementDashboard",
         icon: <DollarSign size={18} />,
         label: "Loan Management"
+      });
+    }
+
+    if (hasPageAccess("/accountsFundingReview") || ["admin", "accountant", "accounts", "finance"].includes(userRole)) {
+      menuItems.push({ type: "link", to: "/accountsFundingReview", icon: <ClipboardList size={18} />, label: "Accounts Funding Review" });
+    }
+    // Petty Cash
+    if (hasPageAccess("/pettyCash") || userRole === "admin" || userRole === "accountant") {
+      menuItems.push({
+        type: "link",
+        to: "/pettyCash",
+        icon: <CreditCard size={18} />,
+        label: "Petty Cash"
       });
     }
     
@@ -479,7 +531,9 @@ function MainSidebar({ isCollapsed = false }) {
     <aside className="fixed h-full w-64 bg-gray-800 text-gray-100 p-4 flex flex-col z-10">
       {/* Logo/Header */}
       <div className="mb-8 mt-4 px-2">
-        <h1 className="text-xl font-bold text-white">EAC Electrical</h1>
+        <h1 className="truncate text-xl font-bold text-white">
+          {settings.companyName || "EAC Electrical"}
+        </h1>
         <p className="text-xs text-gray-400">Employee Management</p>
       </div>
 

@@ -22,7 +22,8 @@ import {
   EyeIcon,
   XCircleIcon
 } from '@heroicons/react/24/outline';
-import { lunchApi } from './services/lunchApi';
+import { lunchApi } from './Services/lunchApi';
+import { changedMealDays, mealDayEditable, mealDate, formatMealDeadline } from './utils/mealSelection';
 
 // ===== IMPORT LOCAL IMAGES - FIXED CASE SENSITIVITY =====
 import AmpesiImage from './assets/Ampesi.png';
@@ -35,15 +36,6 @@ import PlainRiceImage from './assets/PLAIN RICE.png';
 import RedRedImage from './assets/REDRED.png';
 import RiceBallsImage from './assets/RICE BALLS.png';
 import waakyeImage from './assets/waakye.png';
-
-// ===== API BASE URL =====
-const getApiBaseUrl = () => {
-  const hostname = window.location.hostname;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:8080';
-  if (hostname.startsWith('192.168.')) return import.meta.env.VITE_API_BASE_URL_LOCAL;
-  return import.meta.env.VITE_API_BASE_URL_PUBLIC;
-};
-const API_BASE_URL = getApiBaseUrl();
 
 // ===== CONSTANTS =====
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
@@ -305,6 +297,7 @@ const ProgressBar = ({ selected, total }) => {
 
 // ===== SUBCOMPONENT: Meal Day Card =====
 const MealDayCard = ({
+  deadline,
   day,
   date,
   editable,
@@ -375,6 +368,7 @@ const MealDayCard = ({
             <div>
               <p className="text-sm font-semibold text-gray-800">{DAY_LABELS[day]}</p>
               <p className="text-xs text-gray-500">{date}</p>
+              <p className="mt-1 text-xs text-gray-500">Changes close: {formatMealDeadline(deadline)} (Ghana)</p>
             </div>
             <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.color}`}>
               {statusStyle.label}
@@ -382,7 +376,7 @@ const MealDayCard = ({
           </div>
 
           <div className="mt-3">
-            {mealOptions && mealOptions.length === 2 ? (
+            {mealOptions && mealOptions.length > 0 ? (
               <div className="flex flex-wrap gap-3">
                 {mealOptions.map(meal => {
                   const mealImage = getMealImage(meal.name);
@@ -390,8 +384,9 @@ const MealDayCard = ({
                     <button
                       key={meal.id}
                       type="button"
+                      disabled={!editable || meal.assignedOnly}
                       onClick={() => {
-                        if (editable) {
+                        if (editable && !meal.assignedOnly) {
                           onSelect(day, meal.id);
                         }
                       }}
@@ -453,7 +448,7 @@ const MealDayCard = ({
 };
 
 // ===== SUBCOMPONENT: Sidebar Guidelines =====
-const GuidelinesSidebar = () => {
+const GuidelinesSidebar = ({ policy }) => {
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -468,7 +463,7 @@ const GuidelinesSidebar = () => {
         <ul className="mt-4 space-y-3 text-sm">
           <li className="flex items-start gap-2 text-gray-600">
             <ClockIcon className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-            <span>Meals can be edited until <strong>8:00 AM</strong> on the day.</span>
+            <span>Changes close at <strong>{policy?.cutoffTime?.slice(0, 5) || "—"}</strong> {policy?.daysBefore === 1 ? "the day before the meal" : "on the meal day"} (Ghana time).</span>
           </li>
           <li className="flex items-start gap-2 text-gray-600">
             <LockClosedIcon className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
@@ -476,7 +471,7 @@ const GuidelinesSidebar = () => {
           </li>
           <li className="flex items-start gap-2 text-gray-600">
             <CalendarIcon className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-            <span>Future days are always editable.</span>
+            <span>Upcoming meals can be changed before their displayed deadlines.</span>
           </li>
           <li className="flex items-start gap-2 text-gray-600">
             <QuestionMarkCircleIcon className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -531,6 +526,16 @@ const EmployeeMealSelection = () => {
   const [allMeals, setAllMeals] = useState([]);
   const [dailyMealOptions, setDailyMealOptions] = useState({});
   const [selections, setSelections] = useState({});
+  const [savedSelections, setSavedSelections] = useState({});
+  const [deadlines, setDeadlines] = useState({});
+  const [policy, setPolicy] = useState(null);
+  const [clockOffset, setClockOffset] = useState(0);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const [refreshIndex, setRefreshIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [weekStart, setWeekStart] = useState(getMondayOfCurrentWeek());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -549,143 +554,55 @@ const EmployeeMealSelection = () => {
     return monday.toISOString().split('T')[0];
   }
 
-  const getDateForDay = (startDate, dayName) => {
-    const index = DAYS.indexOf(dayName);
-    const date = new Date(startDate);
-    date.setDate(date.getDate() + index);
-    return date.toISOString().split('T')[0];
+  const getDateForDay = mealDate;
+  const isDayEditable = day => mealDayEditable(mealDate(weekStart, day), deadlines[day], clockNow + clockOffset, policy);
+  const pendingChanges = changedMealDays(savedSelections, selections);
+
+  const applyWeek = data => {
+    setEmployee(data.employee);
+    setAllMeals(data.meals || []);
+    setDailyMealOptions(data.options || {});
+    setSelections(data.days || {});
+    setSavedSelections(data.days || {});
+    setDeadlines(data.deadlines || {});
+    setPolicy(data.policy);
+    setClockOffset(Date.parse(data.serverNow) - Date.now());
+    setClockNow(Date.now());
   };
 
-  const isDayEditable = (day) => {
-    const date = getDateForDay(weekStart, day);
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    if (date < today) return false;
-    if (date === today) {
-      if (hours > 8 || (hours === 8 && minutes > 0)) return false;
-      return true;
-    }
-    return true;
-  };
-
-  // Data fetching with employee ID from user data
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const token = localStorage.getItem('jwtToken');
-        if (!token) throw new Error('No token found');
-
-        const userRes = await fetch(`${API_BASE_URL}/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
-        if (!userRes.ok) {
-          const text = await userRes.text();
-          throw new Error(`Failed to fetch user: ${userRes.status} - ${text}`);
-        }
-
-        const userData = await userRes.json();
-        console.log('🔍 User data from /auth/me:', userData);
-
-        let employeeData = userData.employee;
-        if (!employeeData) {
-          console.warn('⚠️ No employee linked to this account. Creating placeholder.');
-          employeeData = {
-            id: userData.id || 1,
-            firstName: userData.name || userData.username || 'User',
-            lastName: '',
-            employeeId: userData.employeeId || 'N/A',
-            department: userData.department || 'N/A',
-            position: userData.position || 'N/A'
-          };
-          setError('No employee profile linked. Using placeholder for testing.');
-        }
-        setEmployee(employeeData);
-
-        const mealsRes = await lunchApi.getMeals();
-        const mealsArray = Array.isArray(mealsRes) ? mealsRes : (mealsRes.data || []);
-        setAllMeals(mealsArray);
-
-        const dailyRes = await lunchApi.getDailyMeals();
-        const dailyData = dailyRes || {};
-        console.log('📋 Daily meal options:', dailyData);
-        
-        const transformedDailyOptions = {};
-        DAYS.forEach(day => {
-          const dayData = dailyData[day] || { meal1Id: null, meal2Id: null };
-          const options = [];
-          if (dayData.meal1Id) {
-            const meal = mealsArray.find(m => m.id === dayData.meal1Id);
-            if (meal) options.push(meal);
-          }
-          if (dayData.meal2Id) {
-            const meal = mealsArray.find(m => m.id === dayData.meal2Id);
-            if (meal) options.push(meal);
-          }
-          transformedDailyOptions[day] = options;
-        });
-        setDailyMealOptions(transformedDailyOptions);
-
-        const employeeId = employeeData.id;
-        console.log('📋 Fetching assignments for employee ID:', employeeId);
-        
-        const assignRes = await lunchApi.getEmployeeWeeklyAssignment(employeeId, weekStart);
-        console.log('📋 Weekly assignment response:', assignRes);
-        
-        const days = assignRes?.days || {};
-        console.log('📋 Days from response:', days);
-        setSelections(days);
-        
-      } catch (err) {
-        console.error('❌ Error fetching data:', err);
-        setError(err.message || 'Failed to load data. Please refresh.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [weekStart]);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    lunchApi.getMyWeeklyAssignment(weekStart)
+      .then(data => { if (!cancelled) applyWeek(data); })
+      .catch(err => { if (!cancelled) { setError(err.message); setEmployee(null); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [weekStart, refreshIndex]);
 
   const handleSelect = (day, mealId) => {
-    if (!isDayEditable(day)) return;
+    if (!isDayEditable(day) || saving || loading) return;
     setSelections(prev => ({ ...prev, [day]: mealId }));
   };
 
   const handleSave = async () => {
-    if (!employee) {
-      setError('Employee data not loaded. Please refresh.');
-      return;
-    }
-    
+    if (!employee || saving || !Object.keys(pendingChanges).length) return;
     setSaving(true);
     setError(null);
     setSuccess(false);
+    let persisted = false;
     try {
-      const payload = {
-        employeeId: employee.id,
-        startDate: weekStart,
-        days: selections,
-      };
-      await lunchApi.updateMyWeeklyAssignment(payload);
+      await lunchApi.updateMyWeeklyAssignment({ startDate: weekStart, days: pendingChanges });
+      persisted = true;
+      applyWeek(await lunchApi.getMyWeeklyAssignment(weekStart));
       setSuccess(true);
-      setToast({ type: 'success', message: 'Meals saved successfully!' });
-      setTimeout(() => {
-        setSuccess(false);
-        setToast(null);
-      }, 4000);
+      setToast({ type: 'success', message: 'Meals saved. Kitchen planning totals have been updated.' });
     } catch (err) {
-      console.error(err);
-      let msg = 'Failed to save. Please try again.';
-      if (err.message && err.message.includes('8:00 AM')) {
-        msg = 'You cannot change today\'s meal after 8:00 AM.';
-      }
-      setError(msg);
-      setToast({ type: 'error', message: msg });
-      setTimeout(() => setToast(null), 4000);
+      const message = persisted ? 'Meals were saved, but could not be reloaded. Please refresh.' : err.message;
+      setError(message);
+      setToast({ type: 'error', message });
+      if (err.status === 409) setRefreshIndex(value => value + 1);
     } finally {
       setSaving(false);
     }
@@ -708,11 +625,13 @@ const EmployeeMealSelection = () => {
   const dayData = useMemo(() => {
     return DAYS.map(day => {
       const date = getDateForDay(weekStart, day);
-      const editable = isDayEditable(day);
+      const editable = isDayEditable(day) && !saving && !loading;
       const selectedMealId = selections[day] || null;
-      const options = dailyMealOptions[day] || [];
+      const options = [...(dailyMealOptions[day] || [])];
+      const assignedMeal = allMeals.find(meal => meal.id === selectedMealId);
+      if (assignedMeal && !options.some(meal => meal.id === assignedMeal.id)) options.push({ ...assignedMeal, assignedOnly: true });
       let status = 'future';
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date(clockNow + clockOffset).toISOString().split('T')[0];
       if (date < today) status = 'past';
       else if (date === today) status = 'today';
       else if (editable) status = 'editable';
@@ -720,14 +639,16 @@ const EmployeeMealSelection = () => {
       if (!editable && date === today) status = 'locked';
       return { day, date, editable, selectedMealId, options, status };
     });
-  }, [weekStart, selections, dailyMealOptions]);
+  }, [weekStart, selections, dailyMealOptions, allMeals, deadlines, policy, clockNow, clockOffset, saving, loading]);
 
-  const handleWeekChange = (newStart) => {
+  const handleWeekChange = async (newStart) => {
+    if (saving) return;
+    if (Object.keys(pendingChanges).length && !await window.appConfirm('Discard your unsaved meal changes and change week?')) return;
     setWeekStart(newStart);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50/50 p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50/50 p-2 sm:p-4 xl:p-6">
       <div className="max-w-7xl mx-auto">
         <AnimatePresence>
           {toast && (
@@ -739,6 +660,13 @@ const EmployeeMealSelection = () => {
           )}
         </AnimatePresence>
 
+        <div className="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-indigo-900">
+            <p className="font-semibold">Your saved weekly meals</p>
+            <p>{policy?.frequency === 'MONTHLY' ? `Meal changes open on day ${policy.monthlyDay} of each month until ${policy.cutoffTime} Ghana time (last day in shorter months). ` : ''}Meals assigned by your administrator are selected by default. Changes close at {policy?.cutoffTime?.slice(0, 5) || '—'} {policy?.daysBefore === 1 ? 'the day before' : 'on the meal day'} (Ghana time).</p>
+          </div>
+          <button type="button" disabled={saving || loading} onClick={() => setRefreshIndex(value => value + 1)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-indigo-700 disabled:opacity-50">Refresh saved meals</button>
+        </div>
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
           <div className="xl:col-span-3 space-y-6">
             <motion.div
@@ -830,6 +758,7 @@ const EmployeeMealSelection = () => {
               <div className="space-y-4">
                 {dayData.map(({ day, date, editable, selectedMealId, options, status }) => (
                   <MealDayCard
+                    deadline={deadlines[day]}
                     key={day}
                     day={day}
                     date={date}
@@ -851,7 +780,7 @@ const EmployeeMealSelection = () => {
             >
               <button
                 onClick={handleSave}
-                disabled={saving || !employee}
+                disabled={saving || loading || !employee || !Object.keys(pendingChanges).length}
                 className="w-full flex items-center justify-center gap-3 py-3.5 px-6 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-2xl shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? (
@@ -866,13 +795,13 @@ const EmployeeMealSelection = () => {
                 )}
               </button>
               <p className="text-xs text-center text-gray-400 mt-2">
-                Changes are saved to your weekly meal plan.
+                Your assigned meals appear by default. Save only when you want to change a meal.
               </p>
             </motion.div>
           </div>
 
           <div className="xl:col-span-1 hidden xl:block">
-            <GuidelinesSidebar />
+            <GuidelinesSidebar policy={policy} />
           </div>
         </div>
       </div>

@@ -41,16 +41,16 @@ function JobDetailView() {
 
         if (!response.ok) {
           if (response.status === 404) {
-            throw new Error('Job not found');
+            throw new Error('Project not found');
           }
-          throw new Error(`Failed to fetch job: ${response.status}`);
+          throw new Error(`Failed to fetch project: ${response.status}`);
         }
 
         const data = await response.json();
         setJobData(data);
         setError(null);
       } catch (err) {
-        console.error('Error fetching job:', err);
+        console.error('Error fetching project:', err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -66,7 +66,7 @@ function JobDetailView() {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <span className="ml-3 text-lg">Loading job details...</span>
+        <span className="ml-3 text-lg">Loading project details...</span>
       </div>
     );
   }
@@ -79,7 +79,7 @@ function JobDetailView() {
           onClick={() => navigate('/JobsManagement')}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
-          Go to Jobs Management
+          Go to Project Management
         </button>
       </div>
     );

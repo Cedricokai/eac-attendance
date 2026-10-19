@@ -1,3 +1,4 @@
+import LeavePageHeader from './LeavePageHeader';
 import { useState, useEffect } from "react";
 
 const HRDashboard = () => {
@@ -125,21 +126,13 @@ const HRDashboard = () => {
 };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="leave-page">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">
-            HR Leave Management Dashboard
-          </h1>
-          <p className="text-gray-600">Final review of planner-approved leave requests</p>
-          <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg inline-block mt-4">
-            <span className="font-bold">{leaveRequests.length}</span> Pending for HR Review
-          </div>
-        </div>
+        <LeavePageHeader role="HR" title="HR leave approvals" description="Complete the final review of leave requests approved by the planner." count={leaveRequests.length} loading={loading} />
 
         {/* Table */}
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+        <div className="leave-table-panel">
+          <div className="leave-table-heading"><h2>Leave requests</h2><p>Review request details and feedback before making a decision.</p></div>
           {loading ? (
             <div className="p-8 text-center">Loading leave requests...</div>
           ) : leaveRequests.length === 0 ? (
@@ -167,7 +160,7 @@ const HRDashboard = () => {
                     <td className="px-6 py-4 text-sm text-gray-600">{request.supervisorFeedback || "No feedback"}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{request.plannerFeedback || "No feedback"}</td>
                     <td className="px-6 py-4">
-                      <button onClick={() => openRequestDetails(request)} className="text-blue-600 hover:text-blue-900">Review</button>
+                      <button onClick={() => openRequestDetails(request)} className="leave-review-button">Review</button>
                     </td>
                   </tr>
                 ))}
@@ -178,8 +171,8 @@ const HRDashboard = () => {
 
         {/* Modal */}
         {isModalOpen && selectedRequest && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full p-6">
+          <div className="leave-dialog-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="leave-dialog bg-white shadow-xl max-w-3xl w-full p-6">
               <h2 className="text-xl font-bold mb-4">HR Final Review</h2>
               
               <div className="space-y-3 mb-4">
@@ -194,7 +187,10 @@ const HRDashboard = () => {
                 )}
               </div>
 
+              <label htmlFor="hr-leave-notes" className="block text-sm font-semibold text-slate-700 mt-6">Decision feedback</label>
+              <p className="text-xs text-slate-500 mt-1">Include a reason when rejecting this request.</p>
               <textarea
+                id="hr-leave-notes"
                 value={hrNotes}
                 onChange={(e) => setHrNotes(e.target.value)}
                 placeholder="HR feedback (required if rejecting)"

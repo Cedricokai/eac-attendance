@@ -1,11 +1,45 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import PayrollHoursReview from '../../../components/PayrollHoursReview';
+import { payrollRateReview } from '../../../utils/payrollRates';
+import { loadPayrollOvertimeSplit } from '../../../utils/payrollOvertimeSplit';
 import { Link, useLocation } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
 import * as XLSX from "xlsx";
 import Header from "../../../components/Header";
+import { CheckBadgeIcon } from "@heroicons/react/24/outline";
+
+const countWeekdays = (startValue, endValue) => {
+  if (!startValue || !endValue) return null;
+  const start = new Date(`${String(startValue).slice(0, 10)}T00:00:00`);
+  const end = new Date(`${String(endValue).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return null;
+  let weekdays = 0;
+  for (const date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+    if (date.getDay() !== 0 && date.getDay() !== 6) weekdays += 1;
+  }
+  return weekdays;
+};
+
+const getWeekdaysForPayrollRecord = (record, periods, selectedPeriodId) => {
+  const selected = periods.find((period) => String(period.id) === String(selectedPeriodId));
+  const period = record.period || selected || {};
+  return countWeekdays(period.startDate || record.periodStart, period.endDate || record.periodEnd) ?? record.totalDaysInPeriod ?? 0;
+};
+
+const getLeaveDays = (record, standardHours = 8) => {
+  const savedDays = Number(record.leaveDays || 0);
+  if (savedDays > 0) return savedDays;
+  const leaveHours = Number(record.leaveHours || 0);
+  const hoursPerDay = Number(record.standardWorkHours || record.employee?.standardWorkHours || standardHours || 8);
+  return leaveHours > 0 && hoursPerDay > 0 ? Number((leaveHours / hoursPerDay).toFixed(2)) : 0;
+};
 
 function Payroll() {
   const [payrollPeriods, setPayrollPeriods] = useState([]);
+  const [payrollProjects, setPayrollProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectLoadError, setProjectLoadError] = useState('');
+  const [generationProjectEmployeeIds, setGenerationProjectEmployeeIds] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [payrollRecords, setPayrollRecords] = useState([]);
   const [newPeriod, setNewPeriod] = useState({ 
@@ -13,6 +47,8 @@ function Payroll() {
     startDate: "", 
     endDate: "",
     category: "",
+    periodType: "CATEGORY",
+    projectId: "",
     convertExcessToOvertime: true 
   });
   const [activeTab, setActiveTab] = useState('credits');
@@ -21,8 +57,34 @@ const [hasActiveLoans, setHasActiveLoans] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [showProcessedPayrollModal, setShowProcessedPayrollModal] = useState(false);
+  const [rateReview, setRateReview] = useState(null);
+  const [hoursReview, setHoursReview] = useState(null);
+  const [generationPeriod, setGenerationPeriod] = useState(null);
+  const [generationScope, setGenerationScope] = useState('ALL');
+  const [generationEmployeeId, setGenerationEmployeeId] = useState('');
+  const [rateDetailsRecord, setRateDetailsRecord] = useState(null);
+  const [rateDetailsOvertime, setRateDetailsOvertime] = useState(null);
+
+  const generationRequest = useRef(null);
+  const generationSubmitting = useRef(false);
+  const cancelGeneration = () => {
+    if (generationSubmitting.current) return;
+    generationRequest.current = null;
+    setRateReview(null);
+    setHoursReview(null);
+    setGenerationPeriod(null);
+    setShowCreditSelectionModal(false);
+  };
   const [summary, setSummary] = useState(null);
   const location = useLocation();
+
+  useEffect(() => {
+    if (error && /(already processed|processed payroll|processed period|cannot.*processed)/i.test(error)) {
+      setShowProcessedPayrollModal(true);
+      setError("");
+    }
+  }, [error]);
   const [creditAmounts, setCreditAmounts] = useState({});
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [selectedEmployeesForCredit, setSelectedEmployeesForCredit] = useState([]);
@@ -55,7 +117,8 @@ const [exportingBankData, setExportingBankData] = useState(false);
   const [showClearRecordsModal, setShowClearRecordsModal] = useState(false);
   const [periodToClear, setPeriodToClear] = useState(null);
   const [isClearingRecords, setIsClearingRecords] = useState(false);
-  
+  const [generationEmployeeIds, setGenerationEmployeeIds] = useState([]);
+const [generationEmployeeSearch, setGenerationEmployeeSearch] = useState("");
   // Pending Credits State
   const [showCreditSelectionModal, setShowCreditSelectionModal] = useState(false);
   const [pendingCreditsList, setPendingCreditsList] = useState([]);
@@ -83,6 +146,7 @@ const [exportingBankData, setExportingBankData] = useState(false);
     { type: "nssAllowance", amount: "", description: "", enabled: false },
   ]);
   const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+  const [showPayrollActions, setShowPayrollActions] = useState(false);
   const [noRecordsMessage, setNoRecordsMessage] = useState("");
 
   const [settings, setSettings] = useState({
@@ -95,7 +159,6 @@ const [exportingBankData, setExportingBankData] = useState(false);
     standardWorkHours: 8,
   });
 
-  const [includeBasicSalary, setIncludeBasicSalary] = useState(false);
   const [payrollTemporaryAllowances, setPayrollTemporaryAllowances] = useState({});
   const [recordSearch, setRecordSearch] = useState("");
   const [recordsPage, setRecordsPage] = useState(1);
@@ -503,11 +566,21 @@ const openBankExportModal = () => {
             'Department': employee.department || '',
             'Grade': employee.grade || '',
             'Work Type': employee.workType || '',
-            'Total Days': record.totalDaysInPeriod || 0,
-            'Leave Days': record.leaveDays || 0,
+            'Weekdays in Period (Excl. Weekends)': getWeekdaysForPayrollRecord(record, payrollPeriods, selectedPeriod),
+            'Leave Days': getLeaveDays(record, settings.standardWorkHours),
+            'Holidays Worked': record.holidayDays || 0,
             'Working Days': record.workingDays || 0,
             'Total Hours': (record.totalHours || 0).toFixed(2),
             'Overtime Hours': (record.overtimeHours || 0).toFixed(2),
+            'OT Rate Used': formatCurrency(record.appliedOvertimeRate ?? record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0),
+            'OT Hours at Old Rate': Number(record.normalRateOvertimeHours || 0).toFixed(2),
+            'OT Hours at New Rate': Number(record.effectiveRateOvertimeHours || 0).toFixed(2),
+            'Old Payroll Rate': formatCurrency(record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0),
+            'New Effective Rate': record.appliedEffectivePayrollRate != null ? formatCurrency(record.appliedEffectivePayrollRate) : '',
+            'Effective From': record.appliedEffectivePayrollRateFrom || '',
+            'Effective To': record.appliedEffectivePayrollRateTo || (record.appliedEffectivePayrollRate != null ? 'Ongoing' : ''),
+            'Hours at Old Rate': Number(record.normalRateHours || 0).toFixed(2),
+            'Hours at New Rate': Number(record.effectiveRateHours || 0).toFixed(2),
             'Basic Salary': formatCurrency(record.basicSalary || 0),
             'Overtime Pay': formatCurrency(record.overtimePay || 0),
             'Housing Allowance': formatCurrency(record.rentAllowance || 0),
@@ -541,8 +614,9 @@ const openBankExportModal = () => {
           'Department': '',
           'Grade': '',
           'Work Type': '',
-          'Total Days': '',
+          'Weekdays in Period (Excl. Weekends)': '',
           'Leave Days': '',
+          'Holidays Worked': '',
           'Working Days': '',
           'Total Hours': '',
           'Overtime Hours': '',
@@ -588,11 +662,21 @@ const openBankExportModal = () => {
           'Department': employee.department || '',
           'Grade': employee.grade || '',
           'Work Type': employee.workType || '',
-          'Total Days': record.totalDaysInPeriod || 0,
-          'Leave Days': record.leaveDays || 0,
+          'Weekdays in Period (Excl. Weekends)': getWeekdaysForPayrollRecord(record, payrollPeriods, selectedPeriod),
+          'Leave Days': getLeaveDays(record, settings.standardWorkHours),
+          'Holidays Worked': record.holidayDays || 0,
           'Working Days': record.workingDays || 0,
           'Total Hours': (record.totalHours || 0).toFixed(2),
           'Overtime Hours': (record.overtimeHours || 0).toFixed(2),
+            'OT Rate Used': formatCurrency(record.appliedOvertimeRate ?? record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0),
+            'OT Hours at Old Rate': Number(record.normalRateOvertimeHours || 0).toFixed(2),
+            'OT Hours at New Rate': Number(record.effectiveRateOvertimeHours || 0).toFixed(2),
+          'Old Payroll Rate': formatCurrency(record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0),
+          'New Effective Rate': record.appliedEffectivePayrollRate != null ? formatCurrency(record.appliedEffectivePayrollRate) : '',
+          'Effective From': record.appliedEffectivePayrollRateFrom || '',
+          'Effective To': record.appliedEffectivePayrollRateTo || (record.appliedEffectivePayrollRate != null ? 'Ongoing' : ''),
+          'Hours at Old Rate': Number(record.normalRateHours || 0).toFixed(2),
+          'Hours at New Rate': Number(record.effectiveRateHours || 0).toFixed(2),
           'Basic Salary': formatCurrency(record.basicSalary || 0),
           'Overtime Pay': formatCurrency(record.overtimePay || 0),
           'Housing Allowance': formatCurrency(record.rentAllowance || 0),
@@ -658,13 +742,15 @@ const openBankExportModal = () => {
       startDate: period.startDate || "",
       endDate: period.endDate || "",
       category: period.category || "",
+      periodType: period.periodType || "CATEGORY",
+      projectId: period.projectId || "",
       convertExcessToOvertime: period.convertExcessToOvertime !== false
     });
     setShowEditPeriodModal(true);
   };
 
   const updatePayrollPeriod = async () => {
-    if (!editPeriodData.category) {
+    if (editPeriodData.periodType !== "PROJECT" && !editPeriodData.category) {
       setError("Please select a category");
       setTimeout(() => setError(""), 3000);
       return;
@@ -718,10 +804,23 @@ const openBankExportModal = () => {
     setShowClearRecordsModal(true);
   };
 
-  const checkPayrollPreviewBeforeGenerate = async (periodId) => {
+  const checkPayrollPreviewBeforeGenerate = async (periodId, hoursReviewed = false) => {
     try {
         setIsCheckingCredits(true);
         const token = getToken();
+
+        if (!hoursReviewed) {
+            const query = new URLSearchParams({ periodId });
+            if (generationRequest.current?.employeeId != null) query.set('employeeId', generationRequest.current.employeeId);
+            const excluded = generationRequest.current?.excludedEmployeeIds || [];
+            if (excluded.length) query.set('excludedEmployeeIds', excluded.join(','));
+            const reviewResponse = await fetch(`${API_BASE_URL}/api/payroll/generation-review?${query}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!reviewResponse.ok) throw new Error('Could not review approved project hours. Payroll was not generated.');
+            setHoursReview({ ...(await reviewResponse.json()), periodId });
+            return false;
+        }
 
         const res = await fetch(`${API_BASE_URL}/api/payroll/preview/${periodId}`, {
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
@@ -730,6 +829,14 @@ const openBankExportModal = () => {
         if (!res.ok) throw new Error("Failed to fetch payroll preview");
 
         const data = await res.json();
+        const employeeId = generationRequest.current?.employeeId;
+        if (employeeId != null || generationRequest.current?.excludedEmployeeIds?.length) {
+            const included = id => (employeeId == null || String(id) === String(employeeId)) && !generationRequest.current.excludedEmployeeIds.some(excluded => String(excluded) === String(id));
+            data.pendingCredits = (data.pendingCredits || []).filter(row => included(row.employeeId));
+            data.activeLoans = (data.activeLoans || []).filter(row => included(row.employeeId));
+            data.hasPendingCredits = data.pendingCredits.length > 0;
+            data.hasActiveLoans = data.activeLoans.length > 0;
+        }
 
         // Set credit data
         if (data.hasPendingCredits && data.pendingCredits.length > 0) {
@@ -764,9 +871,9 @@ const openBankExportModal = () => {
             return true;
         }
     } catch (err) {
-        console.warn("Preview check failed, proceeding with normal payroll:", err.message);
-        await callOriginalGeneratePayroll(periodId);
-        return true;
+        setError(err.message);
+        generationRequest.current = null;
+        return false;
     } finally {
         setIsCheckingCredits(false);
     }
@@ -850,6 +957,29 @@ const openBankExportModal = () => {
     return 1;
   };
 
+  useEffect(() => {
+    if (!rateDetailsRecord || (rateDetailsRecord.normalRateOvertimeHours != null && rateDetailsRecord.effectiveRateOvertimeHours != null)
+      || Number(rateDetailsRecord.overtimeHours || 0) === 0) return;
+    const controller = new AbortController();
+    const period = rateDetailsRecord.period || payrollPeriods.find(p => String(p.id) === String(selectedPeriod));
+    loadPayrollOvertimeSplit({ ...rateDetailsRecord, period }, {
+      baseUrl: API_BASE_URL, token: getToken(), signal: controller.signal
+    }).then(split => {
+      if (!controller.signal.aborted) setRateDetailsOvertime({ record: rateDetailsRecord, ...split });
+    }).catch(error => {
+      if (!controller.signal.aborted) setRateDetailsOvertime({ record: rateDetailsRecord, error: error.message });
+    });
+    return () => controller.abort();
+  }, [rateDetailsRecord, payrollPeriods, selectedPeriod, API_BASE_URL]);
+
+  const rateDetailOtHours = (field, recoveredField) => {
+    if (rateDetailsRecord[field] != null) return `${Number(rateDetailsRecord[field]).toFixed(2)} hrs`;
+    if (Number(rateDetailsRecord.overtimeHours || 0) === 0) return '0.00 hrs';
+    if (rateDetailsOvertime?.record !== rateDetailsRecord) return 'Loading…';
+    if (rateDetailsOvertime.error) return 'Unable to load';
+    return `${Number(rateDetailsOvertime[recoveredField]).toFixed(2)} hrs`;
+  };
+
   const fetchPayrollRecords = async (periodId) => {
     try {
       setLoading(true);
@@ -888,62 +1018,36 @@ const openBankExportModal = () => {
 
   // ==================== PENDING CREDITS FUNCTIONS ====================
 
-  const checkPendingCreditsBeforeGenerate = async (periodId) => {
-    try {
-        setIsCheckingCredits(true);
-        const token = getToken();
-        
-        const res = await fetch(`${API_BASE_URL}/api/payroll/pending-credits/check/${periodId}`, {
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-        });
-        
-        if (!res.ok) throw new Error("Failed to check pending credits");
-        
-        const data = await res.json();
-        
-        if (data.hasPendingCredits && data.pendingCredits.length > 0) {
-            setPendingCreditsList(data.pendingCredits);
-            const allCreditIds = new Set(data.pendingCredits.map(credit => credit.id));
-            setSelectedCreditIds(allCreditIds);
-            const total = data.pendingCredits
-                .filter(credit => allCreditIds.has(credit.id))
-                .reduce((sum, credit) => sum + credit.amount, 0);
-            setTotalSelectedCreditAmount(total);
-            setShowCreditSelectionModal(true);
-            return false;
-        } else {
-            await callOriginalGeneratePayroll(periodId);
-            return true;
-        }
-    } catch (err) {
-        console.warn("Pending credits check failed, proceeding with normal payroll:", err.message);
-        await callOriginalGeneratePayroll(periodId);
-        return true;
-    } finally {
-        setIsCheckingCredits(false);
-    }
+  const scopedEmployeeAmounts = (amounts) => {
+    const employeeId = generationRequest.current?.employeeId;
+    return Object.fromEntries(Object.entries(amounts).filter(([id]) => (employeeId == null || String(id) === String(employeeId)) && !generationRequest.current?.excludedEmployeeIds?.some(excluded => String(excluded) === String(id))));
+  };
+
+  const clearGeneratedCredits = () => {
+    const employeeId = generationRequest.current?.employeeId;
+    const excluded = generationRequest.current?.excludedEmployeeIds || [];
+    setCreditAmounts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => employeeId == null ? excluded.some(value => String(value) === String(id)) : String(id) !== String(employeeId))));
   };
 
   const callOriginalGeneratePayroll = async (periodId) => {
+    if (generationSubmitting.current || !generationRequest.current) return;
+    generationSubmitting.current = true;
     try {
       setLoading(true);
       const token = getToken();
 
       const formattedTemporaryAllowances = {};
       Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-        formattedTemporaryAllowances[employeeId] = {
-          housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-          tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-          clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-          otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-          nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-        };
+        formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
       });
 
       const payload = {
         periodId,
-        temporaryAllowances: formattedTemporaryAllowances,
-        creditAmounts: creditAmounts,
+        rateChoice: generationRequest.current.rateChoice,
+        employeeId: generationRequest.current.employeeId,
+            excludedEmployeeIds: generationRequest.current.excludedEmployeeIds,
+            temporaryAllowances: scopedEmployeeAmounts(formattedTemporaryAllowances),
+        creditAmounts: scopedEmployeeAmounts(creditAmounts),
         settings: {
           hourlyRate: settings.hourlyRate || 15.0,
           overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
@@ -953,12 +1057,12 @@ const openBankExportModal = () => {
           holidays: settings.holidays || [],
           standardWorkHours: settings.standardWorkHours || 8,
         },
-        includeBasicSalary,
+        includeBasicSalary: true,
       };
 
       console.log("Sending payroll generation payload:", payload);
 
-      const res = await fetch(`${API_BASE_URL}/api/payroll/generate`, {
+      const res = await fetch(`${API_BASE_URL}/api/payroll/${generationRequest.current.employeeId == null ? "generate" : "generate-employee"}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -971,7 +1075,7 @@ const openBankExportModal = () => {
 
       setSuccess("Payroll generated successfully");
       setTimeout(() => setSuccess(""), 3000);
-      setCreditAmounts({});
+      clearGeneratedCredits();
 
       setTimeout(() => {
         fetchPayrollRecords(periodId);
@@ -982,30 +1086,32 @@ const openBankExportModal = () => {
       setTimeout(() => setError(""), 5000);
     } finally {
       setLoading(false);
+      generationSubmitting.current = false;
+      generationRequest.current = null;
     }
   };
 
   const handleApplySelectedCredits = async () => {
+    if (generationSubmitting.current || !generationRequest.current) return;
+    const { periodId, rateChoice } = generationRequest.current;
+    generationSubmitting.current = true;
     try {
         setLoading(true);
         const token = getToken();
 
         const formattedTemporaryAllowances = {};
         Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-            formattedTemporaryAllowances[employeeId] = {
-                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-            };
+            formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
         });
 
         const payload = {
-            periodId: selectedPeriod,
+            periodId,
+            rateChoice,
             selectedCreditIds: Array.from(selectedCreditIds),
-            temporaryAllowances: formattedTemporaryAllowances,
-            directCreditAmounts: creditAmounts,
+            employeeId: generationRequest.current.employeeId,
+            excludedEmployeeIds: generationRequest.current.excludedEmployeeIds,
+            temporaryAllowances: scopedEmployeeAmounts(formattedTemporaryAllowances),
+            directCreditAmounts: scopedEmployeeAmounts(creditAmounts),
             settings: {
                 hourlyRate: settings.hourlyRate || 15.0,
                 overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
@@ -1015,10 +1121,10 @@ const openBankExportModal = () => {
                 holidays: settings.holidays || [],
                 standardWorkHours: settings.standardWorkHours || 8,
             },
-            includeBasicSalary: includeBasicSalary,
+            includeBasicSalary: true,
         };
 
-        const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
+        const res = await fetch(`${API_BASE_URL}/api/payroll/${generationRequest.current.employeeId == null ? "generate-with-credits" : "generate-employee-with-credits"}`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -1032,13 +1138,14 @@ const openBankExportModal = () => {
         setSuccess(`Payroll generated successfully with ${selectedCreditIds.size} credit(s) applied`);
         setTimeout(() => setSuccess(""), 3000);
         
-        setCreditAmounts({});
+        clearGeneratedCredits();
         setSelectedCreditIds(new Set());
         setShowCreditSelectionModal(false);
+        generationRequest.current = null;
         
         setTimeout(() => {
-            fetchPayrollRecords(selectedPeriod);
-            fetchPayrollSummary(selectedPeriod);
+            fetchPayrollRecords(periodId);
+            fetchPayrollSummary(periodId);
         }, 1000);
         
     } catch (err) {
@@ -1046,30 +1153,31 @@ const openBankExportModal = () => {
         setTimeout(() => setError(""), 5000);
     } finally {
         setLoading(false);
+        generationSubmitting.current = false;
     }
   };
 
   const handleSkipAllCredits = async () => {
+    if (generationSubmitting.current || !generationRequest.current) return;
+    const { periodId, rateChoice } = generationRequest.current;
+    generationSubmitting.current = true;
     try {
         setLoading(true);
         const token = getToken();
 
         const formattedTemporaryAllowances = {};
         Object.keys(payrollTemporaryAllowances).forEach((employeeId) => {
-            formattedTemporaryAllowances[employeeId] = {
-                housingAllowance: payrollTemporaryAllowances[employeeId].housingAllowance || 0,
-                tntAllowance: payrollTemporaryAllowances[employeeId].tntAllowance || 0,
-                clothsAllowances: payrollTemporaryAllowances[employeeId].clothsAllowances || 0,
-                otherAllowances: payrollTemporaryAllowances[employeeId].otherAllowances || 0,
-                nssAllowance: payrollTemporaryAllowances[employeeId].nssAllowance || 0,
-            };
+            formattedTemporaryAllowances[employeeId] = { ...payrollTemporaryAllowances[employeeId] };
         });
 
         const payload = {
-            periodId: selectedPeriod,
+            periodId,
+            rateChoice,
             selectedCreditIds: [],
-            temporaryAllowances: formattedTemporaryAllowances,
-            directCreditAmounts: creditAmounts,
+            employeeId: generationRequest.current.employeeId,
+            excludedEmployeeIds: generationRequest.current.excludedEmployeeIds,
+            temporaryAllowances: scopedEmployeeAmounts(formattedTemporaryAllowances),
+            directCreditAmounts: scopedEmployeeAmounts(creditAmounts),
             settings: {
                 hourlyRate: settings.hourlyRate || 15.0,
                 overtimeHourlyRate: settings.overtimeHourlyRate || 22.5,
@@ -1079,10 +1187,10 @@ const openBankExportModal = () => {
                 holidays: settings.holidays || [],
                 standardWorkHours: settings.standardWorkHours || 8,
             },
-            includeBasicSalary: includeBasicSalary,
+            includeBasicSalary: true,
         };
 
-        const res = await fetch(`${API_BASE_URL}/api/payroll/generate-with-credits`, {
+        const res = await fetch(`${API_BASE_URL}/api/payroll/${generationRequest.current.employeeId == null ? "generate-with-credits" : "generate-employee-with-credits"}`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -1096,13 +1204,14 @@ const openBankExportModal = () => {
         setSuccess("Payroll generated successfully (credits skipped)");
         setTimeout(() => setSuccess(""), 3000);
         
-        setCreditAmounts({});
+        clearGeneratedCredits();
         setSelectedCreditIds(new Set());
         setShowCreditSelectionModal(false);
+        generationRequest.current = null;
         
         setTimeout(() => {
-            fetchPayrollRecords(selectedPeriod);
-            fetchPayrollSummary(selectedPeriod);
+            fetchPayrollRecords(periodId);
+            fetchPayrollSummary(periodId);
         }, 1000);
         
     } catch (err) {
@@ -1110,6 +1219,7 @@ const openBankExportModal = () => {
         setTimeout(() => setError(""), 5000);
     } finally {
         setLoading(false);
+        generationSubmitting.current = false;
     }
   };
 
@@ -1221,8 +1331,8 @@ const openBankExportModal = () => {
       totalTax: records.reduce((sum, r) => sum + (r.payeTax || 0), 0),
       totalSsnit: records.reduce((sum, r) => sum + (r.ssnitEmployee || 0) + (r.ssnitEmployer || 0), 0),
       employeeCount: records.length,
-      totalLeaveDays: records.reduce((sum, r) => sum + (r.leaveDays || 0), 0),
-      employeesOnLeave: records.filter(r => (r.leaveDays || 0) > 0).length,
+      totalLeaveDays: records.reduce((sum, r) => sum + getLeaveDays(r, settings.standardWorkHours), 0),
+      employeesOnLeave: records.filter(r => getLeaveDays(r, settings.standardWorkHours) > 0).length,
       totalGrossSalary: records.reduce((sum, r) => sum + (r.grossSalary || 0), 0),
       totalBasicSalary: records.reduce((sum, r) => sum + (r.basicSalary || 0), 0),
       totalOvertimePay: records.reduce((sum, r) => sum + (r.overtimePay || 0), 0),
@@ -1236,18 +1346,18 @@ const openBankExportModal = () => {
   };
 
   const createPayrollPeriod = async () => {
-    if (!newPeriod.category) {
-      setError("Please select a category");
+    if (newPeriod.periodType === "PROJECT" ? !newPeriod.projectId : !newPeriod.category) {
+      setError(newPeriod.periodType === "PROJECT" ? "Please select a project" : "Please select a category");
       setTimeout(() => setError(""), 3000);
       return;
     }
     
     try {
       const token = getToken();
-      const res = await fetch(`${API_BASE_URL}/api/payroll/periods/category`, {
+      const res = await fetch(`${API_BASE_URL}/api/payroll/periods`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(newPeriod),
+        body: JSON.stringify({ ...newPeriod, projectId: newPeriod.periodType === "PROJECT" ? Number(newPeriod.projectId) : null, category: newPeriod.periodType === "PROJECT" ? null : newPeriod.category }),
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -1255,7 +1365,7 @@ const openBankExportModal = () => {
       }
       const data = await res.json();
       setPayrollPeriods([...payrollPeriods, data]);
-      setNewPeriod({ name: "", startDate: "", endDate: "", category: "", convertExcessToOvertime: true });
+      setNewPeriod({ name: "", startDate: "", endDate: "", category: "", periodType: "CATEGORY", projectId: "", convertExcessToOvertime: true });
       setSuccess("Payroll period created successfully");
       setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
@@ -1298,8 +1408,55 @@ const openBankExportModal = () => {
     });
   }, [payrollRecords]);
 
-  const generatePayroll = async (periodId) => {
-    await checkPendingCreditsBeforeGenerate(periodId);
+  const generatePayroll = (periodId) => {
+    if (generationRequest.current || generationSubmitting.current || isCheckingCredits) return;
+    setGenerationEmployeeIds([]);
+    setGenerationEmployeeSearch('');
+    setGenerationScope('ALL');
+    setGenerationEmployeeId('');
+    setGenerationPeriod(payrollPeriods.find(period => String(period.id) === String(periodId)));
+    setError('');
+  };
+
+  const startPayrollGeneration = async () => {
+    if (!generationPeriod || (generationScope === 'EMPLOYEE' && !generationEmployeeId)) return;
+    const periodId = generationPeriod.id;
+    const employeeId = generationScope === 'EMPLOYEE' ? Number(generationEmployeeId) : null;
+    if (generationRequest.current || generationSubmitting.current) return;
+    generationRequest.current = { periodId, employeeId, excludedEmployeeIds: generationScope === 'EXCLUDE' ? generationEmployeeIds.map(Number) : [], rateChoice: 'CURRENT' };
+    setGenerationPeriod(null);
+    setIsCheckingCredits(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/payroll?periodId=${periodId}`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      if (!response.ok && response.status !== 404) throw new Error('Could not check existing payroll rates. Please retry.');
+      const allRecords = response.status === 404 ? [] : await response.json();
+      if (!Array.isArray(allRecords)) throw new Error('Invalid payroll response');
+      const records = employeeId == null ? allRecords : allRecords.filter(record => String(record.employee?.id ?? record.employeeId) === String(employeeId));
+      if (records.some(record => record.status === 'Processed')) {
+        generationRequest.current = null;
+        setShowProcessedPayrollModal(true);
+        return;
+      }
+      setSelectedPeriod(periodId);
+      if (records.length) {
+        setRateReview({ periodId, ...payrollRateReview(records.filter(record => !generationRequest.current.excludedEmployeeIds.some(id => String(id) === String(record.employee?.id ?? record.employeeId)))) });
+        return;
+      }
+      await checkPayrollPreviewBeforeGenerate(periodId);
+    } catch (err) {
+      generationRequest.current = null;
+      setError(err.message);
+    } finally { setIsCheckingCredits(false); }
+  };
+
+  const choosePayrollRates = async (rateChoice) => {
+    if (!rateReview || !generationRequest.current || isCheckingCredits) return;
+    const periodId = rateReview.periodId;
+    generationRequest.current = { ...generationRequest.current, periodId, rateChoice };
+    setRateReview(null);
     await checkPayrollPreviewBeforeGenerate(periodId);
   };
 
@@ -1499,14 +1656,23 @@ const openBankExportModal = () => {
         'Grade': employee.grade || '',
         'Work Type': employee.workType || '',
         'Category': employee.category || '',
-        'Total Days in Period': record.totalDaysInPeriod || 0,
-        'Leave Days': record.leaveDays || 0,
-        'Holiday Days': record.holidayDays || 0,
-        'Weekend Days': record.weekendDays || 0,
+        'Weekdays in Period (Excluding Weekends)': getWeekdaysForPayrollRecord(record, payrollPeriods, selectedPeriod),
+        'Leave Days': getLeaveDays(record, settings.standardWorkHours),
+        'Holidays Worked': record.holidayDays || 0,
+        'Weekends Worked': record.weekendDays || 0,
         'Physical Working Days': record.workingDays || 0,
-        'Total Paid Days': (record.workingDays || 0) + (record.leaveDays || 0),
+        'Total Paid Days': (record.workingDays || 0) + getLeaveDays(record, settings.standardWorkHours),
         'Total Hours': (record.totalHours || 0).toFixed(2),
         'Overtime Hours': (record.overtimeHours || 0).toFixed(2),
+            'OT Rate Used': formatCurrency(record.appliedOvertimeRate ?? record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0),
+            'OT Hours at Old Rate': Number(record.normalRateOvertimeHours || 0).toFixed(2),
+            'OT Hours at New Rate': Number(record.effectiveRateOvertimeHours || 0).toFixed(2),
+        'Old Payroll Rate': Number(record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0).toFixed(2),
+        'New Effective Rate': record.appliedEffectivePayrollRate != null ? Number(record.appliedEffectivePayrollRate).toFixed(2) : '',
+        'Effective From': record.appliedEffectivePayrollRateFrom || '',
+        'Effective To': record.appliedEffectivePayrollRateTo || (record.appliedEffectivePayrollRate != null ? 'Ongoing' : ''),
+        'Hours at Old Rate': Number(record.normalRateHours || 0).toFixed(2),
+        'Hours at New Rate': Number(record.effectiveRateHours || 0).toFixed(2),
         'Basic Salary': (record.basicSalary || 0).toFixed(2),
         'Overtime Pay': (record.overtimePay || 0).toFixed(2),
         'Housing Allowance': (record.rentAllowance || 0).toFixed(2),
@@ -1564,6 +1730,10 @@ const openBankExportModal = () => {
       
       return {
         'Employee Name': employeeName,
+        'Old Payroll Rate': Number(record.appliedMinimumRate ?? employee.minimumRate ?? employee.hourlyRate ?? 0).toFixed(2),
+        'New Effective Rate': record.appliedEffectivePayrollRate != null ? Number(record.appliedEffectivePayrollRate).toFixed(2) : '',
+        'Effective From': record.appliedEffectivePayrollRateFrom || '',
+        'Effective To': record.appliedEffectivePayrollRateTo || (record.appliedEffectivePayrollRate != null ? 'Ongoing' : ''),
         'Basic Salary': (record.basicSalary || 0).toFixed(2),
         'Overtime Pay': (record.overtimePay || 0).toFixed(2),
         'Allowances': getTotalAllowance(record).toFixed(2),
@@ -1589,16 +1759,50 @@ const openBankExportModal = () => {
     setTimeout(() => setSuccess(""), 3000);
   };
 
-  const removeTemporaryAllowances = (employeeId) => {
+  const removeTemporaryAllowances = async (employeeId) => {
+    const generatedRecord = payrollRecords.find(record =>
+      String(record.employee?.id || record.employeeId) === String(employeeId)
+    );
+
+    if (generatedRecord) {
+      if (generatedRecord.status === "Processed") {
+        setShowProcessedPayrollModal(true);
+        return;
+      }
+      if (!await window.appConfirm("Remove the temporary allowances and restore this employee's permanent allowances? Payroll totals will be recalculated.")) {
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const token = getToken();
+        const response = await fetch(
+          `${API_BASE_URL}/api/payroll/periods/${selectedPeriod}/employees/${employeeId}/temporary-allowances`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to remove temporary allowances");
+        }
+      } catch (err) {
+        setError(err.message);
+        setTimeout(() => setError(""), 5000);
+        setLoading(false);
+        return;
+      }
+    }
+
     const newTemporaryAllowances = { ...payrollTemporaryAllowances };
     delete newTemporaryAllowances[employeeId];
     setPayrollTemporaryAllowances(newTemporaryAllowances);
 
-    if (selectedPeriod) {
-      fetchPayrollRecords(selectedPeriod);
+    if (selectedPeriod && generatedRecord) {
+      await fetchPayrollRecords(selectedPeriod);
+      await fetchPayrollSummary(selectedPeriod);
     }
 
-    setSuccess("Temporary allowances removed");
+    setLoading(false);
+    setSuccess("Temporary allowances removed. Permanent employee allowances restored.");
     setTimeout(() => setSuccess(""), 3000);
   };
 
@@ -1678,6 +1882,32 @@ const openBankExportModal = () => {
       }
     }
   };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setProjectsLoading(true);
+    fetch(`${API_BASE_URL}/api/jobs`, { headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error('Could not load projects. Check your Project Management access.'); return response.json(); })
+      .then(setPayrollProjects)
+      .catch(error => { if (error.name !== 'AbortError') setProjectLoadError(error.message); })
+      .finally(() => { if (!controller.signal.aborted) setProjectsLoading(false); });
+    return () => controller.abort();
+  }, [API_BASE_URL]);
+
+  useEffect(() => {
+    setGenerationProjectEmployeeIds(null);
+    if (generationPeriod?.periodType !== 'PROJECT') return;
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/api/payroll/generation-review?periodId=${generationPeriod.id}`, { headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error('Could not load project employees'); return response.json(); })
+      .then(review => setGenerationProjectEmployeeIds(review.eligibleEmployeeIds || []))
+      .catch(error => { if (error.name !== 'AbortError') setError(error.message); });
+    return () => controller.abort();
+  }, [generationPeriod?.id, generationPeriod?.periodType, API_BASE_URL]);
+
+  const employeeInGenerationScope = employee => employee.active !== false && (generationPeriod?.periodType === 'PROJECT'
+    ? (generationProjectEmployeeIds || []).includes(employee.id)
+    : !generationPeriod?.category || (employee.category?.name ?? employee.category) === generationPeriod.category);
 
   useEffect(() => {
     fetchPayrollPeriods();
@@ -1912,7 +2142,7 @@ const openBankExportModal = () => {
 
       {/* Main content with dynamic margin */}
       <div 
-        className={`flex-1 transition-all duration-300 ${
+        className={`flex-1 min-w-0 max-w-full overflow-x-hidden transition-all duration-300 ${
           sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'
         }`}
       >
@@ -1921,14 +2151,26 @@ const openBankExportModal = () => {
           user={user}
           onLogout={handleLogout}
         />
-        <main className="flex-1 max-w-full px-2 md:px-4 py-6">
+        <main className="flex-1 min-w-0 w-full max-w-full overflow-x-hidden px-2 md:px-4 py-6">
           {/* Page Header */}
           <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6">
             <div>
               <h1 className="text-2xl font-bold text-gray-800">Payroll Management</h1>
               <p className="text-gray-600">Manage employee payroll and compensation</p>
             </div>
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-col items-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPayrollActions((visible) => !visible)}
+                aria-expanded={showPayrollActions}
+                className="flex items-center rounded-lg bg-slate-800 px-4 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-slate-900"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="mr-2 h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.598 0 2.977a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.286.947c.38 1.562 2.6 1.562 2.98 0a1.532 1.532 0 012.286-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.598 0-2.977a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.286-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                </svg>
+                {showPayrollActions ? "Hide payroll actions" : "Show payroll actions"}
+              </button>
+              {showPayrollActions && <div className="flex flex-wrap justify-end gap-2">
               <button
                 onClick={() => setShowAllowanceModal(true)}
                 className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg flex items-center"
@@ -1959,6 +2201,7 @@ const openBankExportModal = () => {
                   Payslip Generator
                 </button>
               </Link>
+              </div>}
             </div>
           </section>
 
@@ -2008,7 +2251,7 @@ const openBankExportModal = () => {
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 mt-4 flex-wrap">
+          {showPayrollActions && <div className="mt-4 flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {selectedPeriod && (
               <>
                 <button
@@ -2120,7 +2363,7 @@ const openBankExportModal = () => {
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
           {/* Payroll Summary */}
           {summary && (
@@ -2143,7 +2386,7 @@ const openBankExportModal = () => {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                   <div className="text-sm text-gray-500">Total Net Pay</div>
                   <div className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalNetAmount)}</div>
@@ -2166,8 +2409,18 @@ const openBankExportModal = () => {
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                   <div className="text-sm text-gray-500">Total Leave Days</div>
-                  <div className="text-2xl font-bold text-orange-600">{summary.totalLeaveDays || 0}</div>
-                  <div className="text-xs text-gray-400 mt-1">Across {summary.employeesOnLeave || 0} employees</div>
+                  <div className="text-2xl font-bold text-orange-600">{payrollRecords.reduce((sum, record) => sum + getLeaveDays(record, settings.standardWorkHours), 0)}</div>
+                  <div className="text-xs text-gray-400 mt-1">Across {payrollRecords.filter((record) => getLeaveDays(record, settings.standardWorkHours) > 0).length} employees</div>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                  <div className="text-sm text-gray-500">Weekdays in Period</div>
+                  <div className="text-2xl font-bold text-cyan-700">{payrollRecords.length ? getWeekdaysForPayrollRecord(payrollRecords[0], payrollPeriods, selectedPeriod) : 0}</div>
+                  <div className="text-xs text-gray-400 mt-1">Excludes Saturdays and Sundays</div>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                  <div className="text-sm text-gray-500">Holidays Worked</div>
+                  <div className="text-2xl font-bold text-purple-600">{payrollRecords.reduce((sum, record) => sum + Number(record.holidayDays || 0), 0)}</div>
+                  <div className="text-xs text-gray-400 mt-1">Employee holiday-attendance days</div>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                   <div className="text-sm text-gray-500">Employer Cost</div>
@@ -2183,6 +2436,12 @@ const openBankExportModal = () => {
           {/* Create Payroll Period */}
           <div className="mt-6 mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Create Payroll Period</h2>
+            <label className="mb-4 block text-sm font-medium text-gray-700">Payroll for
+              <select aria-label="Payroll period type" value={newPeriod.periodType} onChange={event => setNewPeriod({ ...newPeriod, periodType: event.target.value, category: '', projectId: '' })} className="ml-3 rounded border border-gray-300 px-3 py-2">
+                <option value="CATEGORY">Category payroll</option><option value="PROJECT">Project payroll</option>
+              </select>
+            </label>
+            {newPeriod.periodType === 'PROJECT' && <p className="mb-4 text-sm text-blue-800">Pay employees with approved, synced timesheets for the selected project and dates. Normal salary, allowances and deductions apply. Work already included in another payroll is excluded.</p>}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <input
                 placeholder="Period Name"
@@ -2202,7 +2461,7 @@ const openBankExportModal = () => {
                 onChange={(e) => setNewPeriod({ ...newPeriod, endDate: e.target.value })}
                 className="px-3 py-2 w-full border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <select
+              {newPeriod.periodType === 'PROJECT' ? <div><select aria-label="Payroll project" value={newPeriod.projectId} disabled={projectsLoading} onChange={event => setNewPeriod({ ...newPeriod, projectId: event.target.value })} className="w-full rounded border border-gray-300 px-3 py-2"><option value="">{projectsLoading ? 'Loading projects…' : 'Select Project'}</option>{payrollProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>{projectLoadError && <p role="alert" className="mt-1 text-sm text-red-700">{projectLoadError}</p>}</div> : (              <select
                 value={newPeriod.category}
                 onChange={(e) => setNewPeriod({ ...newPeriod, category: e.target.value })}
                 className="px-3 py-2 w-full border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2211,7 +2470,8 @@ const openBankExportModal = () => {
                 {categories.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
-              </select>
+              </select>)}
+
             </div>
             <div className="mt-4 flex items-center">
               <input
@@ -2222,10 +2482,10 @@ const openBankExportModal = () => {
                 className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
               />
               <label htmlFor="convertExcessToOvertime" className="ml-2 text-sm text-gray-700">
-                Convert excess days to overtime
+                Convert excess attendance hours to overtime
               </label>
               <span className="ml-2 text-xs text-gray-500">
-                (When unchecked, all days worked count as regular days)
+                (Normal hours capped at period weekdays × standard hours; excess added to OT. Unchecked: keep all attendance hours as normal.)
               </span>
             </div>
             <button onClick={createPayrollPeriod} className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 mt-4 rounded-md">
@@ -2233,18 +2493,12 @@ const openBankExportModal = () => {
             </button>
           </div>
 
-          {/* Include Basic Salary Toggle */}
+          {/* Basic salary is always included */}
           <div className="mb-3 bg-white rounded-lg shadow-sm border border-gray-200 p-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                className="h-4 w-4"
-                checked={includeBasicSalary}
-                onChange={(e) => setIncludeBasicSalary(e.target.checked)}
-              />
-              <span className="font-medium">Use Monthly Basic Salary (Prorated by Paid Days)</span>
-              <span className="text-xs text-gray-500">(applies when you click Generate)</span>
-            </label>
+            <div className="flex items-center gap-2 text-sm text-gray-700">
+              <CheckBadgeIcon className="h-5 w-5 text-green-600" />
+              <span className="font-medium">Monthly basic salary is included automatically when payroll is generated.</span>
+            </div>
           </div>
 
           {/* Payroll Periods - Grouped by Month */}
@@ -2312,7 +2566,7 @@ const openBankExportModal = () => {
                           <thead>
                             <tr className="bg-gray-100">
                               <th className="px-4 py-3 font-medium">Period Name</th>
-                              <th className="px-4 py-3 font-medium">Category</th>
+                              <th className="px-4 py-3 font-medium">Category / Project</th>
                               <th className="px-4 py-3 font-medium">Start Date</th>
                               <th className="px-4 py-3 font-medium">End Date</th>
                               <th className="px-4 py-3 font-medium">Excess → OT</th>
@@ -2325,7 +2579,7 @@ const openBankExportModal = () => {
                                 <td className="px-4 py-3 font-medium">{p.name}</td>
                                 <td className="px-4 py-3">
                                   <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
-                                    {p.category || 'N/A'}
+                                    {p.periodType === 'PROJECT' ? `Project: ${p.projectName || p.projectId}` : p.category || 'N/A'}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">{p.startDate}</td>
@@ -2385,7 +2639,7 @@ const openBankExportModal = () => {
 
           {/* Payroll Records Table */}
           {selectedPeriod && (
-            <div className="mt-6 bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="mt-6 min-w-0 w-full max-w-full overflow-hidden bg-white rounded-lg shadow-sm border border-gray-200">
               {loading ? (
                 <div className="flex justify-center items-center h-32">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -2469,15 +2723,16 @@ const openBankExportModal = () => {
                       </button>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto" style={{ overflowX: 'auto', overflowY: 'visible' }}>
-                      <table className="min-w-full text-left text-sm text-gray-700">
-                        <thead>
-                          <tr className="bg-gray-100">
+                    <div className="block w-full max-w-full max-h-[70vh] overflow-auto overscroll-contain">
+                      <table className="w-max min-w-full whitespace-nowrap text-left text-sm text-gray-700">
+                        <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+                          <tr>
                             <th className="px-4 py-3 font-medium">Employee</th>
-                            <th className="px-4 py-3 font-medium">Total Days</th>
+                            <th className="px-4 py-3 font-medium" title="Current rate from the employee profile">Employee Rate<br/><span className="text-xs font-normal text-gray-500">Current employee rate</span></th>
+                            <th className="px-4 py-3 font-medium" title="Monday to Friday calendar days in the payroll period">Weekdays in Period<br/><span className="text-xs font-normal text-gray-500">Excludes weekends</span></th>
                             <th className="px-4 py-3 font-medium">Leave Days</th>
-                            <th className="px-4 py-3 font-medium">Holiday Days</th>
-                            <th className="px-4 py-3 font-medium">Weekend Days</th>
+                            <th className="px-4 py-3 font-medium">Holidays Worked</th>
+                            <th className="px-4 py-3 font-medium">Weekends Worked</th>
                             <th className="px-4 py-3 font-medium">Physical Working Days</th>
                             <th className="px-4 py-3 font-medium">Total Paid Days</th>
                             <th className="px-4 py-3 font-medium">Total Hours</th>
@@ -2511,7 +2766,9 @@ const openBankExportModal = () => {
                             const employeeId = r.employee?.id || r.employeeId;
                             const rowKey = r.id ?? `${employeeId}-${selectedPeriod}-${idx}`;
                             const hasTemporaryAllowances = r.usesTemporaryAllowances || payrollTemporaryAllowances[employeeId];
-                            const hasLeaveDays = r.leaveDays && r.leaveDays > 0;
+                            const leaveDays = getLeaveDays(r, settings.standardWorkHours);
+                            const hasLeaveDays = leaveDays > 0;
+                            const weekdaysInPeriod = getWeekdaysForPayrollRecord(r, payrollPeriods, selectedPeriod);
                             
                             return (
                               <tr key={rowKey} className="hover:bg-gray-50 border-t border-gray-200">
@@ -2524,15 +2781,84 @@ const openBankExportModal = () => {
                                       </span>
                                     )}
                                     {hasLeaveDays && (
-                                      <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full" title={`${r.leaveDays} leave days`}>
+                                      <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full" title={`${leaveDays} leave days`}>
                                         Leave
                                       </span>
                                     )}
                                   </div>
                                 </td>
-                                <td className="px-4 py-3">{r.totalDaysInPeriod || 'N/A'}</td>
+                              <td className="px-4 py-3">
+
+  <div className="min-w-[150px] space-y-1">
+
+    {/* OLD / NORMAL RATE */}
+    <div className="flex items-center justify-between gap-3">
+
+      <span className="text-xs text-gray-500">
+        Old Rate
+      </span>
+
+      <span className="font-medium text-gray-900">
+        GHS
+        {Number(
+          r.appliedMinimumRate ??
+          r.employee?.minimumRate ??
+          r.employee?.hourlyRate ??
+          0
+        ).toFixed(2)}
+      </span>
+
+    </div>
+
+
+    {/* NEW EFFECTIVE RATE */}
+    <div className="flex items-center justify-between gap-3">
+
+      <span className="text-xs text-gray-500">
+        New Rate
+      </span>
+
+      <div className="flex items-center gap-2">
+
+        {r.appliedEffectivePayrollRate != null ? (
+
+          <>
+            <span className="font-semibold text-green-700">
+              GHS
+              {Number(
+                r.appliedEffectivePayrollRate
+              ).toFixed(2)}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setRateDetailsRecord(r)
+              }
+              className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              View
+            </button>
+          </>
+
+        ) : (
+
+          <span className="text-gray-400">
+            —
+          </span>
+
+        )}
+
+      </div>
+
+    </div>
+
+  </div>
+
+</td>
+                                <td className="px-4 py-3 text-center font-semibold" title="Calendar weekdays excluding Saturday and Sunday">{weekdaysInPeriod}</td>
                                 <td className={`px-4 py-3 ${hasLeaveDays ? 'bg-blue-50 font-medium text-blue-700' : ''}`}>
-                                  {r.leaveDays || 0}
+                                  {leaveDays}
                                 </td>
                                 <td className="px-4 py-3 text-center">
                                   {r.holidayDays > 0 ? (
@@ -2552,7 +2878,7 @@ const openBankExportModal = () => {
                                 </td>
                                 <td className="px-4 py-3">{r.workingDays}</td>
                                 <td className="px-4 py-3 font-semibold text-gray-800">
-                                  {(r.workingDays || 0) + (r.leaveDays || 0)}
+                                  {(r.workingDays || 0) + leaveDays}
                                 </td>
                                 <td className="px-4 py-3 text-xs text-gray-500">
                                   Worked: {(r.totalHours - (r.leaveHours || 0))?.toFixed(2)} hrs<br/>
@@ -2677,6 +3003,119 @@ const openBankExportModal = () => {
           )}
         </main>
       </div>
+
+      {hoursReview && <PayrollHoursReview review={hoursReview} busy={isCheckingCredits || loading} onCancel={cancelGeneration} onContinue={() => {
+        const periodId = hoursReview.periodId;
+        setHoursReview(null);
+        checkPayrollPreviewBeforeGenerate(periodId, true);
+      }} />}
+      {generationPeriod && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="payroll-scope-title">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h2 id="payroll-scope-title" className="text-lg font-semibold">Generate payroll</h2>
+            <p className="mt-1 text-sm text-gray-600">{generationPeriod.name} · {generationPeriod.startDate} to {generationPeriod.endDate}{generationPeriod.periodType === 'PROJECT' && ` · Project: ${generationPeriod.projectName}`}</p>
+            <fieldset className="mt-5 space-y-3">
+              <legend className="mb-2 font-medium">Who should payroll be generated for?</legend>
+              <label className="flex items-center gap-2"><input type="radio" name="generationScope" value="ALL" checked={generationScope === 'ALL'} onChange={() => setGenerationScope('ALL')} />{generationPeriod.periodType === 'PROJECT' ? 'All eligible project employees' : 'All employees in this period’s category (default)'}</label>
+              <label className="flex items-center gap-2"><input type="radio" name="generationScope" value="EMPLOYEE" checked={generationScope === 'EMPLOYEE'} onChange={() => setGenerationScope('EMPLOYEE')} />Choose one employee</label>
+            </fieldset>
+            <label className="mt-3 flex items-center gap-2"><input type="radio" name="generationScope" checked={generationScope === 'EXCLUDE'} onChange={() => setGenerationScope('EXCLUDE')} />Exclude selected employees for this period</label>
+            {generationScope === 'EXCLUDE' && (
+              <div className="mt-4">
+                <p className="text-sm text-gray-600">Selected employees will be left out of this payroll period and will remain active.</p>
+                <label htmlFor="payroll-exclusion-search" className="mt-3 block text-sm font-medium">Search by employee name or ID</label>
+                <input id="payroll-exclusion-search" type="search" value={generationEmployeeSearch} onChange={event => setGenerationEmployeeSearch(event.target.value)} className="mt-1 w-full rounded-md border p-2" placeholder="Search employees…" />
+                <div className="mt-2 max-h-56 overflow-y-auto rounded-md border p-2">
+                  {employees.filter(employeeInGenerationScope).filter(employee => (employee.firstName + ' ' + employee.lastName + ' ' + (employee.employeeId || employee.id)).toLowerCase().includes(generationEmployeeSearch.trim().toLowerCase())).map(employee => (
+                    <label key={employee.id} className="flex items-center gap-2 rounded p-2 hover:bg-gray-50">
+                      <input type="checkbox" checked={generationEmployeeIds.includes(String(employee.id))} onChange={event => setGenerationEmployeeIds(previous => event.target.checked ? [...previous, String(employee.id)] : previous.filter(id => id !== String(employee.id)))} />
+                      <span>{employee.firstName} {employee.lastName} — {employee.employeeId || employee.id}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-sm"><span>{generationEmployeeIds.length} employee(s) excluded</span><button type="button" onClick={() => setGenerationEmployeeIds([])} className="text-blue-700">Clear selection</button></div>
+              </div>
+            )}
+            {generationScope === 'EMPLOYEE' && (
+              <div className="mt-4">
+                <label htmlFor="generation-employee" className="block text-sm font-medium">Employee</label>
+                <select id="generation-employee" className="mt-1 w-full rounded-md border p-2" value={generationEmployeeId} onChange={event => setGenerationEmployeeId(event.target.value)}>
+                  <option value="">Select an employee</option>
+                  {employees.filter(employeeInGenerationScope).map(employee => <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName} — {employee.employeeId || employee.id}</option>)}
+                </select>
+                <p className="mt-2 text-sm text-gray-600">Only this employee’s payroll for this period will be generated or recalculated. Other employees’ payroll records will stay unchanged.</p>
+              </div>
+            )}
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setGenerationPeriod(null)} className="rounded-lg border px-4 py-2">Cancel</button>
+              <button onClick={startPayrollGeneration} disabled={isCheckingCredits || (generationScope === 'EMPLOYEE' && !generationEmployeeId)} className="rounded-lg bg-blue-600 px-4 py-2 text-white disabled:opacity-40">{generationScope === 'EXCLUDE' ? `Continue excluding ${generationEmployeeIds.length} employee(s)` : generationScope === 'ALL' ? 'Continue with all employees' : 'Continue with selected employee'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Processed Payroll Notice */}
+      {rateReview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="payroll-rate-title">
+          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl bg-white shadow-xl">
+            <div className="border-b p-5">
+              <h2 id="payroll-rate-title" className="text-lg font-semibold text-gray-900">Choose rates for payroll regeneration</h2>
+              <p className="mt-2 text-sm text-gray-600">This period already has payroll records. Keep the employee rates saved with that run, or calculate using the updated employee rates and monthly salaries.</p>
+              <p className="mt-1 text-xs text-gray-500">New employees use their current rates. Hours, allowances, and deductions follow the normal regeneration rules.</p>
+              {!rateReview.canKeepSaved && <p className="mt-3 text-sm text-amber-700">Some older records have no saved rate history. Their original rates cannot be recovered reliably. Use updated rates to save rates for future runs, or cancel to keep the existing payroll.</p>}
+            </div>
+            <div className="overflow-auto p-5">
+              <table className="w-full text-left text-sm"><thead><tr>{['Employee', 'Saved hourly rate', 'Updated hourly rate', 'Saved monthly salary', 'Updated monthly salary'].map(label => <th key={label} className="border-b px-3 py-2 font-medium">{label}</th>)}</tr></thead><tbody>
+                {rateReview.rows.map(row => <tr key={row.id}><td className="border-b px-3 py-2">{row.name || row.id}</td>{[row.savedRate, row.currentRate, row.savedSalary, row.currentSalary].map((value, index) => <td key={index} className="border-b px-3 py-2">{value == null ? 'Not recorded' : formatCurrency(value)}</td>)}</tr>)}
+              </tbody></table>
+            </div>
+            <div className="flex flex-wrap justify-end gap-3 border-t p-5">
+              <button onClick={cancelGeneration} className="rounded-lg border px-4 py-2 text-sm">Cancel</button>
+              <button disabled={!rateReview.canKeepSaved || isCheckingCredits} onClick={() => choosePayrollRates('SAVED')} className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 disabled:opacity-40">Keep saved rates</button>
+              <button disabled={isCheckingCredits} onClick={() => choosePayrollRates('CURRENT')} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">Use updated rates</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProcessedPayrollModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-amber-50 px-6 py-5 border-b border-amber-100">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01M10.29 3.86l-7.82 13.5A2 2 0 004.2 20h15.6a2 2 0 001.73-3l-7.82-13.5a2 2 0 00-3.42 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Payroll Already Processed</h2>
+                  <p className="text-sm text-amber-800">This payroll has already been finalized.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5">
+              <p className="text-sm leading-6 text-gray-600">
+                To protect finalized payroll figures, you cannot generate it again or change its temporary allowances.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-gray-600">
+                If a correction is required, clear or reopen the payroll period first, then regenerate it after reviewing the records.
+              </p>
+            </div>
+
+            <div className="flex justify-end border-t border-gray-100 bg-gray-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowProcessedPayrollModal(false)}
+                className="rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Month Export Modal */}
       {showMonthExportModal && (
@@ -3082,7 +3521,7 @@ const openBankExportModal = () => {
           </p>
         </div>
         <button 
-          onClick={() => setShowCreditSelectionModal(false)}
+          onClick={cancelGeneration} disabled={loading}
           className="text-gray-400 hover:text-gray-600 transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3209,7 +3648,7 @@ const openBankExportModal = () => {
 
       {/* Modal Footer */}
       <div className="flex justify-between items-center p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-        <button onClick={() => setShowCreditSelectionModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">Cancel</button>
+        <button onClick={cancelGeneration} disabled={loading} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">Cancel</button>
         <div className="flex gap-3">
           <button onClick={handleSkipAllCredits} className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Skip All Credits</button>
           <button onClick={handleApplySelectedCredits} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Generate Payroll</button>
@@ -3268,7 +3707,7 @@ const openBankExportModal = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                {editingPeriod?.periodType === 'PROJECT' ? <p className="rounded bg-blue-50 p-3 text-sm">Project payroll: {editingPeriod.projectName}. To choose another project, create a new period.</p> : <>                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                 <select
                   value={editPeriodData.category}
                   onChange={(e) => setEditPeriodData({ ...editPeriodData, category: e.target.value })}
@@ -3278,7 +3717,7 @@ const openBankExportModal = () => {
                   {categories.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
-                </select>
+                </select></>}
               </div>
 
               <div className="flex items-center">
@@ -3290,10 +3729,10 @@ const openBankExportModal = () => {
                   className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
                 />
                 <label htmlFor="editConvertExcessToOvertime" className="ml-2 text-sm text-gray-700">
-                  Convert excess days to overtime
+                  Convert excess attendance hours to overtime
                 </label>
                 <span className="ml-2 text-xs text-gray-500">
-                  (When unchecked, all days worked count as regular days)
+                  (Normal hours capped at period weekdays × standard hours; excess added to OT. Unchecked: keep all attendance hours as normal.)
                 </span>
               </div>
 
@@ -3520,8 +3959,240 @@ const openBankExportModal = () => {
     </div>
   </div>
 )}
+
+  {rateDetailsRecord && (
+
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+
+    <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white shadow-2xl">
+
+      {/* HEADER */}
+      <div className="flex items-center justify-between border-b px-6 py-4">
+
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">
+            Payroll Rate Details
+          </h3>
+
+          <p className="text-sm text-gray-500">
+            {rateDetailsRecord.employee?.firstName}{" "}
+            {rateDetailsRecord.employee?.lastName}
+          </p>
+        </div>
+
+
+        <button
+          type="button"
+          onClick={() =>
+            setRateDetailsRecord(null)
+          }
+          className="text-2xl leading-none text-gray-400 hover:text-gray-700"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      {/* BODY */}
+      <div className="space-y-5 px-6 py-5">
+
+        {/* RATES */}
+        <div className="grid grid-cols-2 gap-4">
+
+          <div className="rounded-lg border bg-gray-50 p-4">
+
+            <p className="text-xs font-medium uppercase text-gray-500">
+              Old Rate
+            </p>
+
+            <p className="mt-1 text-xl font-semibold text-gray-900">
+              GHS{" "}
+              {Number(
+                rateDetailsRecord.appliedMinimumRate ??
+                rateDetailsRecord.employee?.minimumRate ??
+                rateDetailsRecord.employee?.hourlyRate ??
+                0
+              ).toFixed(2)}
+            </p>
+
+            <p className="mt-1 text-xs text-gray-500">
+              Normal payroll rate
+            </p>
+
+            <dl className="mt-3 space-y-2 border-t border-gray-200 pt-3 text-sm">
+              <div className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-gray-600">NH Hours</dt>
+                <dd className="font-semibold text-gray-900">{Number(rateDetailsRecord.normalRateHours || 0).toFixed(2)} hrs</dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-gray-600">OT Hours</dt>
+                <dd className="font-semibold text-gray-900">{rateDetailOtHours('normalRateOvertimeHours', 'oldRate')}</dd>
+              </div>
+            </dl>
+
+          </div>
+
+
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+
+            <p className="text-xs font-medium uppercase text-green-700">
+              New Rate
+            </p>
+
+            <p className="mt-1 text-xl font-semibold text-green-800">
+              GHS{" "}
+              {Number(
+                rateDetailsRecord.appliedEffectivePayrollRate ??
+                0
+              ).toFixed(2)}
+            </p>
+
+            <p className="mt-1 text-xs text-green-700">
+              Project effective payroll rate
+            </p>
+
+            <dl className="mt-3 space-y-2 border-t border-green-200 pt-3 text-sm">
+              <div className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-green-700">NH Hours</dt>
+                <dd className="font-semibold text-green-800">{Number(rateDetailsRecord.effectiveRateHours || 0).toFixed(2)} hrs</dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-green-700">OT Hours</dt>
+                <dd className="font-semibold text-green-800">{rateDetailOtHours('effectiveRateOvertimeHours', 'newRate')}</dd>
+              </div>
+            </dl>
+
+          </div>
+
+        </div>
+
+        <p className="text-xs text-gray-500">NH = normal hours; OT = overtime hours. Hours are shown for each rate's applicable duration within this payroll period.</p>
+        {rateDetailsOvertime?.record === rateDetailsRecord && rateDetailsOvertime.error && (
+          <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{rateDetailsOvertime.error}. Total OT remains {Number(rateDetailsRecord.overtimeHours || 0).toFixed(2)} hrs.</p>
+        )}
+
+        {/* EFFECTIVE DATE */}
+        <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+
+          <p className="text-sm font-medium text-blue-900">
+            Effective Period
+          </p>
+
+          <p className="mt-1 text-sm text-blue-800">
+            From:{" "}
+            <strong>
+              {rateDetailsRecord.appliedEffectivePayrollRateFrom
+                ? new Date(
+                    `${rateDetailsRecord.appliedEffectivePayrollRateFrom}T00:00:00`
+                  ).toLocaleDateString()
+                : "Not available"}
+            </strong>
+          </p>
+
+          <p className="mt-1 text-sm text-blue-800">
+            To:{" "}
+            <strong>
+              {rateDetailsRecord.appliedEffectivePayrollRateTo
+                ? new Date(
+                    `${rateDetailsRecord.appliedEffectivePayrollRateTo}T00:00:00`
+                  ).toLocaleDateString()
+                : "Ongoing"}
+            </strong>
+          </p>
+
+        </div>
+
+
+        {/* EXPLANATION */}
+        <div className="rounded-lg bg-gray-50 p-4">
+
+          <p className="mb-2 text-sm font-semibold text-gray-800">
+            What happened?
+          </p>
+
+          <p className="text-sm leading-6 text-gray-600">
+
+            The employee's normal payroll rate remained{" "}
+
+            <strong>
+              GHS{" "}
+              {Number(
+                rateDetailsRecord.appliedMinimumRate ??
+                rateDetailsRecord.employee?.minimumRate ??
+                rateDetailsRecord.employee?.hourlyRate ??
+                0
+              ).toFixed(2)}
+            </strong>.
+
+            {" "}The project effective payroll rate of{" "}
+
+            <strong>
+              GHS{" "}
+              {Number(
+                rateDetailsRecord.appliedEffectivePayrollRate ??
+                0
+              ).toFixed(2)}
+            </strong>
+
+            {" "}became applicable from{" "}
+
+            <strong>
+              {rateDetailsRecord.appliedEffectivePayrollRateFrom
+                ? new Date(
+                    `${rateDetailsRecord.appliedEffectivePayrollRateFrom}T00:00:00`
+                  ).toLocaleDateString()
+                : "the configured effective date"}
+            </strong>.
+
+          </p>
+
+        </div>
+
+
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-3 text-sm font-semibold text-amber-900">
+            Overtime Rate Breakdown
+          </p>
+
+          <div className="mt-3 flex justify-between border-t border-amber-200 pt-3 text-sm">
+            <span className="text-gray-600">Total OT Hours</span>
+            <strong>{Number(rateDetailsRecord.overtimeHours || 0).toFixed(2)} hrs</strong>
+          </div>
+
+          <div className="flex justify-between py-1 text-sm">
+            <span className="text-gray-600">OT Pay</span>
+            <strong>{formatCurrency(rateDetailsRecord.overtimePay || 0)}</strong>
+          </div>
+        </div>
+
+      </div>
+
+
+      {/* FOOTER */}
+      <div className="flex justify-end border-t px-6 py-4">
+
+        <button
+          type="button"
+          onClick={() =>
+            setRateDetailsRecord(null)
+          }
+          className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+        >
+          Close
+        </button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+)}
+
     </div>
   );
+
 }
 
 export default Payroll;

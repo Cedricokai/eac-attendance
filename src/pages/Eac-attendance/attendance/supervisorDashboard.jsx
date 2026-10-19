@@ -1,3 +1,4 @@
+import LeavePageHeader from './LeavePageHeader';
 import { useState, useEffect } from "react";
 
 const SupervisorDashboard = () => {
@@ -216,17 +217,11 @@ const SupervisorDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="leave-page">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">
-            Supervisor Leave Management Dashboard
-          </h1>
-          <p className="text-gray-600">
-            Review team leave requests and recommend approval or rejection
-          </p>
+        <LeavePageHeader role="Supervisor" title="Supervisor leave approvals" description="Review your team’s leave requests, check coverage, and record your decision." count={pendingCount} loading={loading} />
 
+        <div className="leave-panel p-5 mb-6">
           {error && (
             <div className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
               <strong>Error:</strong> {error}
@@ -285,7 +280,8 @@ const SupervisorDashboard = () => {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+        <div className="leave-table-panel">
+          <div className="leave-table-heading"><h2>Leave requests</h2><p>Review request details and feedback before making a decision.</p></div>
           {loading ? (
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -357,7 +353,7 @@ const SupervisorDashboard = () => {
                       {request.supervisorStatus === "Pending" && (
                         <button
                           onClick={() => openRequestDetails(request)}
-                          className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                          className="leave-review-button"
                         >
                           Review
                         </button>
@@ -375,8 +371,8 @@ const SupervisorDashboard = () => {
 
         {/* Modal */}
         {isModalOpen && selectedRequest && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="leave-dialog-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="leave-dialog bg-white shadow-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold mb-4">Supervisor Review</h2>
 
               {/* Employee Info */}

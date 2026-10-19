@@ -9,8 +9,10 @@ function LoanManagementDashboard() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showActionModal, setShowActionModal] = useState(false);
+  const [showLoanRequestModal, setShowLoanRequestModal] = useState(false);
   const [actionType, setActionType] = useState('');
   const [actionNote, setActionNote] = useState('');
+  const [bulkActionNote, setBulkActionNote] = useState('');
   const [modifiedLoanDetails, setModifiedLoanDetails] = useState({
     loanAmount: 0,
     repaymentPeriod: 0,
@@ -35,7 +37,6 @@ function LoanManagementDashboard() {
     totalAmount: 0
   });
   
-  // New state for active card filter
   const [activeCardFilter, setActiveCardFilter] = useState(null);
   
   const [employeePayrollHistory, setEmployeePayrollHistory] = useState(null);
@@ -67,6 +68,26 @@ function LoanManagementDashboard() {
   });
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // ==================== LOAN REQUEST STATE ====================
+  const [loanRequestForm, setLoanRequestForm] = useState({
+    employeeId: '',
+    employeeName: '',
+    amount: '',
+    purpose: '',
+    repaymentPeriod: 1,
+    monthlyPaymentAmount: 0,
+  });
+  const [employees, setEmployees] = useState([]);
+  const [filteredEmployees, setFilteredEmployees] = useState([]);
+  const [employeeSearchTerm, setEmployeeSearchTerm] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [requestingLoan, setRequestingLoan] = useState(false);
+  const [settings, setSettings] = useState({
+    maxLoanAmount: 0,
+    minRepaymentPeriod: 1,
+    maxRepaymentPeriod: 12,
+  });
 
   // ==================== HELPER FUNCTIONS ====================
   const getApiBaseUrl = () => {
@@ -106,28 +127,227 @@ function LoanManagementDashboard() {
 
   const calculateMonthlyPayment = (amount, period) => {
     if (!amount || !period || period === 0) return 0;
-    const interestRate = 0.15;
-    const monthlyRate = interestRate / 12;
-    const numerator = amount * monthlyRate * Math.pow(1 + monthlyRate, period);
-    const denominator = Math.pow(1 + monthlyRate, period) - 1;
-    return numerator / denominator;
+    return amount / period; // NO INTEREST
+  };
+
+  // ==================== LOAN REQUEST FUNCTIONS ====================
+  const openLoanRequestModal = () => {
+    setShowLoanRequestModal(true);
+    fetchEmployees();
+    fetchSettings();
+    setLoanRequestForm({
+      employeeId: '',
+      employeeName: '',
+      amount: '',
+      purpose: '',
+      repaymentPeriod: 1,
+      monthlyPaymentAmount: 0,
+    });
+    setSelectedEmployee(null);
+    setEmployeeSearchTerm('');
+    setError('');
+    setSuccess('');
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/settings/loanSettings`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const loanSettingsArray = await response.json();
+        const loanSettings = loanSettingsArray.length > 0 ? loanSettingsArray[0] : {};
+        
+        setSettings(prev => ({
+          ...prev,
+          maxLoanAmount: loanSettings.maximumLoanLimit || 0,
+          minRepaymentPeriod: loanSettings.minRepaymentPeriod || 1,
+          maxRepaymentPeriod: loanSettings.maxRepaymentPeriod || 12,
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading loan settings:', error);
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch employees');
+      const data = await response.json();
+      setEmployees(data);
+      setFilteredEmployees(data);
+    } catch (err) {
+      console.error('Error fetching employees:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (employeeSearchTerm.trim()) {
+      const term = employeeSearchTerm.toLowerCase().trim();
+      const filtered = employees.filter(emp => {
+        const fullName = `${emp.firstName} ${emp.lastName}`.toLowerCase();
+        const employeeId = emp.employeeId?.toLowerCase() || '';
+        const email = emp.email?.toLowerCase() || '';
+        return fullName.includes(term) || employeeId.includes(term) || email.includes(term);
+      });
+      setFilteredEmployees(filtered);
+    } else {
+      setFilteredEmployees(employees);
+    }
+  }, [employeeSearchTerm, employees]);
+
+  const selectEmployee = (employee) => {
+    setSelectedEmployee(employee);
+    setLoanRequestForm(prev => ({
+      ...prev,
+      employeeId: employee.id,
+      employeeName: `${employee.firstName} ${employee.lastName}`
+    }));
+    setEmployeeSearchTerm(`${employee.firstName} ${employee.lastName} - ${employee.employeeId}`);
+    setFilteredEmployees([]);
+  };
+
+  const handleLoanRequestChange = (e) => {
+    const { name, value } = e.target;
+    setLoanRequestForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    if ((name === 'amount' || name === 'repaymentPeriod') && loanRequestForm.amount && loanRequestForm.repaymentPeriod) {
+      const amount = name === 'amount' ? parseFloat(value) : parseFloat(loanRequestForm.amount);
+      const period = name === 'repaymentPeriod' ? parseInt(value) : parseInt(loanRequestForm.repaymentPeriod);
+      if (amount && period && period > 0) {
+        const monthlyPayment = amount / period;
+        setLoanRequestForm(prev => ({
+          ...prev,
+          monthlyPaymentAmount: monthlyPayment
+        }));
+      }
+    }
+  };
+
+  const validateLoanRequest = () => {
+    if (!loanRequestForm.employeeId) {
+      setError('Please select an employee');
+      return false;
+    }
+    
+    if (!loanRequestForm.amount || parseFloat(loanRequestForm.amount) <= 0) {
+      setError('Please enter a valid loan amount');
+      return false;
+    }
+    
+    if (settings.maxLoanAmount > 0 && parseFloat(loanRequestForm.amount) > settings.maxLoanAmount) {
+      setError(`Loan amount cannot exceed ${formatCurrency(settings.maxLoanAmount)}`);
+      return false;
+    }
+    
+    if (!loanRequestForm.purpose || loanRequestForm.purpose.trim() === '') {
+      setError('Please provide a purpose for the loan');
+      return false;
+    }
+    
+    if (loanRequestForm.purpose.trim().length < 10) {
+      setError('Please provide a more detailed purpose (minimum 10 characters)');
+      return false;
+    }
+    
+    if (parseInt(loanRequestForm.repaymentPeriod) < settings.minRepaymentPeriod || 
+        parseInt(loanRequestForm.repaymentPeriod) > settings.maxRepaymentPeriod) {
+      setError(`Repayment period must be between ${settings.minRepaymentPeriod} and ${settings.maxRepaymentPeriod} months`);
+      return false;
+    }
+    
+    return true;
+  };
+
+  const submitLoanRequest = async () => {
+    if (!validateLoanRequest()) return;
+    
+    setRequestingLoan(true);
+    setError('');
+    
+    try {
+      const token = getToken();
+      
+      const loanData = {
+        employeeId: parseInt(loanRequestForm.employeeId),
+        amount: parseFloat(loanRequestForm.amount),
+        purpose: loanRequestForm.purpose.trim(),
+        repaymentPeriod: parseInt(loanRequestForm.repaymentPeriod),
+        monthlyPaymentAmount: parseFloat(loanRequestForm.monthlyPaymentAmount) || 0,
+        status: 'Pending',
+        requestDate: new Date().toISOString().split('T')[0]
+      };
+      
+      const response = await fetch(`${API_BASE_URL}/api/loans`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(loanData)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to submit loan request');
+      }
+      
+      const result = await response.json();
+      
+      setSuccess(`Loan request submitted successfully for ${loanRequestForm.employeeName}!`);
+      
+      setLoanRequestForm({
+        employeeId: '',
+        employeeName: '',
+        amount: '',
+        purpose: '',
+        repaymentPeriod: 1,
+        monthlyPaymentAmount: 0,
+      });
+      setSelectedEmployee(null);
+      setEmployeeSearchTerm('');
+      setFilteredEmployees([]);
+      
+      await fetchLoanRequests();
+      
+      setTimeout(() => {
+        setShowLoanRequestModal(false);
+        setSuccess('');
+      }, 3000);
+      
+    } catch (err) {
+      console.error('Error submitting loan request:', err);
+      setError(err.message || 'Failed to submit loan request. Please try again.');
+    } finally {
+      setRequestingLoan(false);
+    }
   };
 
   // ==================== CARD FILTER HANDLER ====================
   const handleCardClick = (cardType, filterValue = null) => {
-    // Clear visibility filters when clicking cards
     setShowActiveOnly(false);
     setShowConsolidatedOnly(false);
     setShowCompletedOnly(false);
-    
-    // Reset search and date range for clean filtering
     setSearchTerm('');
     setDateRange({ start: '', end: '' });
-    
-    // Set the active card filter
     setActiveCardFilter(cardType);
     
-    // Apply the filter
     if (cardType === 'total') {
       setFilter('all');
     } else if (cardType === 'pending') {
@@ -138,10 +358,8 @@ function LoanManagementDashboard() {
     } else if (cardType === 'rejected') {
       setFilter('rejected');
     } else if (cardType === 'totalAmount') {
-      // For total amount, just show all loans and scroll to table
       setFilter('all');
       setActiveCardFilter('totalAmount');
-      // Scroll to table with slight delay
       setTimeout(() => {
         document.getElementById('loan-table-section')?.scrollIntoView({ 
           behavior: 'smooth', 
@@ -150,7 +368,6 @@ function LoanManagementDashboard() {
       }, 100);
     }
     
-    // Reset sorting when changing card filter
     setSortConfig({ key: null, direction: 'asc' });
   };
 
@@ -515,6 +732,69 @@ function LoanManagementDashboard() {
     }
   };
 
+  // ==================== BULK ACTION FUNCTIONS (FIXED) ====================
+  const handleBulkAction = async (action) => {
+    const selectedIds = filteredRequests.filter(req => req.selected).map(req => req.id);
+    if (selectedIds.length === 0) {
+      setError('Please select at least one loan request');
+      return;
+    }
+    
+    const actionText = action === 'approve' ? 'approve' : 'reject';
+    if (!await window.appConfirm(`Are you sure you want to ${actionText} ${selectedIds.length} selected loan requests?`)) {
+      return;
+    }
+    
+    setLoading(true);
+    setError('');
+    try {
+      const token = getToken();
+      
+      const requestBody = {
+        loanIds: selectedIds,
+        processedBy: user?.name || user?.id || 'System'
+      };
+      
+      if (bulkActionNote) {
+        requestBody.notes = bulkActionNote;
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/api/loans/bulk/${action}`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Failed to ${action} selected loans`);
+      }
+      
+      const result = await response.json();
+      setSuccess(`Successfully ${actionText}d ${result.successCount || selectedIds.length} loan requests!`);
+      
+      if (result.failureCount > 0) {
+        setError(`${result.failureCount} loan(s) failed to ${actionText}. Check console for details.`);
+        console.error('Bulk action failures:', result.results?.filter(r => !r.success));
+      }
+      
+      await fetchLoanRequests();
+      
+      const updated = filteredRequests.map(req => ({ ...req, selected: false }));
+      setFilteredRequests(updated);
+      setBulkActionNote('');
+      
+    } catch (err) {
+      console.error(`Error in bulk ${action}:`, err);
+      setError(err.message || `Failed to ${action} selected loans`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const previewConsolidatedDeletion = async (consolidatedLoanId) => {
     setDeleteLoading(true);
     try {
@@ -632,38 +912,6 @@ function LoanManagementDashboard() {
       setDeleteLoading(false);
       setTimeout(() => setSuccess(''), 3000);
       setTimeout(() => setError(''), 5000);
-    }
-  };
-
-  const handleBulkAction = async (action) => {
-    const selectedIds = filteredRequests.filter(req => req.selected).map(req => req.id);
-    if (selectedIds.length === 0) {
-      setError('Please select at least one loan request');
-      return;
-    }
-    if (!window.confirm(`Are you sure you want to ${action} ${selectedIds.length} selected loan requests?`)) {
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const token = getToken();
-      const response = await fetch(`${API_BASE_URL}/api/loans/bulk/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ loanIds: selectedIds, processedBy: user?.id })
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `Failed to ${action} selected loans`);
-      }
-      setSuccess(`Successfully ${action}d ${selectedIds.length} loan requests!`);
-      await fetchLoanRequests();
-    } catch (err) {
-      console.error(`Error in bulk ${action}:`, err);
-      setError(err.message || `Failed to ${action} selected loans`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -793,7 +1041,7 @@ function LoanManagementDashboard() {
         return;
       }
     }
-    if (!window.confirm(`Are you sure you want to ${action} ${selectedLoanIds.length} selected loan(s)?`)) {
+    if (!await window.appConfirm(`Are you sure you want to ${action} ${selectedLoanIds.length} selected loan(s)?`)) {
       return;
     }
     setLoading(true);
@@ -803,7 +1051,12 @@ function LoanManagementDashboard() {
       const response = await fetch(`${API_BASE_URL}/api/loans/bulk/toggle-active`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loanIds: selectedLoanIds, activate: activate, processedBy: user?.name || user?.id, reason: reason })
+        body: JSON.stringify({ 
+          loanIds: selectedLoanIds, 
+          activate: activate, 
+          processedBy: user?.name || user?.id, 
+          reason: reason 
+        })
       });
       if (!response.ok) {
         const errorData = await response.json();
@@ -911,7 +1164,7 @@ function LoanManagementDashboard() {
   const handleLoanAmountChange = (value) => {
     const newAmount = parseFloat(value) || 0;
     setModifiedLoanDetails(prev => {
-      const monthlyPayment = calculateMonthlyPayment(newAmount, prev.repaymentPeriod);
+      const monthlyPayment = prev.repaymentPeriod > 0 ? newAmount / prev.repaymentPeriod : 0;
       return { ...prev, loanAmount: newAmount, monthlyRepayment: monthlyPayment };
     });
   };
@@ -919,7 +1172,7 @@ function LoanManagementDashboard() {
   const handleRepaymentPeriodChange = (value) => {
     const newPeriod = parseInt(value) || 0;
     setModifiedLoanDetails(prev => {
-      const monthlyPayment = calculateMonthlyPayment(prev.loanAmount, newPeriod);
+      const monthlyPayment = newPeriod > 0 ? prev.loanAmount / newPeriod : 0;
       return { ...prev, repaymentPeriod: newPeriod, monthlyRepayment: monthlyPayment };
     });
   };
@@ -962,7 +1215,6 @@ function LoanManagementDashboard() {
 
   const sortedRequests = getSortedRequests();
 
-  // Get filter description for display
   const getFilterDescription = () => {
     if (activeCardFilter === 'total') return 'Showing all loan requests';
     if (activeCardFilter === 'pending') return 'Showing pending loan requests only';
@@ -998,19 +1250,20 @@ function LoanManagementDashboard() {
               <h1 className="text-2xl font-bold text-gray-800">Loan Approval Management</h1>
               <p className="text-gray-600">Review and manage employee loan requests</p>
             </div>
+            <button
+              onClick={openLoanRequestModal}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Create Loan Request
+            </button>
           </section>
 
           {/* CLICKABLE SUMMARY CARDS */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 mt-6">
-            {/* Total Requests Card */}
-            <div 
-              onClick={() => handleCardClick('total')}
-              className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${
-                activeCardFilter === 'total' 
-                  ? 'border-blue-500 bg-blue-50 shadow-md' 
-                  : 'border-gray-200 hover:border-blue-300'
-              }`}
-            >
+            <div onClick={() => handleCardClick('total')} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${activeCardFilter === 'total' ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 hover:border-blue-300'}`}>
               <p className="text-sm text-gray-600 mb-1">Total Requests</p>
               <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
               {activeCardFilter === 'total' && (
@@ -1023,15 +1276,7 @@ function LoanManagementDashboard() {
               )}
             </div>
 
-            {/* Pending Card */}
-            <div 
-              onClick={() => handleCardClick('pending')}
-              className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${
-                activeCardFilter === 'pending' 
-                  ? 'border-yellow-500 bg-yellow-50 shadow-md' 
-                  : 'border-gray-200 hover:border-yellow-300'
-              }`}
-            >
+            <div onClick={() => handleCardClick('pending')} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${activeCardFilter === 'pending' ? 'border-yellow-500 bg-yellow-50 shadow-md' : 'border-gray-200 hover:border-yellow-300'}`}>
               <p className="text-sm text-gray-600 mb-1">Pending</p>
               <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
               {activeCardFilter === 'pending' && (
@@ -1044,15 +1289,7 @@ function LoanManagementDashboard() {
               )}
             </div>
 
-            {/* Active Loans Card */}
-            <div 
-              onClick={() => handleCardClick('active')}
-              className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${
-                activeCardFilter === 'active' 
-                  ? 'border-green-500 bg-green-50 shadow-md' 
-                  : 'border-gray-200 hover:border-green-300'
-              }`}
-            >
+            <div onClick={() => handleCardClick('active')} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${activeCardFilter === 'active' ? 'border-green-500 bg-green-50 shadow-md' : 'border-gray-200 hover:border-green-300'}`}>
               <p className="text-sm text-gray-600 mb-1">Active Loans</p>
               <p className="text-2xl font-bold text-green-600">{stats.approved}</p>
               {activeCardFilter === 'active' && (
@@ -1065,15 +1302,7 @@ function LoanManagementDashboard() {
               )}
             </div>
 
-            {/* Rejected Card */}
-            <div 
-              onClick={() => handleCardClick('rejected')}
-              className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${
-                activeCardFilter === 'rejected' 
-                  ? 'border-red-500 bg-red-50 shadow-md' 
-                  : 'border-gray-200 hover:border-red-300'
-              }`}
-            >
+            <div onClick={() => handleCardClick('rejected')} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${activeCardFilter === 'rejected' ? 'border-red-500 bg-red-50 shadow-md' : 'border-gray-200 hover:border-red-300'}`}>
               <p className="text-sm text-gray-600 mb-1">Rejected</p>
               <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
               {activeCardFilter === 'rejected' && (
@@ -1086,15 +1315,7 @@ function LoanManagementDashboard() {
               )}
             </div>
 
-            {/* Total Amount Card */}
-            <div 
-              onClick={() => handleCardClick('totalAmount')}
-              className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${
-                activeCardFilter === 'totalAmount' 
-                  ? 'border-purple-500 bg-purple-50 shadow-md' 
-                  : 'border-gray-200 hover:border-purple-300'
-              }`}
-            >
+            <div onClick={() => handleCardClick('totalAmount')} className={`bg-white rounded-xl shadow-sm border-2 transition-all duration-200 p-4 cursor-pointer hover:shadow-md hover:-translate-y-1 ${activeCardFilter === 'totalAmount' ? 'border-purple-500 bg-purple-50 shadow-md' : 'border-gray-200 hover:border-purple-300'}`}>
               <p className="text-sm text-gray-600 mb-1">Total Amount</p>
               <p className="text-2xl font-bold text-purple-600">{formatCurrency(stats.totalAmount)}</p>
               {activeCardFilter === 'totalAmount' && (
@@ -1122,10 +1343,7 @@ function LoanManagementDashboard() {
                   {sortedRequests.length} result{sortedRequests.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <button
-                onClick={clearCardFilter}
-                className="text-sm px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
-              >
+              <button onClick={clearCardFilter} className="text-sm px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -1158,16 +1376,79 @@ function LoanManagementDashboard() {
             </div>
           </div>
 
+          {/* ============ UPDATED BULK ACTION SECTION ============ */}
           {filteredRequests.some(r => r.selected) && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between flex-wrap gap-2">
-              <p className="text-sm text-blue-700">{filteredRequests.filter(r => r.selected).length} loan(s) selected</p>
-              <div className="flex gap-2"><button onClick={() => handleBulkAction('approve')} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">Approve Selected</button><button onClick={() => handleBulkAction('reject')} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">Reject Selected</button><button onClick={() => handleBulkToggle(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Activate Selected</button><button onClick={() => handleBulkToggle(false)} className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm">Deactivate Selected</button></div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                <p className="text-sm text-blue-700 whitespace-nowrap">
+                  {filteredRequests.filter(r => r.selected).length} loan(s) selected
+                </p>
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                  <input
+                    type="text"
+                    placeholder="Add notes (optional)"
+                    value={bulkActionNote}
+                    onChange={(e) => setBulkActionNote(e.target.value)}
+                    className="flex-1 md:flex-none px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-w-[150px]"
+                  />
+                  <button 
+                    onClick={() => handleBulkAction('approve')} 
+                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition-colors flex items-center gap-1"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Approve
+                  </button>
+                  <button 
+                    onClick={() => handleBulkAction('reject')} 
+                    className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm transition-colors flex items-center gap-1"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Reject
+                  </button>
+                  <button 
+                    onClick={() => handleBulkToggle(true)} 
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition-colors flex items-center gap-1"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Activate
+                  </button>
+                  <button 
+                    onClick={() => handleBulkToggle(false)} 
+                    className="px-3 py-1.5 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm transition-colors flex items-center gap-1"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Deactivate
+                  </button>
+                </div>
+              </div>
+              {loading && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
+                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </div>
+              )}
             </div>
           )}
 
           {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg"><p className="text-sm text-red-600">{error}</p></div>}
           {success && <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg"><p className="text-sm text-green-600">{success}</p></div>}
 
+          {/* ============ LOAN TABLE ============ */}
           <div id="loan-table-section" className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
@@ -1285,7 +1566,8 @@ function LoanManagementDashboard() {
         </main>
       </div>
 
-      {/* Details Modal - Same as original */}
+      {/* ============ MODALS (Details, Delete, Action, Toggle, Loan Request) ============ */}
+      {/* Details Modal */}
       {showDetailsModal && selectedRequest && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -1500,6 +1782,276 @@ function LoanManagementDashboard() {
               <h2 className="text-xl font-bold text-gray-800 mb-4">{toggleAction === 'activate' ? 'Activate' : 'Deactivate'} Loan</h2>
               <div className="mb-4"><p className="text-sm text-gray-600 mb-2">Are you sure you want to {toggleAction} this loan?</p><div className="bg-gray-50 p-3 rounded-lg mb-4"><p className="text-sm text-gray-700"><span className="font-medium">Employee:</span> {selectedRequest.employee?.firstName} {selectedRequest.employee?.lastName}</p><p className="text-sm text-gray-700"><span className="font-medium">Loan Amount:</span> {formatCurrency(selectedRequest.approvedAmount || selectedRequest.loanAmount)}</p><p className="text-sm text-gray-700"><span className="font-medium">Remaining Balance:</span> {formatCurrency(selectedRequest.remainingBalance || 0)}</p><p className="text-sm text-gray-700"><span className="font-medium">Current Status:</span> {selectedRequest.isActive ? 'Active' : 'Inactive'}</p></div>{toggleAction === 'deactivate' && (<div><label className="block text-sm font-medium text-gray-700 mb-2">Reason for deactivation *</label><textarea value={toggleReason} onChange={(e) => setToggleReason(e.target.value)} rows="3" placeholder="Please provide a reason for deactivating this loan..." className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required /></div>)}{toggleAction === 'activate' && (<div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><p className="text-sm text-blue-800">Activating this loan will resume monthly deductions from the employee's salary.</p></div>)}</div>
               <div className="flex justify-end gap-3"><button onClick={() => { setShowToggleModal(false); setSelectedRequest(null); setToggleReason(''); }} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button><button onClick={handleToggleActive} disabled={toggleLoading || (toggleAction === 'deactivate' && !toggleReason.trim())} className={`px-4 py-2 text-white rounded-lg flex items-center gap-2 ${toggleAction === 'activate' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} ${(toggleLoading || (toggleAction === 'deactivate' && !toggleReason.trim())) ? 'opacity-50 cursor-not-allowed' : ''}`}>{toggleLoading ? (<><svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Processing...</>) : (`Confirm ${toggleAction === 'activate' ? 'Activation' : 'Deactivation'}`)}</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== LOAN REQUEST MODAL ==================== */}
+      {showLoanRequestModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Create New Loan Request</h2>
+                <button 
+                  onClick={() => {
+                    setShowLoanRequestModal(false);
+                    setError('');
+                    setSuccess('');
+                    setSelectedEmployee(null);
+                    setEmployeeSearchTerm('');
+                    setFilteredEmployees([]);
+                  }} 
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              )}
+              
+              {success && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-sm text-green-600">{success}</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {/* Employee Search */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Search Employee <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search by name, employee ID, or email..."
+                      value={employeeSearchTerm}
+                      onChange={(e) => setEmployeeSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {employeeSearchTerm && (
+                      <button
+                        onClick={() => {
+                          setEmployeeSearchTerm('');
+                          setFilteredEmployees([]);
+                        }}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Employee Results Dropdown */}
+                  {filteredEmployees.length > 0 && (
+                    <div className="mt-1 border border-gray-300 rounded-lg max-h-40 overflow-y-auto">
+                      {filteredEmployees.map((employee) => (
+                        <div
+                          key={employee.id}
+                          onClick={() => selectEmployee(employee)}
+                          className="px-4 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0"
+                        >
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">
+                                {employee.firstName} {employee.lastName}
+                              </p>
+                              <p className="text-xs text-gray-500">{employee.employeeId} {employee.email && `| ${employee.email}`}</p>
+                            </div>
+                            {employee.category && (
+                              <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">
+                                {employee.category}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Selected Employee Display */}
+                  {selectedEmployee && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg flex justify-between items-center">
+                      <div>
+                        <p className="text-sm font-medium text-blue-800">
+                          Selected: {selectedEmployee.firstName} {selectedEmployee.lastName}
+                        </p>
+                        <p className="text-xs text-blue-600">ID: {selectedEmployee.employeeId}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedEmployee(null);
+                          setEmployeeSearchTerm('');
+                          setLoanRequestForm(prev => ({ ...prev, employeeId: '', employeeName: '' }));
+                        }}
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Loan Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Loan Amount (GHS) <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500">₵</span>
+                    </div>
+                    <input
+                      type="number"
+                      name="amount"
+                      value={loanRequestForm.amount}
+                      onChange={handleLoanRequestChange}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                      className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  {settings.maxLoanAmount > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      Maximum loan amount: {formatCurrency(settings.maxLoanAmount)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Monthly Payment Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Monthly Payment Amount (GHS)
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500">₵</span>
+                    </div>
+                    <input
+                      type="number"
+                      name="monthlyPaymentAmount"
+                      value={loanRequestForm.monthlyPaymentAmount}
+                      onChange={handleLoanRequestChange}
+                      placeholder="Auto-calculated"
+                      min="0"
+                      step="0.01"
+                      className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Auto-calculated based on amount and repayment period (NO INTEREST)
+                  </p>
+                </div>
+
+                {/* Purpose */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Purpose of Loan <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    name="purpose"
+                    value={loanRequestForm.purpose}
+                    onChange={handleLoanRequestChange}
+                    rows="3"
+                    placeholder="Please provide a detailed explanation of why the loan is needed..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Minimum 10 characters
+                  </p>
+                </div>
+
+                {/* Repayment Period */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Repayment Period (Months) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    name="repaymentPeriod"
+                    value={loanRequestForm.repaymentPeriod}
+                    onChange={handleLoanRequestChange}
+                    min={settings.minRepaymentPeriod}
+                    max={settings.maxRepaymentPeriod}
+                    step="1"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Minimum: {settings.minRepaymentPeriod} month(s) | Maximum: {settings.maxRepaymentPeriod} months
+                  </p>
+                </div>
+
+                {/* Terms and Conditions */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Terms and Conditions</h4>
+                  <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
+                    <li>Loan approval is subject to company policy and management discretion</li>
+                    <li>Repayments will be deducted from monthly salary</li>
+                    <li>Early repayment is allowed without penalty</li>
+                    <li>Defaulting on payments may affect future loan eligibility</li>
+                    <li>This request will be reviewed within 3-5 business days</li>
+                  </ul>
+                </div>
+
+                {/* Submit Buttons */}
+                <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
+                  <button
+                    onClick={() => {
+                      setShowLoanRequestModal(false);
+                      setError('');
+                      setSuccess('');
+                      setSelectedEmployee(null);
+                      setEmployeeSearchTerm('');
+                      setFilteredEmployees([]);
+                    }}
+                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitLoanRequest}
+                    disabled={requestingLoan}
+                    className={`px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium shadow-sm hover:shadow flex items-center gap-2 ${
+                      requestingLoan ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {requestingLoan ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Submit Loan Request
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

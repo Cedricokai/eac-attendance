@@ -24,6 +24,8 @@ function EmployeeOvertimeRequest() {
   const navigate = useNavigate();
   const createMenuRef = useRef(null);
   const [selectAllEmployees, setSelectAllEmployees] = useState(false);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]);
+  const [employeeSearch, setEmployeeSearch] = useState('');
   const [user, setUser] = useState(null);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
@@ -35,7 +37,8 @@ function EmployeeOvertimeRequest() {
     status: 'Pending',
     overtimeHours: 0,
     totalOvertimePay: 0,
-    overtimeMultiplier: null
+    overtimeMultiplier: null,
+    notes: ''
   });
 
   const getApiBaseUrl = () => {
@@ -248,172 +251,94 @@ function EmployeeOvertimeRequest() {
     fetchEmployees();
   }, [newOvertime.date]);
 
-  const createOvertime = async () => { 
-    if (selectAllEmployees) {
-      const formatTimeToHHMMSS = (time) => {
-        if (!time) return '00:00:00';
-        if (time.length === 5) return time + ':00';
-        if (time.length === 8) return time;
-        const parts = time.split(':');
-        if (parts.length === 2) return `${parts[0]}:${parts[1]}:00`;
-        return '00:00:00';
-      };
-
-      for (const employee of employees) {
-        const employeeRate = employee.minimumRate || settings.hourlyRate;
-
-        const date = new Date(newOvertime.date);
-        const dayOfWeek = date.getDay();
-
-        let multiplier = settings.defaultOvertimeMultiplier;
-
-        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
-          multiplier = settings.sundayOvertimeMultiplier;
-        }
-
-        const [startHours, startMinutes] = newOvertime.startTime.split(':').map(Number);
-        const [endHours, endMinutes] = newOvertime.endTime.split(':').map(Number);
-
-        const startTotal = startHours * 60 + startMinutes;
-        const endTotal = endHours * 60 + endMinutes;
-
-        const diffHours = (endTotal - startTotal) / 60;
-
-        if (settings.enableTimeAndHalfAfter8Hours && diffHours > 8) {
-          multiplier = settings.timeAndHalfMultiplier;
-        }
-
-        const newHourlyRate = employeeRate * multiplier;
-        const overtimePay = (newHourlyRate * diffHours).toFixed(2);
-
-        const overtimeData = {
-          employeeId: employee.id,
-          date: newOvertime.date,
-          startTime: formatTimeToHHMMSS(newOvertime.startTime),
-          endTime: formatTimeToHHMMSS(newOvertime.endTime),
-          status: 'Pending',
-          baseHourlyRate: employeeRate,
-          overtimeMultiplier: multiplier,
-          overtimeHours: Number(diffHours.toFixed(2)),
-          calculatedOvertimePay: Number(overtimePay)
-        };
-
-        try {
-          const token = getToken();
-          
-          const response = await fetch(`${API_BASE_URL}/api/overtime`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(overtimeData)
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server error response:', errorText);
-            continue;
-          }
-
-          const responseData = await response.json();
-          console.log('Successfully created overtime:', responseData);
-
-        } catch (err) {
-          console.error('Error creating overtime for employee:', employee.id, err);
-          continue;
-        }
-      }
-
-      setNewOvertime({
-        employee: { id: '' },
-        date: new Date().toISOString().split('T')[0],
-        startTime: '',
-        endTime: '',
-        status: 'Pending',
-        overtimeHours: 0,
-        totalOvertimePay: 0,
-        overtimeMultiplier: null
-      });
-
-      setSelectAllEmployees(false);
-      setIsCreateMenuOpen(false);
-      alert('Overtime requests submitted successfully!');
-
-    } else {
-      if (!newOvertime.employee.id || !newOvertime.date || !newOvertime.startTime || !newOvertime.endTime) {
-        setError('Please fill out all required fields.');
-        return;
-      }
-
-      if (!newOvertime.overtimeHours || parseFloat(newOvertime.overtimeHours) <= 0) {
-        setError('End time must be after start time');
-        return;
-      }
-
-      try {
-        const employeeRate = getEmployeeRate(newOvertime.employee.id);
-        const newHourlyRate = employeeRate * (newOvertime.overtimeMultiplier || settings.defaultOvertimeMultiplier);
-        const calculatedPay = (newHourlyRate * parseFloat(newOvertime.overtimeHours || 0)).toFixed(2);
-        const formatTime = (t) => t.length === 5 ? t + ":00" : t;
-
-        const overtimeData = {
-          employeeId: newOvertime.employee.id,
-          date: newOvertime.date,
-          startTime: formatTime(newOvertime.startTime),
-          endTime: formatTime(newOvertime.endTime),
-          status: 'Pending',
-          baseHourlyRate: employeeRate,
-          calculatedOvertimePay: Number(calculatedPay),
-          overtimeHours: Number(newOvertime.overtimeHours),
-          ...(newOvertime.overtimeMultiplier != null && {
-            overtimeMultiplier: Number(newOvertime.overtimeMultiplier)
-          })
-        };
-
-        overtimeData.baseHourlyRate = Number(overtimeData.baseHourlyRate);
-        overtimeData.overtimeMultiplier = Number(overtimeData.overtimeMultiplier);
-        overtimeData.overtimeHours = Number(overtimeData.overtimeHours);
-        overtimeData.calculatedOvertimePay = Number(overtimeData.calculatedOvertimePay);
-
-        const token = getToken();
-
-        const response = await fetch(`${API_BASE_URL}/api/overtime`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(overtimeData),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Server error response:', errorText);
-          throw new Error(`Server error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-
-        setNewOvertime({
-          employee: { id: '' },
-          date: new Date().toISOString().split('T')[0],
-          startTime: '',
-          endTime: '',
-          status: 'Pending',
-          overtimeHours: 0,
-          totalOvertimePay: 0,
-          overtimeMultiplier: null
-        });
-        setError('');
-        setIsCreateMenuOpen(false);
-        alert('Overtime request submitted successfully!');
-
-      } catch (err) {
-        console.error('Error creating overtime:', err);
-        setError(err.message);
-      }
+  const createOvertime = async () => {
+    if (!newOvertime.date || !newOvertime.startTime || !newOvertime.endTime) {
+      setError('Please select employees, a date, start time, and end time.');
+      return;
     }
+
+    const targetEmployees = selectAllEmployees
+      ? employees
+      : employees.filter(employee => selectedEmployeeIds.includes(employee.id));
+
+    if (targetEmployees.length === 0) {
+      setError('Please select at least one employee.');
+      return;
+    }
+
+    const [startHours, startMinutes] = newOvertime.startTime.split(':').map(Number);
+    const [endHours, endMinutes] = newOvertime.endTime.split(':').map(Number);
+    const diffHours = ((endHours * 60 + endMinutes) - (startHours * 60 + startMinutes)) / 60;
+    if (diffHours <= 0) {
+      setError('End time must be after start time.');
+      return;
+    }
+
+    const formatTime = (time) => time.length === 5 ? `${time}:00` : time;
+    const token = getToken();
+    setLoading(true);
+    setError('');
+    const overtimeRequests = targetEmployees.map(employee => {
+      let multiplier = Number(settings.defaultOvertimeMultiplier || 1.5);
+      const requestDate = new Date(`${newOvertime.date}T00:00:00`);
+      if (requestDate.getDay() === 0 && settings.doubleTimeOnSunday) {
+        multiplier = Number(settings.sundayOvertimeMultiplier || 2);
+      }
+      if (settings.enableTimeAndHalfAfter8Hours && diffHours > 8) {
+        multiplier = Number(settings.timeAndHalfMultiplier || 1.5);
+      }
+
+      const employeeRate = Number(employee.minimumRate || settings.hourlyRate || 0);
+      return {
+        employeeId: employee.id,
+        date: newOvertime.date,
+        startTime: formatTime(newOvertime.startTime),
+        endTime: formatTime(newOvertime.endTime),
+        status: 'Pending',
+        baseHourlyRate: employeeRate,
+        overtimeMultiplier: multiplier,
+        overtimeHours: Number(diffHours.toFixed(2)),
+        calculatedOvertimePay: Number((employeeRate * multiplier * diffHours).toFixed(2)),
+        notes: newOvertime.notes || ''
+      };
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/overtime/delegated-requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(overtimeRequests)
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+    } catch (err) {
+      setLoading(false);
+      setError(`Submission failed: ${err.message}`);
+      return;
+    }
+    setLoading(false);
+
+    setSelectedEmployeeIds([]);
+    setEmployeeSearch('');
+    setSelectAllEmployees(false);
+    setNewOvertime({
+      employee: { id: '' },
+      date: new Date().toISOString().split('T')[0],
+      startTime: '',
+      endTime: '',
+      status: 'Pending',
+      overtimeHours: 0,
+      totalOvertimePay: 0,
+      overtimeMultiplier: null,
+      notes: ''
+    });
+    const successCount = overtimeRequests.length;
+    alert(`${successCount} overtime request${successCount === 1 ? '' : 's'} submitted. Each supervisor will receive one grouped email.`);
   };
 
   const getDefaultOvertimeMultiplier = () => {
@@ -429,6 +354,25 @@ function EmployeeOvertimeRequest() {
   const getEmployeeRate = (employeeId) => {
     const employee = employees.find(emp => emp.id === employeeId);
     return employee?.minimumRate || settings.hourlyRate;
+  };
+
+  const filteredEmployeeOptions = employees.filter((employee) => {
+    const search = employeeSearch.trim().toLowerCase();
+    if (!search) return true;
+    const category = typeof employee.category === 'object' ? employee.category?.name : employee.category;
+    return [employee.firstName, employee.lastName, employee.employeeId, category]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(search));
+  });
+
+  const toggleEmployee = (employeeId) => {
+    setSelectedEmployeeIds(previous => {
+      const next = previous.includes(employeeId)
+        ? previous.filter(id => id !== employeeId)
+        : [...previous, employeeId];
+      setNewOvertime(current => ({ ...current, employee: { id: next[0] || '' } }));
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -536,8 +480,8 @@ function EmployeeOvertimeRequest() {
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="mb-6">
-            <h2 className="text-lg font-semibold text-gray-800">Request Overtime</h2>
-            <p className="text-sm text-gray-600">Fill in the details below to submit an overtime request</p>
+            <h2 className="text-lg font-semibold text-gray-800">Submit Overtime for an Employee</h2>
+            <p className="text-sm text-gray-600">Requests are recorded under your account and sent to the employee&apos;s supervisor for review.</p>
           </div>
 
           {error && (
@@ -559,22 +503,50 @@ function EmployeeOvertimeRequest() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-                <select
-                  name="employeeId"
-                  value={newOvertime.employee.id}
-                  onChange={handleInputChange}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Search employees</label>
+                <input
+                  type="search"
+                  value={employeeSearch}
+                  onChange={(e) => setEmployeeSearch(e.target.value)}
                   disabled={selectAllEmployees}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Select Employee</option>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.firstName} {employee.lastName} ({formatCurrency(employee.minimumRate || settings.hourlyRate)}/hr)
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Name, employee ID, or category"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                />
               </div>
+            </div>
+
+            {!selectAllEmployees && (
+              <div className="border border-gray-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100">
+                {filteredEmployeeOptions.map((employee) => {
+                  const category = typeof employee.category === 'object' ? employee.category?.name : employee.category;
+                  return (
+                    <label key={employee.id} className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmployeeIds.includes(employee.id)}
+                        onChange={() => toggleEmployee(employee.id)}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-gray-800">{employee.firstName} {employee.lastName}</span>
+                        <span className="block text-xs text-gray-500">
+                          {employee.employeeId || 'No employee ID'}{category ? ` • ${category}` : ''}
+                        </span>
+                      </span>
+                      <span className="text-xs text-gray-500">{formatCurrency(employee.minimumRate || settings.hourlyRate)}/hr</span>
+                    </label>
+                  );
+                })}
+                {filteredEmployeeOptions.length === 0 && (
+                  <p className="p-4 text-sm text-center text-gray-500">No employees match your search.</p>
+                )}
+              </div>
+            )}
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+              {selectAllEmployees
+                ? `All ${employees.length} available employees selected`
+                : `${selectedEmployeeIds.length} employee${selectedEmployeeIds.length === 1 ? '' : 's'} selected`}
             </div>
 
             {newOvertime.employee.id && (
@@ -590,7 +562,13 @@ function EmployeeOvertimeRequest() {
                 type="checkbox"
                 id="selectAllEmployees"
                 checked={selectAllEmployees}
-                onChange={(e) => setSelectAllEmployees(e.target.checked)}
+                onChange={(e) => {
+                  setSelectAllEmployees(e.target.checked);
+                  if (e.target.checked) {
+                    setSelectedEmployeeIds([]);
+                    setNewOvertime(prev => ({ ...prev, employee: { id: '' } }));
+                  }
+                }}
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
               <label htmlFor="selectAllEmployees" className="text-sm font-medium text-gray-700">
@@ -654,6 +632,18 @@ function EmployeeOvertimeRequest() {
               </div>
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason or notes</label>
+              <textarea
+                value={newOvertime.notes || ''}
+                onChange={(e) => setNewOvertime(prev => ({ ...prev, notes: e.target.value }))}
+                rows={3}
+                maxLength={1000}
+                placeholder="Explain why the overtime is required"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <h4 className="text-sm font-medium text-green-800 mb-2">Overtime Calculation (GHS)</h4>
               <div className="text-sm text-green-700 space-y-1">
@@ -676,6 +666,8 @@ function EmployeeOvertimeRequest() {
                     overtimeMultiplier: null
                   });
                   setSelectAllEmployees(false);
+                  setSelectedEmployeeIds([]);
+                  setEmployeeSearch('');
                   setError('');
                 }}
                 className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -684,9 +676,10 @@ function EmployeeOvertimeRequest() {
               </button>
               <button
                 onClick={createOvertime}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-blue-300 disabled:cursor-not-allowed"
               >
-                Submit Overtime Request
+                {loading ? 'Submitting...' : 'Submit Overtime Request'}
               </button>
             </div>
           </div>

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import PropTypes from "prop-types";
 import LeaveBalanceTracker from "./LeaveBalanceTracker";
 import InventoryRequestStatusTracker from "./InventoryRequestStatusTracker";
 import html2pdf from "html2pdf.js";
 import companyLogo from "../../../assets/companyLogo.jpg";
+import { useSettings } from "../context/SettingsContext";
 import {
   CalendarCheck,
   Users,
@@ -41,13 +43,18 @@ import {
   Filter,
   Search,
   X,
-  Utensils // ✅ ADDED for Meals
+  UtensilsCrossed,
+  LogOut,
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
+  const location = useLocation();
+  const { settings } = useSettings();
   const [accessiblePages, setAccessiblePages] = useState([]);
   const [filteredPages, setFilteredPages] = useState([]);
   const [pageSearchQuery, setPageSearchQuery] = useState("");
+  const [selectedModule, setSelectedModule] = useState("ALL");
+  const [showApplicationsWorkspace, setShowApplicationsWorkspace] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState({ username: "", roles: [], email: "" });
   const [leaveRequests, setLeaveRequests] = useState([]);
@@ -58,6 +65,7 @@ const EmployeeDashboard = () => {
   const [employeeInfo, setEmployeeInfo] = useState(null);
   const [showInventoryStatus, setShowInventoryStatus] = useState(false);
   const [showLeaveBalance, setShowLeaveBalance] = useState(false);
+  const [showMyInformation, setShowMyInformation] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState([]);
   const [unreadEmails, setUnreadEmails] = useState(0);
   const [inventoryStats, setInventoryStats] = useState({
@@ -77,12 +85,27 @@ const EmployeeDashboard = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPayslip, setShowPayslip] = useState(false);
+  const [showAttendance, setShowAttendance] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const attendanceTotals = useMemo(() => attendanceRecords.reduce((totals, record) => ({
+    hours: totals.hours + record.hours,
+    overtime: totals.overtime + record.overtime,
+  }), { hours: 0, overtime: 0 }), [attendanceRecords]);
+  const [attendanceRange, setAttendanceRange] = useState(null);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const attendanceRequestRef = useRef(0);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [attendanceError, setAttendanceError] = useState("");
   const [yearFilter, setYearFilter] = useState(new Date().getFullYear());
   const [monthFilter, setMonthFilter] = useState("");
   const payslipRef = useRef(null);
   const pdfRef = useRef(null);
 
-  const companyName = "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyName = settings.companyName || "EAC ELECTRICAL SOLUTION LIMITED";
+  const companyContactLine = [settings.companyAddress, settings.companyEmail, settings.companyPhone]
+    .filter(Boolean)
+    .join(" • ");
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
@@ -97,6 +120,29 @@ const EmployeeDashboard = () => {
 
   const API_BASE_URL = getApiBaseUrl();
   const getToken = () => localStorage.getItem("jwtToken");
+
+  const handleLogout = async () => {
+    const token = getToken();
+
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+    } catch (logoutError) {
+      console.error("Logout request failed:", logoutError);
+    } finally {
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      localStorage.removeItem("user");
+      localStorage.removeItem("userData");
+      window.location.href = "/";
+    }
+  };
 
   const toNumber = (v) => {
     const n = Number(v);
@@ -120,6 +166,146 @@ const EmployeeDashboard = () => {
       month: "long",
       day: "numeric",
     });
+  };
+
+  const toDateInputValue = (date) => {
+    const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return offsetDate.toISOString().slice(0, 10);
+  };
+
+const fetchEmployeeAttendance = async (range = attendanceRange) => {
+  const today = toDateInputValue(new Date());
+  const startDate = range?.startDate || today;
+  const endDate = range?.endDate || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    setAttendanceError("Choose a valid start and end date.");
+    return;
+  }
+  const requestId = ++attendanceRequestRef.current;
+  if (!employeeInfo?.id) {
+    setAttendanceRecords([]);
+    setAttendanceError("No employee profile is linked to your account.");
+    return;
+  }
+
+  setAttendanceRecords([]);
+  setLoadingAttendance(true);
+  setAttendanceError("");
+  try {
+    const token = getToken();
+    const singleDay = startDate === endDate;
+    const params = new URLSearchParams({
+      employeeId: String(employeeInfo.id),
+      ...(singleDay ? { date: startDate } : { startDate, endDate }),
+    });
+    const endpoint = singleDay ? 'by-employee-date' : 'by-employee-range';
+
+    // Fetch attendance and approved overtime in parallel.
+    const [attendanceResponse, approvedOvertimeByKey] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/attendance/${endpoint}?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }),
+      fetchApprovedOvertimeForRange(startDate, endDate, employeeInfo.id).catch((err) => {
+        console.error('Overtime lookup failed:', err);
+        return new Map();
+      }),
+    ]);
+
+    if (requestId !== attendanceRequestRef.current) return;
+    if (singleDay && attendanceResponse.status === 404) {
+      setAttendanceRecords([]);
+      return;
+    }
+    if (!attendanceResponse.ok) throw new Error("Could not load your attendance record");
+
+    const data = await attendanceResponse.json();
+    const records = (Array.isArray(data) ? data : data ? [data] : [])
+      .filter((record) =>
+        String(record.employee?.id ?? record.employeeId) === String(employeeInfo.id) &&
+        String(record.date || "").slice(0, 10) >= startDate &&
+        String(record.date || "").slice(0, 10) <= endDate
+      )
+      .map((record) => {
+        const date = String(record.date || "").slice(0, 10);
+        const key = `${employeeInfo.id}-${date}`;
+        const approvedOvertime = approvedOvertimeByKey.get(key) ?? 0;
+
+        return {
+          id: record.id || `${date}-${record.employeeId}`,
+          date,
+          checkIn: record.checkIn || "--:--",
+          checkOut: record.checkOut || "--:--",
+          hours: toNumber(
+            record.minimumHour ?? record.regularHours
+              ?? Math.max(0, toNumber(record.totalHours) - toNumber(record.overtime ?? record.overtimeHours))
+          ),
+          overtime: approvedOvertime,   // only approved OT
+          status: record.status || "Not recorded",
+          shift: record.shift,
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    if (requestId === attendanceRequestRef.current) setAttendanceRecords(records);
+  } catch (err) {
+    if (requestId !== attendanceRequestRef.current) return;
+    console.error("Error fetching employee attendance:", err);
+    setAttendanceError(err.message || "Could not load attendance records");
+    setAttendanceRecords([]);
+  } finally {
+    if (requestId === attendanceRequestRef.current) setLoadingAttendance(false);
+  }
+};
+
+  const fetchApprovedOvertimeForRange = async (startDate, endDate, employeeId) => {
+  const token = getToken();
+  const params = new URLSearchParams({
+    startDate,
+    endDate,
+    page: '0',
+    size: '500',
+  });
+  const response = await fetch(`${API_BASE_URL}/api/overtime/page?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) throw new Error('Could not load overtime records');
+
+  const page = await response.json();
+  const records = Array.isArray(page.content) ? page.content : [];
+
+  // Build a lookup keyed by `${employeeId}-${date}` for approved overtime only.
+  const approvedByEmployeeDate = new Map();
+  for (const record of records) {
+    const recordEmployeeId = record.employeeId ?? record.employee?.id;
+    if (String(recordEmployeeId) !== String(employeeId)) continue;
+    if (String(record.status || '').toLowerCase() !== 'approved') continue;
+
+    const date = String(record.date || '').slice(0, 10);
+    if (!date) continue;
+
+    // The hours that actually count depend on where the multiplier was applied:
+    //   - multiplier applied to hours  -> overtimeHours already includes it
+    //   - multiplier applied to rate   -> rawOvertimeHours is the real hours
+    const hours = record.multiplierAppliedToHours
+      ? Number(record.overtimeHours ?? 0)
+      : Number(record.rawOvertimeHours ?? record.overtimeHours ?? 0);
+
+    const key = `${recordEmployeeId}-${date}`;
+    approvedByEmployeeDate.set(key, (approvedByEmployeeDate.get(key) || 0) + hours);
+  }
+  return approvedByEmployeeDate;
+};
+
+  const openAttendance = () => {
+    const today = toDateInputValue(new Date());
+    setCustomStartDate(today);
+    setCustomEndDate(today);
+    setAttendanceRange(null);
+    if (showAttendance) fetchEmployeeAttendance(null);
+    setShowAttendance(true);
+    window.setTimeout(() => {
+      document.getElementById("my-attendance")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   };
 
   const fetchCurrentUser = async () => {
@@ -173,9 +359,15 @@ const EmployeeDashboard = () => {
         setPayrollPeriods(data);
 
         if (data.length > 0) {
-          const years = [...new Set(data.map((period) => new Date(period.startDate).getFullYear()))];
+          const years = [...new Set(
+            data
+              .filter((period) => period.endDate)
+              .map((period) => new Date(period.endDate).getFullYear())
+          )];
           const currentYear = new Date().getFullYear();
-          setYearFilter(years.includes(currentYear) ? currentYear : Math.max(...years));
+          if (years.length > 0) {
+            setYearFilter(years.includes(currentYear) ? currentYear : Math.max(...years));
+          }
         }
       }
     } catch (err) {
@@ -218,6 +410,52 @@ const EmployeeDashboard = () => {
       setPayrollRecord(null);
     } finally {
       setLoadingPayslip(false);
+    }
+  };
+
+  const fetchAvailableEmployeePayslips = async (periods, employeeId) => {
+    if (!employeeId || !Array.isArray(periods) || periods.length === 0) {
+      setPayslips([]);
+      return;
+    }
+
+    setLoadingPayslips(true);
+    try {
+      const token = getToken();
+      const availablePeriods = await Promise.all(
+        periods.map(async (period) => {
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/payroll/employee-payslip?periodId=${period.id}&employeeId=${employeeId}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+            return response.ok ? period : null;
+          } catch (error) {
+            console.error(`Could not check payslip for period ${period.id}:`, error);
+            return null;
+          }
+        })
+      );
+
+      const employeePeriods = availablePeriods.filter(Boolean);
+      setPayslips(employeePeriods);
+
+      const employeeYears = [...new Set(
+        employeePeriods
+          .filter((period) => period.endDate)
+          .map((period) => new Date(period.endDate).getFullYear())
+      )];
+      if (employeeYears.length > 0) {
+        const currentYear = new Date().getFullYear();
+        setYearFilter(employeeYears.includes(currentYear) ? currentYear : Math.max(...employeeYears));
+      }
+    } finally {
+      setLoadingPayslips(false);
     }
   };
 
@@ -508,7 +746,7 @@ const EmployeeDashboard = () => {
 
             <div class="footer">
               <div><strong>${companyName}</strong></div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>${companyContactLine}</div>
               <div style="margin-top: 3px; font-size: 8px;">
                 This is a computer-generated payslip. No signature is required for digital copies.
               </div>
@@ -546,9 +784,12 @@ const EmployeeDashboard = () => {
     printWindow.document.close();
   };
 
-  const filteredPeriods = payrollPeriods.filter((period) => {
-    const periodYear = new Date(period.startDate).getFullYear();
-    const periodMonth = new Date(period.startDate).getMonth();
+  const filteredPeriods = payslips.filter((period) => {
+    if (!period.endDate) return false;
+
+    const periodEndDate = new Date(period.endDate);
+    const periodYear = periodEndDate.getFullYear();
+    const periodMonth = periodEndDate.getMonth();
 
     if (yearFilter && periodYear !== parseInt(yearFilter)) return false;
     if (monthFilter && periodMonth !== parseInt(monthFilter)) return false;
@@ -572,9 +813,11 @@ const EmployeeDashboard = () => {
     { value: "11", label: "December" },
   ];
 
-  const availableYears = [...new Set(payrollPeriods.map((period) => new Date(period.startDate).getFullYear()))].sort(
-    (a, b) => b - a
-  );
+  const availableYears = [...new Set(
+    payslips
+      .filter((period) => period.endDate)
+      .map((period) => new Date(period.endDate).getFullYear())
+  )].sort((a, b) => b - a);
 
   const handleGeneratePayslip = () => {
     if (!selectedPeriod) {
@@ -606,23 +849,34 @@ const EmployeeDashboard = () => {
             !page.path.includes("/signin") &&
             !page.path.includes("/signup") &&
             !page.path.includes("/register") &&
+            !page.path.includes("/actions/") &&
             !page.name.toLowerCase().includes("signin") &&
             !page.name.toLowerCase().includes("signup") &&
             !page.name.toLowerCase().includes("login") &&
             !page.name.toLowerCase().includes("register")
         );
 
-        const transformedPages = filteredPages.map((page) => ({
-          id: page.id,
-          to: page.path,
-          icon: getIconComponent(page.iconName),
-          title: page.name,
-          description: page.description || "Access this page",
-          module: page.module || "GENERAL",
-          isPublic: page.isPublic || false,
-          displayOrder: page.displayOrder || 0,
-          requiresAuth: page.requiresAuth !== false,
-        }));
+        const transformedPages = filteredPages.map((page) => {
+          const normalizedName = String(page.name || "").trim().toLowerCase();
+          const normalizedPath = String(page.path || "").trim().toLowerCase();
+          const isDashboardOverview =
+            normalizedName === "dashboard overview" ||
+            normalizedName === "employee dashboard" ||
+            normalizedPath === "/overview" ||
+            normalizedPath === "/attendancedashboard";
+
+          return {
+            id: page.id,
+            to: isDashboardOverview ? "/employeeDashboard" : page.path,
+            icon: getIconComponent(page.iconName),
+            title: page.name,
+            description: page.description || "Access this page",
+            module: page.module || "GENERAL",
+            isPublic: page.isPublic || false,
+            displayOrder: page.displayOrder || 0,
+            requiresAuth: page.requiresAuth !== false,
+          };
+        });
 
         transformedPages.sort((a, b) => a.displayOrder - b.displayOrder);
         setAccessiblePages(transformedPages);
@@ -819,20 +1073,37 @@ const EmployeeDashboard = () => {
     );
   };
 
-  // Filter pages based on search query
+  const applicationModules = useMemo(
+    () => [...new Set(accessiblePages.map((page) => page.module || "GENERAL"))].sort(),
+    [accessiblePages]
+  );
+
+  const moduleTheme = (moduleName = "GENERAL") => {
+    const themes = {
+      LEAVE: { accent: "from-blue-500 to-cyan-400", icon: "bg-blue-50 ring-blue-100", badge: "bg-blue-50 text-blue-700" },
+      ATTENDANCE: { accent: "from-emerald-500 to-teal-400", icon: "bg-emerald-50 ring-emerald-100", badge: "bg-emerald-50 text-emerald-700" },
+      INVENTORY: { accent: "from-orange-500 to-amber-400", icon: "bg-orange-50 ring-orange-100", badge: "bg-orange-50 text-orange-700" },
+      PAYROLL: { accent: "from-violet-500 to-purple-400", icon: "bg-violet-50 ring-violet-100", badge: "bg-violet-50 text-violet-700" },
+      TRANSPORT: { accent: "from-rose-500 to-red-400", icon: "bg-rose-50 ring-rose-100", badge: "bg-rose-50 text-rose-700" },
+      ADMIN: { accent: "from-slate-600 to-slate-400", icon: "bg-slate-100 ring-slate-200", badge: "bg-slate-100 text-slate-700" },
+      GENERAL: { accent: "from-indigo-500 to-blue-400", icon: "bg-indigo-50 ring-indigo-100", badge: "bg-indigo-50 text-indigo-700" },
+    };
+    return themes[String(moduleName).toUpperCase()] || themes.GENERAL;
+  };
+
+  // Filter pages based on search query and selected module.
   useEffect(() => {
-    if (!pageSearchQuery.trim()) {
-      setFilteredPages(accessiblePages);
-    } else {
-      const query = pageSearchQuery.toLowerCase().trim();
-      const filtered = accessiblePages.filter(page => 
+    const query = pageSearchQuery.toLowerCase().trim();
+    const filtered = accessiblePages.filter((page) => {
+      const matchesModule = selectedModule === "ALL" || (page.module || "GENERAL") === selectedModule;
+      const matchesQuery = !query ||
         page.title.toLowerCase().includes(query) ||
         page.description.toLowerCase().includes(query) ||
-        page.module?.toLowerCase().includes(query)
-      );
-      setFilteredPages(filtered);
-    }
-  }, [pageSearchQuery, accessiblePages]);
+        page.module?.toLowerCase().includes(query);
+      return matchesModule && matchesQuery;
+    });
+    setFilteredPages(filtered);
+  }, [pageSearchQuery, selectedModule, accessiblePages]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -859,29 +1130,156 @@ const EmployeeDashboard = () => {
     }
   }, [statusFilter, leaveRequests]);
 
+  useEffect(() => {
+    if (employeeInfo?.id && payrollPeriods.length > 0) {
+      fetchAvailableEmployeePayslips(payrollPeriods, employeeInfo.id);
+    }
+  }, [employeeInfo?.id, payrollPeriods]);
+
+  useEffect(() => {
+    if (showAttendance) fetchEmployeeAttendance();
+  }, [showAttendance, employeeInfo?.id]);
+
+  useEffect(() => {
+    if (location.hash === "#applications-launcher") {
+      setShowApplicationsWorkspace(true);
+      return;
+    }
+
+    if (location.hash === "#recent-activity") {
+      setShowApplicationsWorkspace(false);
+      window.requestAnimationFrame(() => {
+        document.getElementById("recent-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }, [location.hash]);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-lg font-medium text-gray-700">Loading dashboard...</p>
+          <div className="mx-auto h-11 w-11 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
+          <p className="mt-4 text-sm font-medium text-slate-600">Preparing your workspace...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="bg-white shadow-sm border-b rounded-lg mb-6">
-        <div className="px-6 py-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Employee Dashboard</h1>
-              <p className="text-gray-600">Welcome back, {userInfo.username}!</p>
+    <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
+      <aside className="fixed inset-y-4 left-4 z-30 hidden w-64 flex-col overflow-hidden rounded-2xl bg-slate-950 text-white shadow-2xl shadow-slate-300/50 lg:flex">
+        <div className="border-b border-white/10 px-5 py-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500 shadow-lg shadow-blue-950/30">
+              <User className="h-5 w-5" />
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold">{employeeInfo?.firstName || userInfo.username}</p>
+              <p className="truncate text-xs text-slate-400">Employee workspace</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-5">
+          <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Dashboard</p>
+          <nav className="space-y-1">
+            <a href="#dashboard-overview" onClick={() => setShowApplicationsWorkspace(false)} className="flex items-center gap-3 rounded-xl bg-white/10 px-3 py-2.5 text-sm font-semibold text-white">
+              <Home className="h-4 w-4 text-blue-400" /> Overview
+            </a>
+            <button onClick={() => setShowApplicationsWorkspace(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <Layers className="h-4 w-4" /> Applications
+            </button>
+            <a href="#recent-activity" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <Clock className="h-4 w-4" /> Recent activity
+            </a>
+            <button onClick={openAttendance} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <CalendarCheck className="h-4 w-4" /> My attendance
+            </button>
+            <button onClick={() => setShowMyInformation(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <UserCog className="h-4 w-4" /> My information
+            </button>
+          </nav>
+
+          <p className="mb-2 mt-7 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Quick actions</p>
+          <div className="space-y-1">
+            <Link to="/leaveRequestForm" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-blue-500/10 hover:text-blue-300">
+              <CalendarCheck className="h-4 w-4" /> Apply for leave
+            </Link>
+            <Link to="/inventoryRequest" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-orange-500/10 hover:text-orange-300">
+              <Package className="h-4 w-4" /> Request inventory
+            </Link>
+            <button onClick={() => setShowLeaveBalance(!showLeaveBalance)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-emerald-500/10 hover:text-emerald-300">
+              <Calendar className="h-4 w-4" /> Leave balance
+            </button>
+            <button onClick={() => setShowPayslip(!showPayslip)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-violet-500/10 hover:text-violet-300">
+              <CreditCard className="h-4 w-4" /> View payslip
+            </button>
+            <button onClick={openAttendance} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-cyan-500/10 hover:text-cyan-300">
+              <Clock className="h-4 w-4" /> My hours
+            </button>
+          </div>
+
+          {accessiblePages.length > 0 && (
+            <div className="mt-7">
+              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Pinned apps</p>
+              <div className="space-y-1">
+                {accessiblePages.slice(0, 4).map((page) => (
+                  <Link
+                    key={`sidebar-${page.id || page.to}`}
+                    to={page.to}
+                    onClick={() => {
+                      if (page.to === "/employeeDashboard") setShowApplicationsWorkspace(false);
+                    }}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white"
+                  >
+                    <span className="scale-75">{page.icon}</span>
+                    <span className="truncate">{page.title}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-white/10 p-4">
+          <div className="rounded-xl bg-white/5 px-3 py-3">
+            <p className="text-xs font-semibold text-slate-200">EAC Employee Portal</p>
+            <p className="mt-1 text-[10px] leading-4 text-slate-500">Secure access based on your assigned role.</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 hover:text-white"
+          >
+            <LogOut className="h-4 w-4" /> Log out
+          </button>
+        </div>
+      </aside>
+
+      <div id="dashboard-overview" className="mx-auto max-w-[1600px] scroll-mt-6 lg:ml-72 lg:max-w-none">
+      <div className="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-blue-800 shadow-lg">
+        <div className="absolute -right-16 -top-24 h-64 w-64 rounded-full bg-white/10" />
+        <div className="relative px-6 py-7 sm:px-8">
+          <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">
+                <User className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">Employee self-service</p>
+                <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Welcome, {employeeInfo?.firstName || userInfo.username}</h1>
+                <div className="mt-2 flex items-center gap-2 text-sm font-medium text-blue-50">
+                  <Briefcase className="h-4 w-4 text-blue-200" />
+                  <span>
+                    <span className="text-blue-200">Job Position:</span>{" "}
+                    {employeeInfo?.jobPosition || "Not assigned"}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm text-blue-100">Manage your requests, documents and workplace applications.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               {userInfo.roles.map((role, index) => (
-                <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full font-medium">
+                <span key={index} className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
                   {role.replace("ROLE_", "")}
                 </span>
               ))}
@@ -890,21 +1288,64 @@ const EmployeeDashboard = () => {
         </div>
       </div>
 
-      <div className="mb-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white rounded-lg shadow p-6">
+      {accessiblePages.length > 0 && (
+        <section id="applications-launcher" className="mb-6 scroll-mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:hidden">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-blue-600" />
+                <h2 className="font-bold text-slate-900">Applications</h2>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Open your most accessible workplace tools.</p>
+            </div>
+            <button
+              onClick={() => setShowApplicationsWorkspace(true)}
+              className="flex items-center gap-1 self-start rounded-lg px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 sm:self-auto"
+            >
+              Browse all {accessiblePages.length}
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 lg:grid-cols-6">
+            {accessiblePages.slice(0, 6).map((page) => {
+              const theme = moduleTheme(page.module);
+              return (
+                <Link
+                  key={`launcher-${page.id || page.to}`}
+                  to={page.to}
+                  className="group relative flex min-h-[132px] flex-col items-center justify-center gap-3 p-4 text-center transition hover:bg-slate-50"
+                >
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ring-1 transition group-hover:-translate-y-0.5 group-hover:shadow-md ${theme.icon}`}>
+                    {page.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800 group-hover:text-blue-700">{page.title}</p>
+                    <p className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {page.module || "GENERAL"}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <div id="quick-actions" className="mb-8 scroll-mt-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
-              <div className="p-3 bg-blue-100 rounded-lg mr-4">
+              <div className="mr-4 rounded-xl bg-blue-50 p-3 ring-1 ring-blue-100">
                 <CalendarCheck className="w-6 h-6 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-600">Leave Requests</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+                <p className="text-sm font-medium text-slate-500">Leave Requests</p>
+                <p className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900">{stats.total}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-orange-100 rounded-lg mr-4">
                 <Package className="w-6 h-6 text-orange-600" />
@@ -916,19 +1357,21 @@ const EmployeeDashboard = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-green-100 rounded-lg mr-4">
                 <FileTextIcon className="w-6 h-6 text-green-600" />
               </div>
               <div>
                 <p className="text-sm text-gray-600">Available Payslips</p>
-                <p className="text-2xl font-bold text-gray-900">{payrollPeriods.filter((p) => payrollRecord).length}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {loadingPayslips ? "..." : payslips.length}
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center">
               <div className="p-3 bg-purple-100 rounded-lg mr-4">
                 <AlertCircle className="w-6 h-6 text-purple-600" />
@@ -943,15 +1386,28 @@ const EmployeeDashboard = () => {
       </div>
 
       <div className="mb-8">
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-lg font-semibold text-slate-900">Quick actions</h2>
+            <p className="mt-0.5 text-sm text-slate-500">Your most frequently used employee services.</p>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+              <button
+                onClick={() => setShowMyInformation(true)}
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
+              >
+                <div className="mr-3 rounded-lg bg-sky-100 p-2">
+                  <UserCog className="h-5 w-5 text-sky-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">My Information</h3>
+                  <p className="text-sm text-gray-600">Review your details</p>
+                </div>
+              </button>
               <Link
                 to="/leaveRequestForm"
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-blue-100 rounded-lg mr-3">
                   <CalendarCheck className="w-5 h-5 text-blue-600" />
@@ -964,7 +1420,7 @@ const EmployeeDashboard = () => {
 
               <Link
                 to="/inventoryRequest"
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-orange-200 hover:bg-orange-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-orange-100 rounded-lg mr-3">
                   <Package className="w-5 h-5 text-orange-600" />
@@ -977,7 +1433,7 @@ const EmployeeDashboard = () => {
 
               <button
                 onClick={() => setShowLeaveBalance(!showLeaveBalance)}
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-green-200 hover:bg-green-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-green-100 rounded-lg mr-3">
                   <Calendar className="w-5 h-5 text-green-600" />
@@ -990,7 +1446,7 @@ const EmployeeDashboard = () => {
 
               <button
                 onClick={() => setShowPayslip(!showPayslip)}
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-purple-200 hover:bg-purple-50/50 hover:shadow-sm"
               >
                 <div className="p-2 bg-purple-100 rounded-lg mr-3">
                   <FileTextIcon className="w-5 h-5 text-purple-600" />
@@ -1001,23 +1457,128 @@ const EmployeeDashboard = () => {
                 </div>
               </button>
 
-              {/* ✅ NEW: My Meals Quick Action */}
-              <Link
-                to="/my-meals"
-                className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              <button
+                onClick={openAttendance}
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-cyan-200 hover:bg-cyan-50/50 hover:shadow-sm"
               >
-                <div className="p-2 bg-amber-100 rounded-lg mr-3">
-                  <Utensils className="w-5 h-5 text-amber-600" />
+                <div className="p-2 bg-cyan-100 rounded-lg mr-3">
+                  <Clock className="w-5 h-5 text-cyan-600" />
                 </div>
                 <div>
-                  <h3 className="font-medium text-gray-900">My Meals</h3>
-                  <p className="text-sm text-gray-600">View meal plan & requests</p>
+                  <h3 className="font-medium text-gray-900">View My Attendance</h3>
+                  <p className="text-sm text-gray-600">View today’s attendance record</p>
+                </div>
+              </button>
+
+              <Link
+                to="/lunch/meal-selection"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-amber-200 hover:bg-amber-50/50 hover:shadow-sm"
+              >
+                <div className="mr-3 rounded-lg bg-amber-100 p-2">
+                  <UtensilsCrossed className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Select Meals</h3>
+                  <p className="text-sm text-gray-600">Choose your weekly meals</p>
                 </div>
               </Link>
             </div>
           </div>
         </div>
       </div>
+
+      {showAttendance && (
+        <section id="my-attendance" className="mb-8 scroll-mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-cyan-600" />
+                <h2 className="text-lg font-semibold text-slate-900">{attendanceRange ? "My attendance" : "Today’s attendance"}</h2>
+              </div>
+  <p className="mt-1 text-sm text-slate-500">
+  {attendanceRange
+    ? `${formatDate(attendanceRange.startDate)} – ${formatDate(attendanceRange.endDate)}`
+    : "Your attendance record for today."}
+  {" "}Employee Overtime hours.
+</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => fetchEmployeeAttendance()} disabled={loadingAttendance} className="rounded-lg border border-cyan-200 px-3 py-2 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60">
+                Refresh
+              </button>
+              <button onClick={() => setShowAttendance(false)} aria-label="Close attendance" className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <form className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-6 py-4" onSubmit={(event) => {
+            event.preventDefault();
+            if (!customStartDate || !customEndDate || customStartDate > customEndDate) {
+              setAttendanceError("Choose a valid start and end date.");
+              return;
+            }
+            const range = { startDate: customStartDate, endDate: customEndDate };
+            setAttendanceRange(range);
+            fetchEmployeeAttendance(range);
+          }}>
+            <label className="text-sm text-slate-600">From<input required type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-3 py-2" /></label>
+            <label className="text-sm text-slate-600">To<input required type="date" min={customStartDate} value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-3 py-2" /></label>
+            <button type="submit" disabled={loadingAttendance} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Apply</button>
+            <button type="button" onClick={() => {
+              const today = toDateInputValue(new Date());
+              setCustomStartDate(today); setCustomEndDate(today); setAttendanceRange(null);
+              fetchEmployeeAttendance(null);
+            }} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Today</button>
+          </form>
+
+          <div className="overflow-x-auto">
+            {attendanceError ? (
+              <div className="px-6 py-8 text-center text-sm text-red-600">{attendanceError}</div>
+            ) : loadingAttendance ? (
+              <div className="px-6 py-8 text-center text-sm text-slate-500">Loading your attendance records...</div>
+            ) : attendanceRecords.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-slate-500">{attendanceRange ? "No attendance records found for these dates." : "No attendance record has been recorded for you today."}</div>
+            ) : (
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Check in</th>
+                    <th className="px-5 py-3">Check out</th>
+                    <th className="px-5 py-3">Normal Hours</th>
+                    <th className="px-5 py-3">Overtime</th>
+                    <th className="px-5 py-3">Total Hours</th>
+                    <th className="px-5 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {attendanceRecords.map((record) => (
+                    <tr key={record.id} className="hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-5 py-3 font-medium text-slate-800">{formatDate(record.date)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{record.checkIn}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{record.checkOut}</td>
+                      <td className="whitespace-nowrap px-5 py-3 font-semibold text-cyan-700">{formatHours(record.hours)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-orange-700">{formatHours(record.overtime)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 font-semibold text-indigo-700">{formatHours(record.hours + record.overtime)}</td>
+                      <td className="whitespace-nowrap px-5 py-3"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{record.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
+                  <tr>
+                    <th scope="row" colSpan={3} className="px-5 py-3 text-left text-slate-800">{attendanceRange ? 'Selected range total' : 'Today’s total'}</th>
+                    <td className="whitespace-nowrap px-5 py-3 text-cyan-700">{formatHours(attendanceTotals.hours)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-orange-700">{formatHours(attendanceTotals.overtime)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-indigo-700">{formatHours(attendanceTotals.hours + attendanceTotals.overtime)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        </section>
+      )}
 
       {showPayslip && (
         <div className="mb-8">
@@ -1038,7 +1599,11 @@ const EmployeeDashboard = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Year</label>
                     <select
                       value={yearFilter}
-                      onChange={(e) => setYearFilter(e.target.value)}
+                      onChange={(e) => {
+                        setYearFilter(e.target.value);
+                        setSelectedPeriod(null);
+                        setPayrollRecord(null);
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       {availableYears.map((year) => (
@@ -1053,7 +1618,11 @@ const EmployeeDashboard = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Month</label>
                     <select
                       value={monthFilter}
-                      onChange={(e) => setMonthFilter(e.target.value)}
+                      onChange={(e) => {
+                        setMonthFilter(e.target.value);
+                        setSelectedPeriod(null);
+                        setPayrollRecord(null);
+                      }}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       {months.map((month) => (
@@ -1070,9 +1639,11 @@ const EmployeeDashboard = () => {
                       value={selectedPeriod || ""}
                       onChange={(e) => setSelectedPeriod(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      disabled={loadingPayslip || filteredPeriods.length === 0}
+                      disabled={loadingPayslip || loadingPayslips || filteredPeriods.length === 0}
                     >
-                      <option value="">Select a period</option>
+                      <option value="">
+                        {loadingPayslips ? "Checking your payslips..." : "Select a period"}
+                      </option>
                       {filteredPeriods.map((period) => (
                         <option key={period.id} value={period.id}>
                           {period.name} ({formatDate(period.startDate)} - {formatDate(period.endDate)})
@@ -1409,7 +1980,7 @@ const EmployeeDashboard = () => {
 
                     <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm">
                       <div className="font-semibold">{companyName}</div>
-                      <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+                      <div>{companyContactLine}</div>
                       <div className="text-xs mt-1 text-gray-500">
                         This is a computer-generated payslip. No signature is required.
                       </div>
@@ -1422,7 +1993,80 @@ const EmployeeDashboard = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+      {showMyInformation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="my-information-title">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
+                  <UserCog className="h-5 w-5" /> Employee record
+                </div>
+                <h2 id="my-information-title" className="mt-1 text-xl font-bold text-slate-900">My Information</h2>
+                <p className="mt-1 text-sm text-slate-500">Please review the details held for you and report anything that needs correcting.</p>
+              </div>
+              <button onClick={() => setShowMyInformation(false)} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800" aria-label="Close my information">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5 sm:p-7">
+              <div className="flex flex-col gap-4 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-700 p-5 text-white sm:flex-row sm:items-center">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/15 text-xl font-bold">
+                  {(employeeInfo?.firstName || userInfo.username || "E").charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-lg font-bold">{`${employeeInfo?.firstName || ""} ${employeeInfo?.lastName || ""}`.trim() || userInfo.username || "Employee"}</h3>
+                  <p className="mt-0.5 text-sm text-blue-100">{employeeInfo?.jobPosition || "Job position not assigned"}</p>
+                </div>
+                <span className="self-start rounded-full bg-white/15 px-3 py-1 text-xs font-semibold sm:self-auto">ID: {employeeInfo?.employeeId || "Not assigned"}</span>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <InformationGroup title="Personal & contact details" icon={User}>
+                  <InformationRow label="Full name" value={`${employeeInfo?.firstName || ""} ${employeeInfo?.lastName || ""}`.trim()} />
+                  <InformationRow label="Email address" value={employeeInfo?.email || userInfo.email} />
+                  <InformationRow label="Phone number" value={employeeInfo?.phone} />
+                  <InformationRow label="Date of birth" value={formatDate(employeeInfo?.dateOfBirth)} />
+                  <InformationRow label="Town of residence" value={employeeInfo?.townOfResidence} />
+                  <InformationRow label="House number" value={employeeInfo?.houseNumber} />
+                </InformationGroup>
+
+                <InformationGroup title="Employment details" icon={Briefcase}>
+                  <InformationRow label="Employee ID" value={employeeInfo?.employeeId} />
+                  <InformationRow label="Designation" value={employeeInfo?.jobPosition} />
+                  <InformationRow label="Department" value={employeeInfo?.department} />
+                  <InformationRow label="Location" value={employeeInfo?.location} />
+                  <InformationRow label="Tag number" value={employeeInfo?.tagNumber} />
+                  <InformationRow label="Start date" value={formatDate(employeeInfo?.startDate)} />
+                </InformationGroup>
+
+                <InformationGroup title="Emergency contact" icon={Users}>
+                  <InformationRow label="Emergency contact" value={employeeInfo?.emergencyContact} />
+                  <InformationRow label="Contact person" value={employeeInfo?.contactPerson} />
+                  <InformationRow label="Relationship" value={employeeInfo?.relationship} />
+                  <InformationRow label="Spouse" value={employeeInfo?.spouse} />
+                  <InformationRow label="Number of children" value={employeeInfo?.numberOfChildren} />
+                </InformationGroup>
+
+                <InformationGroup title="Payroll & statutory details" icon={CreditCard}>
+                  <InformationRow label="Bank" value={employeeInfo?.bankName || employeeInfo?.bank} />
+                  <InformationRow label="Bank branch" value={employeeInfo?.bankBranch} />
+                  <InformationRow label="Account name" value={employeeInfo?.accountName} />
+                  <InformationRow label="Account number" value={employeeInfo?.accountNumber} />
+                  <InformationRow label="SSNIT number" value={employeeInfo?.ssnitNumber} />
+                  <InformationRow label="TIN number" value={employeeInfo?.tinNumber} />
+                </InformationGroup>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="font-semibold">Something incorrect?</span> Please contact HR so your employee record can be updated. These details are displayed for review only.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div id="recent-activity" className="mb-8 grid scroll-mt-6 grid-cols-1 gap-8 lg:grid-cols-2">
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold text-gray-900">Recent Leave Requests</h2>
@@ -1706,7 +2350,7 @@ const EmployeeDashboard = () => {
 
             <div className="bg-gray-50 p-4 text-center text-gray-600 text-sm footer">
               <div className="font-semibold">{companyName}</div>
-              <div>P. O. Box AB 253 Abeka-Accra Ghana • Email: eac.electricalsolution.ltd@yahoo.com</div>
+              <div>{companyContactLine}</div>
               <div className="text-xs mt-1 text-gray-500">This is a computer-generated payslip. No signature is required.</div>
             </div>
           </div>
@@ -1730,7 +2374,7 @@ const EmployeeDashboard = () => {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>{companyName}</div>
-              <div style={{ fontSize: "10px", color: "#666" }}>P. O. Box AB 253 Abeka-Accra Ghana</div>
+              <div style={{ fontSize: "10px", color: "#666" }}>{settings.companyAddress || ""}</div>
             </div>
 
             <div style={{ textAlign: "right" }}>
@@ -1848,89 +2492,210 @@ const EmployeeDashboard = () => {
       )}
 
       {/* All Applications Section with Search */}
-      {accessiblePages.length > 0 && (
-        <div className="mt-8">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">All Applications</h2>
-            
-            {/* Search Input for Pages */}
-            <div className="relative w-full sm:w-80">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-gray-400" />
+      {showApplicationsWorkspace && accessiblePages.length > 0 && (
+        <section id="applications-workspace" className="fixed inset-4 left-[18rem] z-40 m-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl max-lg:left-4">
+          <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-5 py-7 sm:px-7">
+            <div className="absolute -right-12 -top-20 h-56 w-56 rounded-full bg-blue-500/20 blur-2xl" />
+            <div className="absolute bottom-0 right-1/3 h-24 w-24 rounded-full bg-cyan-400/10 blur-xl" />
+            <div className="relative flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+              <div className="max-w-xl">
+                <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-300">
+                  <Layers className="h-4 w-4" />
+                  Digital workspace
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Your applications</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Everything you have access to, organised in one secure workspace.
+                </p>
               </div>
-              <input
-                type="text"
-                placeholder="Search applications by name, description, or module..."
-                value={pageSearchQuery}
-                onChange={(e) => setPageSearchQuery(e.target.value)}
-                className="block w-full pl-9 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-              />
-              {pageSearchQuery && (
+
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center backdrop-blur-sm">
+                  <div className="text-xl font-bold text-white">{accessiblePages.length}</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Applications</div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-center backdrop-blur-sm">
+                  <div className="text-xl font-bold text-white">{applicationModules.length}</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Modules</div>
+                </div>
                 <button
-                  onClick={() => setPageSearchQuery("")}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  onClick={() => setShowApplicationsWorkspace(false)}
+                  aria-label="Close applications workspace"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </button>
-              )}
+              </div>
             </div>
           </div>
-          
-          {/* Search Results Count */}
-          {pageSearchQuery && (
-            <div className="mb-3 text-sm text-gray-500">
-              Found {filteredPages.length} {filteredPages.length === 1 ? "application" : "applications"} matching "{pageSearchQuery}"
+
+          <div className="border-b border-slate-100 bg-white px-5 py-5 sm:px-7">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Find an application</p>
+                <p className="text-xs text-slate-500">Search by name, description, or module.</p>
+              </div>
+              <div className="relative w-full sm:w-96">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  aria-label="Search applications"
+                  placeholder="Search your applications..."
+                  value={pageSearchQuery}
+                  onChange={(e) => setPageSearchQuery(e.target.value)}
+                  className="block w-full rounded-xl border border-slate-300 bg-slate-50 py-3 pl-10 pr-10 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                />
+                {pageSearchQuery && (
+                  <button
+                    onClick={() => setPageSearchQuery("")}
+                    aria-label="Clear application search"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+            <p className="mt-4 text-xs font-medium text-slate-500">
+              Showing {filteredPages.length} of {accessiblePages.length} applications
+              {pageSearchQuery ? ` for “${pageSearchQuery}”` : ""}
+            </p>
+          </div>
           
+          <div className="flex flex-col lg:flex-row">
+            <aside className="shrink-0 border-b border-slate-200 bg-slate-50/80 p-4 lg:w-60 lg:border-b-0 lg:border-r lg:p-5">
+              <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
+                <Layers className="h-4 w-4 text-slate-400" />
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Modules</span>
+              </div>
+              <nav className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0" aria-label="Application modules">
+                {["ALL", ...applicationModules].map((moduleName) => {
+                  const count = moduleName === "ALL"
+                    ? accessiblePages.length
+                    : accessiblePages.filter((page) => (page.module || "GENERAL") === moduleName).length;
+                  return (
+                    <button
+                      key={moduleName}
+                      onClick={() => setSelectedModule(moduleName)}
+                      className={`group flex shrink-0 items-center justify-between gap-4 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition lg:w-full ${
+                        selectedModule === moduleName
+                          ? "bg-slate-900 text-white shadow-md shadow-slate-200"
+                          : "border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 lg:border-transparent lg:bg-transparent"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <span className={`h-2 w-2 rounded-full ${selectedModule === moduleName ? "bg-blue-400" : "bg-slate-300 group-hover:bg-blue-400"}`} />
+                        {moduleName === "ALL" ? "All applications" : moduleName.replaceAll("_", " ")}
+                      </span>
+                      <span className={`rounded-md px-2 py-0.5 text-[11px] ${selectedModule === moduleName ? "bg-white/10 text-white" : "bg-slate-200/70 text-slate-500"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="mt-5 hidden rounded-xl border border-blue-100 bg-blue-50 p-3 lg:block">
+                <Shield className="mb-2 h-4 w-4 text-blue-600" />
+                <p className="text-xs font-semibold text-blue-900">Role-based access</p>
+                <p className="mt-1 text-[11px] leading-4 text-blue-700">Only applications assigned to your account are shown.</p>
+              </div>
+            </aside>
+
+            <div className="min-w-0 flex-1">
+              <div className="border-b border-slate-100 px-5 py-4 sm:px-7">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {selectedModule === "ALL" ? "All applications" : selectedModule.replaceAll("_", " ")}
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">{filteredPages.length} applications in this view</p>
+              </div>
+
           {/* Applications Grid */}
           {filteredPages.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-8 text-center">
+            <div className="p-12 text-center">
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                  <Search className="w-8 h-8 text-gray-400" />
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                  <Search className="h-7 w-7 text-slate-400" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-1">No applications found</h3>
-                <p className="text-gray-500 text-sm">
-                  {pageSearchQuery 
-                    ? `No results matching "${pageSearchQuery}". Try a different search term.`
-                    : "No applications available for your role."}
-                </p>
+                <h3 className="mb-1 text-lg font-semibold text-slate-900">No applications found</h3>
+                <p className="max-w-sm text-sm text-slate-500">Try another search term or choose a different module.</p>
+                <button onClick={() => { setPageSearchQuery(""); setSelectedModule("ALL"); }} className="mt-5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
+                  Clear filters
+                </button>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {filteredPages.map((page) => (
-                <Link
-                  key={page.id || page.to}
-                  to={page.to}
-                  className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col items-center text-center hover:shadow-md transition-shadow group"
-                >
-                  <div className="mb-3 group-hover:scale-110 transition-transform duration-200">
-                    {page.icon}
-                  </div>
-                  <h3 className="font-medium text-gray-900 mb-1">{page.title}</h3>
-                  <p className="text-sm text-gray-600 mb-3 line-clamp-2">{page.description}</p>
-                  
-                  {/* Module Badge */}
-                  {page.module && page.module !== "GENERAL" && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full mb-2">
-                      {page.module}
-                    </span>
-                  )}
-                  
-                  <div className="flex items-center text-blue-600 text-sm group-hover:text-blue-700">
-                    <span>Open</span>
-                    <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </Link>
-              ))}
+            <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 sm:p-7 xl:grid-cols-3">
+              {filteredPages.map((page) => {
+                const theme = moduleTheme(page.module);
+                return (
+                  <Link
+                    key={page.id || page.to}
+                    to={page.to}
+                    onClick={() => {
+                      if (page.to === "/employeeDashboard") {
+                        setShowApplicationsWorkspace(false);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }
+                    }}
+                    className="group relative flex min-h-[220px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left transition duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl hover:shadow-slate-200/70"
+                  >
+                    <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${theme.accent}`} />
+                    <div className="mb-5 flex items-start justify-between">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl ring-1 ${theme.icon}`}>
+                        {page.icon}
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-blue-600" />
+                    </div>
+                    <h3 className="mb-1.5 text-base font-bold text-slate-900 transition group-hover:text-blue-700">{page.title}</h3>
+                    <p className="mb-5 line-clamp-2 text-sm leading-5 text-slate-500">{page.description}</p>
+                    <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-4">
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${theme.badge}`}>
+                        {(page.module || "GENERAL").replaceAll("_", " ")}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400 transition group-hover:text-blue-600">Open app</span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
-        </div>
+            </div>
+          </div>
+        </section>
       )}
+      </div>
     </div>
   );
+};
+
+const InformationGroup = ({ title, icon: Icon, children }) => (
+  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+      <div className="rounded-lg bg-blue-50 p-2 text-blue-700">
+        <Icon className="h-4 w-4" />
+      </div>
+      <h3 className="font-semibold text-slate-900">{title}</h3>
+    </div>
+    <dl className="divide-y divide-slate-100">{children}</dl>
+  </section>
+);
+
+const InformationRow = ({ label, value }) => (
+  <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3 px-4 py-3 text-sm">
+    <dt className="text-slate-500">{label}</dt>
+    <dd className="break-words text-right font-medium text-slate-800">{value || "Not provided"}</dd>
+  </div>
+);
+
+InformationGroup.propTypes = {
+  title: PropTypes.string.isRequired,
+  icon: PropTypes.elementType.isRequired,
+  children: PropTypes.node.isRequired,
+};
+
+InformationRow.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
 
 export default EmployeeDashboard;

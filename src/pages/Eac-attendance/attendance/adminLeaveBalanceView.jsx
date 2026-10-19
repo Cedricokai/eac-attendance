@@ -1,888 +1,1694 @@
-import React, { useState, useEffect, Fragment } from 'react';
-import { 
-  Calendar, 
-  TrendingUp, 
-  AlertCircle, 
-  CheckCircle, 
-  Clock,
-  Filter,
-  Search,
-  Download,
-  ChevronLeft,
-  ChevronRight,
-  User,
-  Briefcase,
-  ChevronDown,
-  ChevronUp,
-  PieChart,
-  BarChart3,
-  FileText,
-  UserPlus
-} from 'lucide-react';
-import * as XLSX from 'xlsx';
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDownTrayIcon,
+  ArrowPathIcon,
+  CalendarDaysIcon,
+  ChartBarIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  DocumentChartBarIcon,
+  ExclamationTriangleIcon,
+  FunnelIcon,
+  MagnifyingGlassIcon,
+  PrinterIcon,
+  UserGroupIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
 
-const AdminLeaveBalanceView = ({ apiBaseUrl, getToken }) => {
-  // ==================== STATE DECLARATIONS ====================
-  const [employees, setEmployees] = useState([]);
-  const [filteredEmployees, setFilteredEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [sortField, setSortField] = useState('lastName');
-  const [sortDirection, setSortDirection] = useState('asc');
-  const [categories, setCategories] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [expandedEmployee, setExpandedEmployee] = useState(null);
-  const [stats, setStats] = useState({
-    totalEmployees: 0,
-    totalUsed: 0,
-    totalPending: 0,
-    avgUsage: 0,
-    lowBalanceCount: 0
-  });
-  
-  // ==================== SINGLE EMPLOYEE EXPORT STATE ====================
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [selectedEmployeeForExport, setSelectedEmployeeForExport] = useState(null);
-  const [exportDateRange, setExportDateRange] = useState({
-    startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
-  });
-  const [exportType, setExportType] = useState('summary');
-  const [exporting, setExporting] = useState(false);
+const DEFAULT_PAGE_SIZE = 25;
 
-  // ==================== HELPER FUNCTIONS ====================
-  const getDisplayValue = (value) => {
-    if (!value) return 'N/A';
-    if (typeof value === 'object') {
-      return value.name || String(value);
-    }
-    return String(value);
-  };
+const getCategoryName = (category) => {
+  if (category === null || category === undefined || category === "") {
+    return "Unassigned";
+  }
 
-  // ==================== FETCH EMPLOYEE BALANCES ====================
-  const fetchEmployeeBalances = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/leave/admin/employee-balances`, {
-        headers: {
-          'Authorization': `Bearer ${getToken()}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch employee balances');
-      
-      const data = await response.json();
-      setEmployees(data);
-      setFilteredEmployees(data);
-      
-      const uniqueCategories = ['All', ...new Set(
-        data
-          .map(emp => {
-            if (emp.category && typeof emp.category === 'object') {
-              return emp.category.name || String(emp.category);
-            }
-            return emp.category;
-          })
-          .filter(Boolean)
-          .map(cat => String(cat))
-      )];
-      
-      const uniqueDepartments = ['All', ...new Set(
-        data
-          .map(emp => {
-            if (emp.department && typeof emp.department === 'object') {
-              return emp.department.name || String(emp.department);
-            }
-            return emp.department;
-          })
-          .filter(Boolean)
-          .map(dept => String(dept))
-      )];
-      
-      setCategories(uniqueCategories);
-      setDepartments(uniqueDepartments);
-      
-      calculateStats(data);
-      
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (typeof category === "string" || typeof category === "number") {
+    return String(category);
+  }
 
-  // ==================== CALCULATE STATISTICS ====================
-  const calculateStats = (data) => {
-    const totalUsed = data.reduce((sum, emp) => sum + (emp.usedDays || 0), 0);
-    const totalPending = data.reduce((sum, emp) => sum + (emp.pendingDays || 0), 0);
-    const lowBalanceCount = data.filter(emp => (emp.availableBalance || 0) < 5).length;
-    const avgUsage = data.length > 0 
-      ? Math.round((totalUsed / (data.length * 20)) * 100) 
-      : 0;
-
-    setStats({
-      totalEmployees: data.length,
-      totalUsed,
-      totalPending,
-      avgUsage,
-      lowBalanceCount
-    });
-  };
-
-  // ==================== INITIAL DATA FETCH ====================
-  useEffect(() => {
-    fetchEmployeeBalances();
-  }, []);
-
-  // ==================== APPLY FILTERS AND SEARCH ====================
-  useEffect(() => {
-    let filtered = [...employees];
-    
-    if (categoryFilter !== 'All') {
-      filtered = filtered.filter(emp => {
-        let empCategory = emp.category;
-        if (empCategory && typeof empCategory === 'object') {
-          empCategory = empCategory.name || String(empCategory);
-        }
-        return String(empCategory) === categoryFilter;
-      });
-    }
-    
-    if (departmentFilter !== 'All') {
-      filtered = filtered.filter(emp => {
-        let empDept = emp.department;
-        if (empDept && typeof empDept === 'object') {
-          empDept = empDept.name || String(empDept);
-        }
-        return String(empDept) === departmentFilter;
-      });
-    }
-    
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(emp => 
-        (emp.firstName?.toLowerCase() || '').includes(term) ||
-        (emp.lastName?.toLowerCase() || '').includes(term) ||
-        (emp.employeeCode?.toLowerCase() || '').includes(term) ||
-        (`${emp.firstName || ''} ${emp.lastName || ''}`.toLowerCase()).includes(term)
-      );
-    }
-    
-    filtered.sort((a, b) => {
-      let aVal = a[sortField] || '';
-      let bVal = b[sortField] || '';
-      
-      if (sortField === 'category' || sortField === 'department') {
-        aVal = aVal && typeof aVal === 'object' ? (aVal.name || String(aVal)) : (aVal || '');
-        bVal = bVal && typeof bVal === 'object' ? (bVal.name || String(bVal)) : (bVal || '');
-      }
-      
-      if (sortField === 'usagePercentage' || sortField === 'availableBalance' || 
-          sortField === 'usedDays' || sortField === 'pendingDays' || sortField === 'annualBalance') {
-        aVal = aVal || 0;
-        bVal = bVal || 0;
-      }
-      
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-    
-    setFilteredEmployees(filtered);
-    setCurrentPage(1);
-  }, [searchTerm, categoryFilter, departmentFilter, sortField, sortDirection, employees]);
-
-  // ==================== SORTING HANDLER ====================
-  const handleSort = (field) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  // ==================== STATUS COLOR HELPER ====================
-  const getStatusColor = (available) => {
-    if (available >= 10) return 'text-green-600 bg-green-100';
-    if (available >= 5) return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
-  };
-
-  // ==================== EXPORT ALL EMPLOYEES TO EXCEL ====================
-  const exportAllToExcel = () => {
-    const exportData = filteredEmployees.map(emp => ({
-      'Employee ID': emp.employeeCode || '',
-      'First Name': emp.firstName || '',
-      'Last Name': emp.lastName || '',
-      'Department': getDisplayValue(emp.department),
-      'Category': getDisplayValue(emp.category),
-      'Annual Balance': emp.annualBalance || 20,
-      'Used Days': emp.usedDays || 0,
-      'Pending Days': emp.pendingDays || 0,
-      'Available Balance': emp.availableBalance || 0,
-      'Usage %': `${emp.usagePercentage || 0}%`,
-      'Status': (emp.availableBalance || 0) >= 10 ? 'Good' : 
-                (emp.availableBalance || 0) >= 5 ? 'Warning' : 'Critical'
-    }));
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, ws, 'Leave Balances');
-    
-    const fileName = `all_leave_balances_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  // ==================== FETCH EMPLOYEE LEAVE RECORDS ====================
-  const fetchEmployeeLeaveRecords = async (employeeId, startDate, endDate) => {
-    try {
-      const token = getToken();
-      const url = `${apiBaseUrl}/api/leave/employee/${employeeId}`;
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch leave records');
-      
-      const allLeaves = await response.json();
-      
-      let filteredLeaves = allLeaves;
-      if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        filteredLeaves = allLeaves.filter(leave => {
-          const leaveDate = new Date(leave.startDate);
-          return leaveDate >= start && leaveDate <= end;
-        });
-      }
-      
-      return filteredLeaves;
-    } catch (err) {
-      console.error('Error fetching leave records:', err);
-      throw err;
-    }
-  };
-
-  // ==================== EXPORT SINGLE EMPLOYEE SUMMARY ====================
-  const exportSingleEmployeeSummary = (employee, leaveRecords) => {
-    const totalApprovedDays = leaveRecords
-      .filter(l => l.status === 'Approved')
-      .reduce((sum, l) => sum + (l.deductedDays || 0), 0);
-    
-    const totalPendingDays = leaveRecords
-      .filter(l => l.status === 'Pending')
-      .reduce((sum, l) => sum + (l.deductedDays || 0), 0);
-    
-    const totalRejectedDays = leaveRecords
-      .filter(l => l.status === 'Rejected')
-      .reduce((sum, l) => sum + (l.deductedDays || 0), 0);
-    
-    const leaveTypeSummary = {};
-    leaveRecords.forEach(record => {
-      const type = record.leaveType || 'Unknown';
-      if (!leaveTypeSummary[type]) {
-        leaveTypeSummary[type] = { approved: 0, pending: 0, rejected: 0, total: 0 };
-      }
-      if (record.status === 'Approved') leaveTypeSummary[type].approved += (record.deductedDays || 0);
-      if (record.status === 'Pending') leaveTypeSummary[type].pending += (record.deductedDays || 0);
-      if (record.status === 'Rejected') leaveTypeSummary[type].rejected += (record.deductedDays || 0);
-      leaveTypeSummary[type].total += (record.deductedDays || 0);
-    });
-    
-    const summaryData = [
-      ['Report Type', 'EMPLOYEE LEAVE SUMMARY REPORT', '', '', '', ''],
-      ['', '', '', '', '', ''],
-      ['Employee Name', `${employee.firstName || ''} ${employee.lastName || ''}`, 'Employee ID', employee.employeeCode || '', 'Department', getDisplayValue(employee.department)],
-      ['Category', getDisplayValue(employee.category), 'Report Date', new Date().toLocaleDateString(), 'Date Range', `${exportDateRange.startDate} to ${exportDateRange.endDate}`],
-      ['', '', '', '', '', ''],
-      ['Annual Leave Entitlement', employee.annualBalance || 20, 'Days Used This Year', employee.usedDays || 0, 'Days Pending', employee.pendingDays || 0],
-      ['Available Balance', employee.availableBalance || 0, 'Usage Percentage', `${employee.usagePercentage || 0}%`, 'Status', (employee.availableBalance || 0) >= 10 ? 'Good' : (employee.availableBalance || 0) >= 5 ? 'Warning' : 'Critical'],
-      ['', '', '', '', '', ''],
-      ['SUMMARY STATISTICS', '', '', '', '', ''],
-      ['Total Approved Days', totalApprovedDays, 'Total Pending Days', totalPendingDays, 'Total Rejected Days', totalRejectedDays],
-      ['Total Leave Requests', leaveRecords.length, '', '', '', ''],
-      ['', '', '', '', '', ''],
-      ['LEAVE TYPE BREAKDOWN', '', '', '', '', ''],
-      ['Leave Type', 'Approved Days', 'Pending Days', 'Rejected Days', 'Total Days', '']
-    ];
-    
-    Object.entries(leaveTypeSummary).forEach(([type, data]) => {
-      summaryData.push([type, data.approved, data.pending, data.rejected, data.total, '']);
-    });
-    
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(summaryData);
-    ws['!cols'] = [{wch:20}, {wch:15}, {wch:15}, {wch:15}, {wch:15}, {wch:15}];
-    
-    XLSX.utils.book_append_sheet(wb, ws, 'Leave Summary');
-    const fileName = `leave_summary_${employee.firstName}_${employee.lastName}_${exportDateRange.startDate}_to_${exportDateRange.endDate}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  // ==================== EXPORT SINGLE EMPLOYEE DETAILED ====================
-  const exportSingleEmployeeDetailed = (employee, leaveRecords) => {
-    const detailedData = leaveRecords.map(record => ({
-      'Leave ID': record.id || '',
-      'Leave Type': record.leaveType || '',
-      'Start Date': record.startDate ? new Date(record.startDate).toLocaleDateString() : '',
-      'End Date': record.endDate ? new Date(record.endDate).toLocaleDateString() : '',
-      'Duration (Days)': record.deductedDays || 0,
-      'Reason': record.reason || '',
-      'Status': record.status || '',
-      'Supervisor Status': record.supervisorStatus || '',
-      'Planner Status': record.plannerStatus || '',
-      'HR Status': record.hrStatus || '',
-      'Submitted Date': record.submittedDate ? new Date(record.submittedDate).toLocaleDateString() : '',
-      'Approved/Rejected Date': record.hrActionDate ? new Date(record.hrActionDate).toLocaleDateString() : 
-                               record.plannerActionDate ? new Date(record.plannerActionDate).toLocaleDateString() :
-                               record.supervisorActionDate ? new Date(record.supervisorActionDate).toLocaleDateString() : '',
-      'Weekend Policy': record.weekendCalculationMethod || 'Excluded'
-    }));
-    
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(detailedData);
-    ws['!cols'] = [{wch:10}, {wch:15}, {wch:12}, {wch:12}, {wch:10}, {wch:30}, {wch:12}, {wch:12}, {wch:12}, {wch:10}, {wch:12}, {wch:15}, {wch:12}];
-    
-    XLSX.utils.book_append_sheet(wb, ws, 'Leave Records');
-    const fileName = `leave_records_${employee.firstName}_${employee.lastName}_${exportDateRange.startDate}_to_${exportDateRange.endDate}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  // ==================== HANDLE SINGLE EMPLOYEE EXPORT ====================
-  const handleSingleEmployeeExport = async () => {
-    if (!selectedEmployeeForExport) return;
-    
-    setExporting(true);
-    try {
-      const leaveRecords = await fetchEmployeeLeaveRecords(
-        selectedEmployeeForExport.id,
-        exportDateRange.startDate,
-        exportDateRange.endDate
-      );
-      
-      if (exportType === 'summary') {
-        exportSingleEmployeeSummary(selectedEmployeeForExport, leaveRecords);
-      } else {
-        exportSingleEmployeeDetailed(selectedEmployeeForExport, leaveRecords);
-      }
-      
-      setShowExportModal(false);
-      setSelectedEmployeeForExport(null);
-      setExportType('summary');
-    } catch (err) {
-      setError('Failed to export leave records: ' + err.message);
-      setTimeout(() => setError(''), 5000);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // ==================== OPEN EXPORT MODAL ====================
-  const openExportModal = (employee) => {
-    setSelectedEmployeeForExport(employee);
-    setExportDateRange({
-      startDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-      endDate: new Date().toISOString().split('T')[0]
-    });
-    setExportType('summary');
-    setShowExportModal(true);
-  };
-
-  // ==================== PAGINATION ====================
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentEmployees = filteredEmployees.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
-
-  // ==================== SORT ICON COMPONENT ====================
-  const SortIcon = ({ field }) => {
-    if (sortField !== field) return <ChevronDown className="w-4 h-4 opacity-30" />;
-    return sortDirection === 'asc' ? 
-      <ChevronUp className="w-4 h-4" /> : 
-      <ChevronDown className="w-4 h-4" />;
-  };
-
-  // ==================== LOADING STATE ====================
-  if (loading) {
+  if (typeof category === "object") {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
+      category.name ??
+      category.categoryName ??
+      category.label ??
+      "Unassigned"
     );
   }
 
-  // ==================== MAIN RENDER ====================
+  return "Unassigned";
+};
+
+const getEmployeeName = (record) => {
+  if (!record) return "Unknown employee";
+
+  const directName =
+    record.employeeName ??
+    record.fullName ??
+    record.name;
+
+  if (directName && typeof directName !== "object") {
+    return String(directName).trim();
+  }
+
+  const employee = record.employee ?? record;
+  const firstName = employee?.firstName ?? "";
+  const lastName = employee?.lastName ?? "";
+
+  return `${firstName} ${lastName}`.trim() || "Unknown employee";
+};
+
+const getEmployeeNumber = (record) => {
+  const employee = record?.employee ?? record;
+
   return (
-    <div className="space-y-6">
-      {/* Error Message Display */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}
-        </div>
-      )}
+    record?.employeeNumber ??
+    employee?.employeeId ??
+    record?.employeeIdNumber ??
+    "N/A"
+  );
+};
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow">
-          <div className="text-sm opacity-90">Total Employees</div>
-          <div className="text-2xl font-bold">{stats.totalEmployees}</div>
-        </div>
-        
-        <div className="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 rounded-xl shadow">
-          <div className="text-sm opacity-90">Total Used Days</div>
-          <div className="text-2xl font-bold">{stats.totalUsed}</div>
-        </div>
-        
-        <div className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-white p-4 rounded-xl shadow">
-          <div className="text-sm opacity-90">Total Pending</div>
-          <div className="text-2xl font-bold">{stats.totalPending}</div>
-        </div>
-        
-        <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow">
-          <div className="text-sm opacity-90">Avg Usage</div>
-          <div className="text-2xl font-bold">{stats.avgUsage}%</div>
-        </div>
-        
-        <div className="bg-gradient-to-r from-red-500 to-red-600 text-white p-4 rounded-xl shadow">
-          <div className="text-sm opacity-90">Low Balance</div>
-          <div className="text-2xl font-bold">{stats.lowBalanceCount}</div>
-        </div>
-      </div>
+const getEmployeeDatabaseId = (record) => {
+  return (
+    record?.employee?.id ??
+    record?.employeeId ??
+    record?.id ??
+    null
+  );
+};
 
-      {/* Filters Section */}
-      <div className="bg-white p-6 rounded-xl shadow border border-gray-200">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Search employees..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-          
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            {categories.map((cat, index) => (
-              <option key={`cat-${index}-${cat}`} value={cat}>{cat}</option>
-            ))}
-          </select>
-          
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            {departments.map((dept, index) => (
-              <option key={`dept-${index}-${dept}`} value={dept}>{dept}</option>
-            ))}
-          </select>
-          
-          <button
-            onClick={exportAllToExcel}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-          >
-            <Download className="w-4 h-4" />
-            Export All
-          </button>
-        </div>
+const getRecordCategory = (record) => {
+  return (
+    record?.employee?.category ??
+    record?.category ??
+    record?.employeeCategory ??
+    null
+  );
+};
 
-        <div className="mt-4 text-sm text-gray-600">
-          Showing {filteredEmployees.length} of {employees.length} employees
-        </div>
-      </div>
+const parseLocalDate = (value) => {
+  if (!value) return null;
 
-      {/* Employee Balances Table */}
-      <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('lastName')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Employee <SortIcon field="lastName" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('department')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Department <SortIcon field="department" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('category')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Category <SortIcon field="category" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('annualBalance')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Annual <SortIcon field="annualBalance" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('usedDays')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Used <SortIcon field="usedDays" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('pendingDays')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Pending <SortIcon field="pendingDays" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('availableBalance')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Available <SortIcon field="availableBalance" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button
-                    onClick={() => handleSort('usagePercentage')}
-                    className="flex items-center gap-1 hover:text-gray-700"
-                  >
-                    Usage <SortIcon field="usagePercentage" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Details
-                </th>
-                {/* <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Export
-                </th> */}
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {currentEmployees.map((emp) => (
-                <Fragment key={emp.employeeId || `emp-${emp.firstName}-${emp.lastName}`}>
-                  <tr className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                          <User className="w-5 h-5 text-gray-600" />
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">
-                            {emp.firstName || ''} {emp.lastName || ''}
-                          </div>
-                          <div className="text-sm text-gray-500">{emp.employeeCode || ''}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {getDisplayValue(emp.department)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {getDisplayValue(emp.category)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                      {emp.annualBalance || 20}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                      {emp.usedDays || 0}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-yellow-600">
-                      {emp.pendingDays > 0 ? emp.pendingDays : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(emp.availableBalance)}`}>
-                        {emp.availableBalance || 0} days
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <div className="w-full bg-gray-200 rounded-full h-2.5">
-                        <div
-                          className="bg-blue-600 h-2.5 rounded-full"
-                          style={{ width: `${Math.min(emp.usagePercentage || 0, 100)}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1 block">
-                        {emp.usagePercentage || 0}%
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        (emp.availableBalance || 0) >= 10 ? 'bg-green-100 text-green-800' :
-                        (emp.availableBalance || 0) >= 5 ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {(emp.availableBalance || 0) >= 10 ? 'Good' :
-                         (emp.availableBalance || 0) >= 5 ? 'Warning' : 'Critical'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <button
-                        onClick={() => setExpandedEmployee(
-                          expandedEmployee === emp.employeeId ? null : emp.employeeId
-                        )}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        {expandedEmployee === emp.employeeId ? (
-                          <ChevronUp className="w-5 h-5" />
-                        ) : (
-                          <ChevronDown className="w-5 h-5" />
-                        )}
-                      </button>
-                    </td>
-                    {/* <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <button
-                        onClick={() => openExportModal(emp)}
-                        className="text-green-600 hover:text-green-800 flex items-center gap-1 mx-auto"
-                        title="Export this employee's leave records"
-                      >
-                        <FileText className="w-5 h-5" />
-                        <span className="text-xs">Export</span>
-                      </button>
-                    </td> */}
-                  </tr>
-                  
-                  {/* Expanded Row - Leave Type Breakdown */}
-                  {expandedEmployee === emp.employeeId && (
-                    <tr className="bg-blue-50">
-                      <td colSpan="11" className="px-6 py-4">
-                        <div className="text-sm">
-                          <h4 className="font-medium text-gray-900 mb-3">Leave Type Breakdown ({new Date().getFullYear()})</h4>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {emp.leaveTypeBreakdown && Object.entries(emp.leaveTypeBreakdown).map(([type, days]) => (
-                              <div key={type} className="bg-white p-3 rounded-lg border border-blue-200">
-                                <div className="text-xs text-gray-500">{type}</div>
-                                <div className="text-lg font-bold text-blue-700">{days} days</div>
-                              </div>
-                            ))}
-                            {(!emp.leaveTypeBreakdown || Object.keys(emp.leaveTypeBreakdown).length === 0) && (
-                              <div className="col-span-4 text-center text-gray-500 py-4">
-                                No approved leave records for this year
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+  const [year, month, day] = String(value).split("-").map(Number);
 
-        {/* Pagination */}
-        {filteredEmployees.length > itemsPerPage && (
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
-              Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredEmployees.length)} of {filteredEmployees.length} employees
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="p-2 border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <span className="px-4 py-2">
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="p-2 border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
+
+const formatDate = (value) => {
+  const date = parseLocalDate(value);
+
+  if (!date) return "N/A";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatNumber = (value, fractionDigits = 0) => {
+  const number = Number(value ?? 0);
+
+  if (!Number.isFinite(number)) return "0";
+
+  return number.toLocaleString("en-GH", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+};
+
+const normalizeLeaveType = (value) => {
+  if (!value) return "Unspecified";
+
+  return String(value).replace(/\s+Leave$/i, "").trim() || "Unspecified";
+};
+
+const isApproved = (leave) =>
+  String(leave?.status ?? "").toLowerCase() === "approved";
+
+const isPending = (leave) => {
+  const status = String(leave?.status ?? "").toLowerCase();
+
+  return (
+    status === "pending" ||
+    status === "supervisor_approved" ||
+    status === "planner_approved"
+  );
+};
+
+const calculateCalendarDays = (startDate, endDate) => {
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+
+  if (!start || !end || end < start) return 0;
+
+  let total = 0;
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    total += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return total;
+};
+
+const getReportedDays = (leave) => {
+  const deductedDays = Number(leave?.deductedDays);
+
+  if (Number.isFinite(deductedDays) && deductedDays > 0) {
+    return deductedDays;
+  }
+
+  return calculateCalendarDays(leave?.startDate, leave?.endDate);
+};
+
+const csvEscape = (value) => {
+  const text =
+    value === null || value === undefined
+      ? ""
+      : typeof value === "object"
+        ? JSON.stringify(value)
+        : String(value);
+
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const downloadCsv = (filename, rows) => {
+  const csv = rows
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\r\n");
+
+  const blob = new Blob(["\uFEFF", csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(url);
+};
+
+const StatusBadge = ({ status }) => {
+  const normalized = String(status ?? "Unknown").toLowerCase();
+
+  const className =
+    normalized === "approved"
+      ? "bg-emerald-100 text-emerald-800"
+      : normalized === "rejected"
+        ? "bg-rose-100 text-rose-800"
+        : normalized.includes("approved")
+          ? "bg-blue-100 text-blue-800"
+          : "bg-amber-100 text-amber-800";
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${className}`}
+    >
+      {status || "Unknown"}
+    </span>
+  );
+};
+
+const SummaryCard = ({ title, value, description, icon: Icon }) => (
+  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium text-slate-500">{title}</p>
+        <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+        {description && (
+          <p className="mt-1 text-xs text-slate-500">{description}</p>
         )}
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-green-50 p-4 rounded-xl border border-green-200">
-          <div className="flex items-center gap-3">
-            <CheckCircle className="w-8 h-8 text-green-600" />
-            <div>
-              <div className="text-sm text-gray-600">Employees with Good Balance (&gt;10 days)</div>
-              <div className="text-2xl font-bold text-green-700">
-                {filteredEmployees.filter(e => (e.availableBalance || 0) >= 10).length}
-              </div>
-            </div>
-          </div>
+      {Icon && (
+        <div className="rounded-lg bg-blue-50 p-3">
+          <Icon className="h-6 w-6 text-blue-600" />
         </div>
-        
-        <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-8 h-8 text-yellow-600" />
-            <div>
-              <div className="text-sm text-gray-600">Employees with Warning (5-9 days)</div>
-              <div className="text-2xl font-bold text-yellow-700">
-                {filteredEmployees.filter(e => {
-                  const bal = e.availableBalance || 0;
-                  return bal >= 5 && bal < 10;
-                }).length}
-              </div>
-            </div>
+      )}
+    </div>
+  </div>
+);
+
+const EmptyState = ({ title, description }) => (
+  <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+    <DocumentChartBarIcon className="h-12 w-12 text-slate-300" />
+    <h3 className="mt-4 text-base font-semibold text-slate-900">{title}</h3>
+    <p className="mt-1 max-w-md text-sm text-slate-500">{description}</p>
+  </div>
+);
+
+const AdminLeaveBalanceView = ({ apiBaseUrl, getToken }) => {
+  const [activeView, setActiveView] = useState("balances");
+
+  const [balances, setBalances] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+
+  const [loadingBalances, setLoadingBalances] = useState(true);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [error, setError] = useState("");
+
+  const [balanceSearch, setBalanceSearch] = useState("");
+  const [balanceCategory, setBalanceCategory] = useState("All");
+  const [balancePage, setBalancePage] = useState(1);
+  const [balancePageSize, setBalancePageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [balanceSort, setBalanceSort] = useState({
+    key: "employeeName",
+    direction: "asc",
+  });
+
+  const currentYear = new Date().getFullYear();
+
+  const [reportFilters, setReportFilters] = useState({
+    leaveType: "All",
+    status: "All",
+    category: "All",
+    employee: "",
+    startDate: `${currentYear}-01-01`,
+    endDate: `${currentYear}-12-31`,
+  });
+
+  const [reportPage, setReportPage] = useState(1);
+  const [reportPageSize, setReportPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [reportSort, setReportSort] = useState({
+    key: "startDate",
+    direction: "desc",
+  });
+
+  const token = typeof getToken === "function" ? getToken() : null;
+
+  const authHeaders = useMemo(
+    () => ({
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    }),
+    [token]
+  );
+
+  const loadBalances = async () => {
+    setLoadingBalances(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/leave/admin/employee-balances`,
+        {
+          headers: authHeaders,
+        }
+      );
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Failed to load leave balances");
+      }
+
+      const data = await response.json();
+      setBalances(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      console.error("Failed to load leave balances:", loadError);
+      setError(loadError.message || "Failed to load leave balances");
+      setBalances([]);
+    } finally {
+      setLoadingBalances(false);
+    }
+  };
+
+  const loadLeaveReportData = async () => {
+    setLoadingReports(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/leave`, {
+        headers: authHeaders,
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Failed to load leave report data");
+      }
+
+      const data = await response.json();
+      setLeaves(Array.isArray(data) ? data : []);
+    } catch (loadError) {
+      console.error("Failed to load leave report data:", loadError);
+      setError(loadError.message || "Failed to load leave report data");
+      setLeaves([]);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBalances();
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    if (activeView === "reports" && leaves.length === 0) {
+      loadLeaveReportData();
+    }
+  }, [activeView]);
+
+  const categories = useMemo(() => {
+    const values = new Set();
+
+    balances.forEach((balance) => {
+      values.add(getCategoryName(balance.category));
+    });
+
+    leaves.forEach((leave) => {
+      values.add(getCategoryName(getRecordCategory(leave)));
+    });
+
+    return [...values]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [balances, leaves]);
+
+  const leaveTypes = useMemo(() => {
+    return [
+      ...new Set(
+        leaves
+          .map((leave) => normalizeLeaveType(leave.leaveType))
+          .filter(Boolean)
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+  }, [leaves]);
+
+  const balanceRows = useMemo(() => {
+    const search = balanceSearch.trim().toLowerCase();
+
+    const rows = balances.filter((balance) => {
+      const employeeName = getEmployeeName(balance).toLowerCase();
+      const employeeNumber = String(
+        balance.employeeId ?? balance.employeeNumber ?? ""
+      ).toLowerCase();
+      const department = String(balance.department ?? "").toLowerCase();
+      const categoryName = getCategoryName(balance.category);
+
+      const matchesSearch =
+        !search ||
+        employeeName.includes(search) ||
+        employeeNumber.includes(search) ||
+        department.includes(search) ||
+        categoryName.toLowerCase().includes(search);
+
+      const matchesCategory =
+        balanceCategory === "All" || categoryName === balanceCategory;
+
+      return matchesSearch && matchesCategory;
+    });
+
+    const multiplier = balanceSort.direction === "asc" ? 1 : -1;
+
+    return [...rows].sort((first, second) => {
+      let firstValue;
+      let secondValue;
+
+      switch (balanceSort.key) {
+        case "employeeName":
+          firstValue = getEmployeeName(first);
+          secondValue = getEmployeeName(second);
+          break;
+        case "category":
+          firstValue = getCategoryName(first.category);
+          secondValue = getCategoryName(second.category);
+          break;
+        case "annualBalance":
+          firstValue = Number(first.annualLeaveBalance ?? first.annualBalance ?? 0);
+          secondValue = Number(
+            second.annualLeaveBalance ?? second.annualBalance ?? 0
+          );
+          break;
+        case "usedDays":
+          firstValue = Number(first.usedLeaveDays ?? first.usedDays ?? 0);
+          secondValue = Number(second.usedLeaveDays ?? second.usedDays ?? 0);
+          break;
+        case "availableDays":
+          firstValue = Number(first.availableLeaveDays ?? first.available ?? 0);
+          secondValue = Number(
+            second.availableLeaveDays ?? second.available ?? 0
+          );
+          break;
+        default:
+          firstValue = first[balanceSort.key] ?? "";
+          secondValue = second[balanceSort.key] ?? "";
+      }
+
+      if (typeof firstValue === "number" && typeof secondValue === "number") {
+        return (firstValue - secondValue) * multiplier;
+      }
+
+      return String(firstValue).localeCompare(String(secondValue)) * multiplier;
+    });
+  }, [balances, balanceSearch, balanceCategory, balanceSort]);
+
+  const balanceTotals = useMemo(() => {
+    return balanceRows.reduce(
+      (summary, balance) => {
+        summary.employees += 1;
+        summary.annual += Number(
+          balance.annualLeaveBalance ?? balance.annualBalance ?? 0
+        );
+        summary.used += Number(balance.usedLeaveDays ?? balance.usedDays ?? 0);
+        summary.pending += Number(
+          balance.pendingLeaveDays ?? balance.pendingDays ?? 0
+        );
+        summary.available += Number(
+          balance.availableLeaveDays ?? balance.available ?? 0
+        );
+
+        return summary;
+      },
+      {
+        employees: 0,
+        annual: 0,
+        used: 0,
+        pending: 0,
+        available: 0,
+      }
+    );
+  }, [balanceRows]);
+
+  const balanceTotalPages = Math.max(
+    1,
+    Math.ceil(balanceRows.length / balancePageSize)
+  );
+
+  const pagedBalanceRows = useMemo(() => {
+    const safePage = Math.min(balancePage, balanceTotalPages);
+    const start = (safePage - 1) * balancePageSize;
+
+    return balanceRows.slice(start, start + balancePageSize);
+  }, [balanceRows, balancePage, balancePageSize, balanceTotalPages]);
+
+  useEffect(() => {
+    if (balancePage > balanceTotalPages) {
+      setBalancePage(balanceTotalPages);
+    }
+  }, [balancePage, balanceTotalPages]);
+
+  const filteredReportRows = useMemo(() => {
+    const employeeSearch = reportFilters.employee.trim().toLowerCase();
+    const startFilter = parseLocalDate(reportFilters.startDate);
+    const endFilter = parseLocalDate(reportFilters.endDate);
+
+    const rows = leaves.filter((leave) => {
+      const leaveType = normalizeLeaveType(leave.leaveType);
+      const categoryName = getCategoryName(getRecordCategory(leave));
+      const employeeName = getEmployeeName(leave).toLowerCase();
+      const employeeNumber = String(getEmployeeNumber(leave)).toLowerCase();
+      const leaveStart = parseLocalDate(leave.startDate);
+      const leaveEnd = parseLocalDate(leave.endDate);
+
+      const matchesType =
+        reportFilters.leaveType === "All" ||
+        leaveType === reportFilters.leaveType;
+
+      const matchesStatus =
+        reportFilters.status === "All" ||
+        String(leave.status ?? "").toLowerCase() ===
+          reportFilters.status.toLowerCase();
+
+      const matchesCategory =
+        reportFilters.category === "All" ||
+        categoryName === reportFilters.category;
+
+      const matchesEmployee =
+        !employeeSearch ||
+        employeeName.includes(employeeSearch) ||
+        employeeNumber.includes(employeeSearch);
+
+      const overlapsStart =
+        !startFilter || !leaveEnd || leaveEnd >= startFilter;
+
+      const overlapsEnd =
+        !endFilter || !leaveStart || leaveStart <= endFilter;
+
+      return (
+        matchesType &&
+        matchesStatus &&
+        matchesCategory &&
+        matchesEmployee &&
+        overlapsStart &&
+        overlapsEnd
+      );
+    });
+
+    const multiplier = reportSort.direction === "asc" ? 1 : -1;
+
+    return [...rows].sort((first, second) => {
+      let firstValue;
+      let secondValue;
+
+      switch (reportSort.key) {
+        case "employee":
+          firstValue = getEmployeeName(first);
+          secondValue = getEmployeeName(second);
+          break;
+        case "leaveType":
+          firstValue = normalizeLeaveType(first.leaveType);
+          secondValue = normalizeLeaveType(second.leaveType);
+          break;
+        case "category":
+          firstValue = getCategoryName(getRecordCategory(first));
+          secondValue = getCategoryName(getRecordCategory(second));
+          break;
+        case "days":
+          firstValue = getReportedDays(first);
+          secondValue = getReportedDays(second);
+          break;
+        default:
+          firstValue = first[reportSort.key] ?? "";
+          secondValue = second[reportSort.key] ?? "";
+      }
+
+      if (typeof firstValue === "number" && typeof secondValue === "number") {
+        return (firstValue - secondValue) * multiplier;
+      }
+
+      return String(firstValue).localeCompare(String(secondValue)) * multiplier;
+    });
+  }, [leaves, reportFilters, reportSort]);
+
+  const reportSummary = useMemo(() => {
+    const employeeIds = new Set();
+    const typeTotals = {};
+
+    let totalDays = 0;
+    let approvedCount = 0;
+    let pendingCount = 0;
+    let rejectedCount = 0;
+
+    filteredReportRows.forEach((leave) => {
+      const employeeKey =
+        getEmployeeDatabaseId(leave) ??
+        `${getEmployeeName(leave)}-${getEmployeeNumber(leave)}`;
+
+      employeeIds.add(employeeKey);
+
+      const type = normalizeLeaveType(leave.leaveType);
+      const days = getReportedDays(leave);
+
+      totalDays += days;
+      typeTotals[type] = (typeTotals[type] ?? 0) + days;
+
+      if (isApproved(leave)) {
+        approvedCount += 1;
+      } else if (isPending(leave)) {
+        pendingCount += 1;
+      } else if (
+        String(leave.status ?? "").toLowerCase() === "rejected"
+      ) {
+        rejectedCount += 1;
+      }
+    });
+
+    return {
+      requests: filteredReportRows.length,
+      employees: employeeIds.size,
+      totalDays,
+      approvedCount,
+      pendingCount,
+      rejectedCount,
+      typeTotals,
+    };
+  }, [filteredReportRows]);
+
+  const reportTotalPages = Math.max(
+    1,
+    Math.ceil(filteredReportRows.length / reportPageSize)
+  );
+
+  const pagedReportRows = useMemo(() => {
+    const safePage = Math.min(reportPage, reportTotalPages);
+    const start = (safePage - 1) * reportPageSize;
+
+    return filteredReportRows.slice(start, start + reportPageSize);
+  }, [filteredReportRows, reportPage, reportPageSize, reportTotalPages]);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [reportFilters, reportPageSize]);
+
+  const toggleBalanceSort = (key) => {
+    setBalanceSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const toggleReportSort = (key) => {
+    setReportSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const SortIcon = ({ active, direction }) => {
+    if (!active) {
+      return <ChevronUpIcon className="h-4 w-4 opacity-25" />;
+    }
+
+    return direction === "asc" ? (
+      <ChevronUpIcon className="h-4 w-4" />
+    ) : (
+      <ChevronDownIcon className="h-4 w-4" />
+    );
+  };
+
+  const exportBalanceCsv = () => {
+    const rows = [
+      [
+        "Employee ID",
+        "Employee",
+        "Department",
+        "Category",
+        "Annual Leave",
+        "Used Days",
+        "Pending Days",
+        "Available Days",
+        "Usage %",
+      ],
+      ...balanceRows.map((balance) => [
+        balance.employeeId ?? balance.employeeNumber ?? "N/A",
+        getEmployeeName(balance),
+        balance.department ?? "N/A",
+        getCategoryName(balance.category),
+        balance.annualLeaveBalance ?? balance.annualBalance ?? 0,
+        balance.usedLeaveDays ?? balance.usedDays ?? 0,
+        balance.pendingLeaveDays ?? balance.pendingDays ?? 0,
+        balance.availableLeaveDays ?? balance.available ?? 0,
+        balance.usagePercentage ?? balance.percentage ?? 0,
+      ]),
+    ];
+
+    downloadCsv(
+      `leave_balances_${new Date().toISOString().slice(0, 10)}.csv`,
+      rows
+    );
+  };
+
+  const exportLeaveTypeReportCsv = () => {
+    const selectedType =
+      reportFilters.leaveType === "All"
+        ? "all_leave_types"
+        : reportFilters.leaveType
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_");
+
+    const rows = [
+      [
+        "Employee ID",
+        "Employee",
+        "Category",
+        "Leave Type",
+        "Start Date",
+        "End Date",
+        "Days",
+        "Status",
+        "Reason",
+        "Supervisor Status",
+        "Planner Status",
+        "HR Status",
+      ],
+      ...filteredReportRows.map((leave) => [
+        getEmployeeNumber(leave),
+        getEmployeeName(leave),
+        getCategoryName(getRecordCategory(leave)),
+        normalizeLeaveType(leave.leaveType),
+        leave.startDate ?? "",
+        leave.endDate ?? "",
+        getReportedDays(leave),
+        leave.status ?? "",
+        leave.reason ?? "",
+        leave.supervisorStatus ?? "",
+        leave.plannerStatus ?? "",
+        leave.hrStatus ?? "",
+      ]),
+    ];
+
+    downloadCsv(
+      `leave_report_${selectedType}_${reportFilters.startDate}_${reportFilters.endDate}.csv`,
+      rows
+    );
+  };
+
+  const printLeaveTypeReport = () => {
+    const rows = filteredReportRows
+      .map(
+        (leave) => `
+          <tr>
+            <td>${getEmployeeNumber(leave)}</td>
+            <td>${getEmployeeName(leave)}</td>
+            <td>${getCategoryName(getRecordCategory(leave))}</td>
+            <td>${normalizeLeaveType(leave.leaveType)}</td>
+            <td>${formatDate(leave.startDate)}</td>
+            <td>${formatDate(leave.endDate)}</td>
+            <td>${getReportedDays(leave)}</td>
+            <td>${leave.status ?? "Unknown"}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const reportType =
+      reportFilters.leaveType === "All"
+        ? "All Leave Types"
+        : `${reportFilters.leaveType} Leave`;
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      setError("Pop-up blocked. Allow pop-ups to print the report.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${reportType} Report</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              color: #0f172a;
+              margin: 28px;
+            }
+            h1 { margin-bottom: 6px; }
+            .meta {
+              color: #475569;
+              margin-bottom: 20px;
+              font-size: 13px;
+            }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 12px;
+              margin-bottom: 20px;
+            }
+            .summary div {
+              border: 1px solid #cbd5e1;
+              border-radius: 8px;
+              padding: 12px;
+            }
+            .summary strong {
+              display: block;
+              font-size: 20px;
+              margin-top: 4px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+            }
+            th, td {
+              border: 1px solid #cbd5e1;
+              padding: 7px;
+              text-align: left;
+            }
+            th { background: #f1f5f9; }
+            @media print {
+              body { margin: 10mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${reportType} Report</h1>
+          <div class="meta">
+            Period: ${formatDate(reportFilters.startDate)} to
+            ${formatDate(reportFilters.endDate)} |
+            Generated: ${new Date().toLocaleString()}
           </div>
-        </div>
-        
-        <div className="bg-red-50 p-4 rounded-xl border border-red-200">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-8 h-8 text-red-600" />
-            <div>
-              <div className="text-sm text-gray-600">Employees with Critical (&lt;5 days)</div>
-              <div className="text-2xl font-bold text-red-700">
-                {filteredEmployees.filter(e => (e.availableBalance || 0) < 5).length}
-              </div>
-            </div>
+
+          <div class="summary">
+            <div>Requests<strong>${reportSummary.requests}</strong></div>
+            <div>Employees<strong>${reportSummary.employees}</strong></div>
+            <div>Total days<strong>${reportSummary.totalDays}</strong></div>
+            <div>Approved<strong>${reportSummary.approvedCount}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Employee ID</th>
+                <th>Employee</th>
+                <th>Category</th>
+                <th>Leave Type</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Days</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+    }, 300);
+  };
+
+  const resetReportFilters = () => {
+    setReportFilters({
+      leaveType: "All",
+      status: "All",
+      category: "All",
+      employee: "",
+      startDate: `${currentYear}-01-01`,
+      endDate: `${currentYear}-12-31`,
+    });
+  };
+
+  const refreshCurrentView = () => {
+    if (activeView === "balances") {
+      loadBalances();
+    } else {
+      loadLeaveReportData();
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">
+              Leave Analytics
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Review employee balances or generate reports for individual
+              leave types.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveView("balances")}
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                activeView === "balances"
+                  ? "bg-blue-600 text-white"
+                  : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <UserGroupIcon className="h-5 w-5" />
+              Leave Balances
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveView("reports")}
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                activeView === "reports"
+                  ? "bg-blue-600 text-white"
+                  : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <DocumentChartBarIcon className="h-5 w-5" />
+              Leave Type Reports
+            </button>
+
+            <button
+              type="button"
+              onClick={refreshCurrentView}
+              disabled={loadingBalances || loadingReports}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ArrowPathIcon
+                className={`h-5 w-5 ${
+                  loadingBalances || loadingReports ? "animate-spin" : ""
+                }`}
+              />
+              Refresh
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Single Employee Export Modal */}
-      {showExportModal && selectedEmployeeForExport && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-900">Export Leave Records</h3>
-              <button
-                onClick={() => {
-                  setShowExportModal(false);
-                  setSelectedEmployeeForExport(null);
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+      {error && (
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-800">
+          <div className="flex items-start gap-3">
+            <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+
+          <button type="button" onClick={() => setError("")}>
+            <XMarkIcon className="h-5 w-5" />
+          </button>
+        </div>
+      )}
+
+      {activeView === "balances" ? (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <SummaryCard
+              title="Employees"
+              value={formatNumber(balanceTotals.employees)}
+              description="Matching current filters"
+              icon={UserGroupIcon}
+            />
+            <SummaryCard
+              title="Annual Allocation"
+              value={formatNumber(balanceTotals.annual)}
+              description="Total allocated days"
+              icon={CalendarDaysIcon}
+            />
+            <SummaryCard
+              title="Used Days"
+              value={formatNumber(balanceTotals.used)}
+              description="Approved deductible leave"
+              icon={ChartBarIcon}
+            />
+            <SummaryCard
+              title="Pending Days"
+              value={formatNumber(balanceTotals.pending)}
+              description="Awaiting final approval"
+              icon={DocumentChartBarIcon}
+            />
+            <SummaryCard
+              title="Available Days"
+              value={formatNumber(balanceTotals.available)}
+              description="Remaining employee balance"
+              icon={CalendarDaysIcon}
+            />
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-4">
+              <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+                <div className="flex flex-1 flex-col gap-3 sm:flex-row">
+                  <div className="relative flex-1">
+                    <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
+                    <input
+                      type="search"
+                      value={balanceSearch}
+                      onChange={(event) => {
+                        setBalanceSearch(event.target.value);
+                        setBalancePage(1);
+                      }}
+                      placeholder="Search employee, ID, department or category"
+                      className="w-full rounded-lg border border-slate-300 py-2 pl-10 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                  </div>
+
+                  <select
+                    value={balanceCategory}
+                    onChange={(event) => {
+                      setBalanceCategory(event.target.value);
+                      setBalancePage(1);
+                    }}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="All">All categories</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={exportBalanceCsv}
+                  disabled={balanceRows.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowDownTrayIcon className="h-5 w-5" />
+                  Export balances
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="bg-blue-50 p-3 rounded-lg">
-                <p className="text-sm font-medium text-blue-800">Employee: {selectedEmployeeForExport.firstName} {selectedEmployeeForExport.lastName}</p>
-                <p className="text-xs text-blue-600 mt-1">ID: {selectedEmployeeForExport.employeeCode || 'N/A'}</p>
+            {loadingBalances ? (
+              <div className="flex items-center justify-center py-20">
+                <ArrowPathIcon className="h-8 w-8 animate-spin text-blue-600" />
+              </div>
+            ) : balanceRows.length === 0 ? (
+              <EmptyState
+                title="No leave balances found"
+                description="No employee balance records match the selected filters."
+              />
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {[
+                          ["employeeName", "Employee"],
+                          ["category", "Category"],
+                          ["annualBalance", "Annual"],
+                          ["usedDays", "Used"],
+                          ["pendingDays", "Pending"],
+                          ["availableDays", "Available"],
+                        ].map(([key, label]) => (
+                          <th
+                            key={key}
+                            className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleBalanceSort(key)}
+                              className="inline-flex items-center gap-1"
+                            >
+                              {label}
+                              <SortIcon
+                                active={balanceSort.key === key}
+                                direction={balanceSort.direction}
+                              />
+                            </button>
+                          </th>
+                        ))}
+
+                        <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Department
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Usage
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Leave-type breakdown
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {pagedBalanceRows.map((balance) => {
+                        const annual = Number(
+                          balance.annualLeaveBalance ??
+                            balance.annualBalance ??
+                            0
+                        );
+                        const used = Number(
+                          balance.usedLeaveDays ?? balance.usedDays ?? 0
+                        );
+                        const pending = Number(
+                          balance.pendingLeaveDays ??
+                            balance.pendingDays ??
+                            0
+                        );
+                        const available = Number(
+                          balance.availableLeaveDays ??
+                            balance.available ??
+                            0
+                        );
+
+                        const percentage =
+                          Number(
+                            balance.usagePercentage ??
+                              balance.percentage ??
+                              (annual > 0 ? (used * 100) / annual : 0)
+                          ) || 0;
+
+                        const breakdown =
+                          balance.leaveTypeBreakdown &&
+                          typeof balance.leaveTypeBreakdown === "object"
+                            ? Object.entries(balance.leaveTypeBreakdown)
+                            : [];
+
+                        return (
+                          <tr
+                            key={
+                              balance.employeeDatabaseId ??
+                              balance.id ??
+                              `${balance.employeeId}-${getEmployeeName(balance)}`
+                            }
+                            className="hover:bg-slate-50"
+                          >
+                            <td className="whitespace-nowrap px-4 py-4">
+                              <div className="font-semibold text-slate-900">
+                                {getEmployeeName(balance)}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {balance.employeeId ??
+                                  balance.employeeNumber ??
+                                  "N/A"}
+                              </div>
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                              {getCategoryName(balance.category)}
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm font-semibold text-slate-900">
+                              {formatNumber(annual)}
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                              {formatNumber(used)}
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm text-amber-700">
+                              {formatNumber(pending)}
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm font-semibold text-emerald-700">
+                              {formatNumber(available)}
+                            </td>
+
+                            <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                              {balance.department || "N/A"}
+                            </td>
+
+                            <td className="min-w-44 px-4 py-4">
+                              <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+                                <span>{formatNumber(percentage, 1)}%</span>
+                                <span>
+                                  {formatNumber(used)}/{formatNumber(annual)}
+                                </span>
+                              </div>
+
+                              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                                <div
+                                  className="h-full rounded-full bg-blue-600"
+                                  style={{
+                                    width: `${Math.min(
+                                      100,
+                                      Math.max(0, percentage)
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                            </td>
+
+                            <td className="min-w-64 px-4 py-4">
+                              {breakdown.length === 0 ? (
+                                <span className="text-sm text-slate-400">
+                                  No approved leave
+                                </span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {breakdown.map(([type, days]) => (
+                                    <button
+                                      type="button"
+                                      key={type}
+                                      onClick={() => {
+                                        setReportFilters((current) => ({
+                                          ...current,
+                                          leaveType: normalizeLeaveType(type),
+                                          employee:
+                                            balance.employeeId ??
+                                            getEmployeeName(balance),
+                                        }));
+                                        setActiveView("reports");
+                                      }}
+                                      className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                                      title={`Run ${type} report for this employee`}
+                                    >
+                                      {type}: {days}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-col justify-between gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center">
+                  <div className="text-sm text-slate-500">
+                    Showing{" "}
+                    {balanceRows.length === 0
+                      ? 0
+                      : (balancePage - 1) * balancePageSize + 1}
+                    –{Math.min(balancePage * balancePageSize, balanceRows.length)}{" "}
+                    of {balanceRows.length}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={balancePageSize}
+                      onChange={(event) => {
+                        setBalancePageSize(Number(event.target.value));
+                        setBalancePage(1);
+                      }}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      {[10, 25, 50, 100].map((size) => (
+                        <option key={size} value={size}>
+                          {size} rows
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      disabled={balancePage <= 1}
+                      onClick={() =>
+                        setBalancePage((current) => Math.max(1, current - 1))
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="px-2 text-sm text-slate-600">
+                      Page {balancePage} of {balanceTotalPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={balancePage >= balanceTotalPages}
+                      onClick={() =>
+                        setBalancePage((current) =>
+                          Math.min(balanceTotalPages, current + 1)
+                        )
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <FunnelIcon className="h-5 w-5 text-blue-600" />
+              <h3 className="font-semibold text-slate-900">
+                Individual Leave Type Report
+              </h3>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Leave type
+                </label>
+                <select
+                  value={reportFilters.leaveType}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      leaveType: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="All">All leave types</option>
+                  {leaveTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Export Type</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="summary"
-                      checked={exportType === 'summary'}
-                      onChange={(e) => setExportType(e.target.value)}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <span className="text-sm text-gray-700">Summary Report</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="detailed"
-                      checked={exportType === 'detailed'}
-                      onChange={(e) => setExportType(e.target.value)}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <span className="text-sm text-gray-700">Detailed Records</span>
-                  </label>
-                </div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Status
+                </label>
+                <select
+                  value={reportFilters.status}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      status: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="All">All statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Supervisor_Approved">
+                    Supervisor approved
+                  </option>
+                  <option value="Planner_Approved">Planner approved</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-                  <input
-                    type="date"
-                    value={exportDateRange.startDate}
-                    onChange={(e) => setExportDateRange({ ...exportDateRange, startDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
-                  <input
-                    type="date"
-                    value={exportDateRange.endDate}
-                    onChange={(e) => setExportDateRange({ ...exportDateRange, endDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Category
+                </label>
+                <select
+                  value={reportFilters.category}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      category: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="All">All categories</option>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="bg-yellow-50 p-3 rounded-lg">
-                <p className="text-xs text-yellow-700">
-                  <strong>Note:</strong> {exportType === 'summary' 
-                    ? 'Summary report includes annual balance, usage statistics, and leave type breakdown.'
-                    : 'Detailed report includes all leave requests with dates, statuses, and approval history.'}
-                </p>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Start date
+                </label>
+                <input
+                  type="date"
+                  value={reportFilters.startDate}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      startDate: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  End date
+                </label>
+                <input
+                  type="date"
+                  value={reportFilters.endDate}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      endDate: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Employee
+                </label>
+                <input
+                  type="search"
+                  value={reportFilters.employee}
+                  onChange={(event) =>
+                    setReportFilters((current) => ({
+                      ...current,
+                      employee: event.target.value,
+                    }))
+                  }
+                  placeholder="Name or ID"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
+            <div className="mt-4 flex flex-wrap gap-2">
               <button
-                onClick={() => {
-                  setShowExportModal(false);
-                  setSelectedEmployeeForExport(null);
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                type="button"
+                onClick={resetReportFilters}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Cancel
+                <XMarkIcon className="h-5 w-5" />
+                Reset filters
               </button>
+
               <button
-                onClick={handleSingleEmployeeExport}
-                disabled={exporting}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                type="button"
+                onClick={exportLeaveTypeReportCsv}
+                disabled={filteredReportRows.length === 0}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {exporting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Exporting...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    Export
-                  </>
-                )}
+                <ArrowDownTrayIcon className="h-5 w-5" />
+                Export CSV
+              </button>
+
+              <button
+                type="button"
+                onClick={printLeaveTypeReport}
+                disabled={filteredReportRows.length === 0}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <PrinterIcon className="h-5 w-5" />
+                Print / PDF
               </button>
             </div>
           </div>
-        </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+            <SummaryCard
+              title="Requests"
+              value={formatNumber(reportSummary.requests)}
+              description={
+                reportFilters.leaveType === "All"
+                  ? "All matching leave types"
+                  : `${reportFilters.leaveType} requests`
+              }
+              icon={DocumentChartBarIcon}
+            />
+            <SummaryCard
+              title="Employees"
+              value={formatNumber(reportSummary.employees)}
+              description="Unique employees"
+              icon={UserGroupIcon}
+            />
+            <SummaryCard
+              title="Leave Days"
+              value={formatNumber(reportSummary.totalDays)}
+              description="Deducted days where available"
+              icon={CalendarDaysIcon}
+            />
+            <SummaryCard
+              title="Approved"
+              value={formatNumber(reportSummary.approvedCount)}
+              description="Final approvals"
+              icon={ChartBarIcon}
+            />
+            <SummaryCard
+              title="Pending"
+              value={formatNumber(reportSummary.pendingCount)}
+              description="Still in workflow"
+              icon={DocumentChartBarIcon}
+            />
+            <SummaryCard
+              title="Rejected"
+              value={formatNumber(reportSummary.rejectedCount)}
+              description="Rejected requests"
+              icon={ExclamationTriangleIcon}
+            />
+          </div>
+
+          {reportFilters.leaveType === "All" &&
+            Object.keys(reportSummary.typeTotals).length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="font-semibold text-slate-900">
+                  Leave days by type
+                </h3>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {Object.entries(reportSummary.typeTotals)
+                    .sort((first, second) => second[1] - first[1])
+                    .map(([type, days]) => (
+                      <button
+                        type="button"
+                        key={type}
+                        onClick={() =>
+                          setReportFilters((current) => ({
+                            ...current,
+                            leaveType: type,
+                          }))
+                        }
+                        className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                      >
+                        {type}: {days} day{Number(days) === 1 ? "" : "s"}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            {loadingReports ? (
+              <div className="flex items-center justify-center py-20">
+                <ArrowPathIcon className="h-8 w-8 animate-spin text-blue-600" />
+              </div>
+            ) : filteredReportRows.length === 0 ? (
+              <EmptyState
+                title="No leave requests found"
+                description="No leave requests match the selected leave type, status, employee, category and date period."
+              />
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {[
+                          ["employee", "Employee"],
+                          ["category", "Category"],
+                          ["leaveType", "Leave Type"],
+                          ["startDate", "Start"],
+                          ["endDate", "End"],
+                          ["days", "Days"],
+                          ["status", "Status"],
+                        ].map(([key, label]) => (
+                          <th
+                            key={key}
+                            className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleReportSort(key)}
+                              className="inline-flex items-center gap-1"
+                            >
+                              {label}
+                              <SortIcon
+                                active={reportSort.key === key}
+                                direction={reportSort.direction}
+                              />
+                            </button>
+                          </th>
+                        ))}
+
+                        <th className="min-w-64 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Reason
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Workflow
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {pagedReportRows.map((leave) => (
+                        <tr key={leave.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-4 py-4">
+                            <div className="font-semibold text-slate-900">
+                              {getEmployeeName(leave)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {getEmployeeNumber(leave)}
+                            </div>
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                            {getCategoryName(getRecordCategory(leave))}
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-slate-900">
+                            {normalizeLeaveType(leave.leaveType)}
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                            {formatDate(leave.startDate)}
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-700">
+                            {formatDate(leave.endDate)}
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-sm font-semibold text-slate-900">
+                            {formatNumber(getReportedDays(leave))}
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4">
+                            <StatusBadge status={leave.status} />
+                          </td>
+
+                          <td className="max-w-sm px-4 py-4 text-sm text-slate-600">
+                            <div className="line-clamp-2">
+                              {leave.reason || "No reason supplied"}
+                            </div>
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-600">
+                            <div>Supervisor: {leave.supervisorStatus || "N/A"}</div>
+                            <div>Planner: {leave.plannerStatus || "N/A"}</div>
+                            <div>HR: {leave.hrStatus || "N/A"}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-col justify-between gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center">
+                  <div className="text-sm text-slate-500">
+                    Showing{" "}
+                    {(reportPage - 1) * reportPageSize + 1}–
+                    {Math.min(
+                      reportPage * reportPageSize,
+                      filteredReportRows.length
+                    )}{" "}
+                    of {filteredReportRows.length}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={reportPageSize}
+                      onChange={(event) =>
+                        setReportPageSize(Number(event.target.value))
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      {[10, 25, 50, 100].map((size) => (
+                        <option key={size} value={size}>
+                          {size} rows
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      disabled={reportPage <= 1}
+                      onClick={() =>
+                        setReportPage((current) => Math.max(1, current - 1))
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="px-2 text-sm text-slate-600">
+                      Page {reportPage} of {reportTotalPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={reportPage >= reportTotalPages}
+                      onClick={() =>
+                        setReportPage((current) =>
+                          Math.min(reportTotalPages, current + 1)
+                        )
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

@@ -132,7 +132,7 @@ const WorkflowSettings = () => {
 
   // ----------------------- Delete workflow -----------------------
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this workflow?')) return;
+    if (!await window.appConfirm('Delete this workflow?')) return;
     const token = getToken();
     if (!token) {
       alert('No authentication token found.');

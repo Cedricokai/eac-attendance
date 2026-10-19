@@ -244,6 +244,44 @@ function BiometricStatus() {
   const stats = getStatistics();
   const filteredEvents = getFilteredEvents();
 
+  const exportFilteredEvents = () => {
+    if (!filteredEvents.length) return;
+
+    const now = new Date();
+    const exportDate = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    const rows = [
+      ['Event ID', 'Status', 'Employee', 'Employee ID', 'Action', 'Sign Type', 'Timestamp', 'Device Timestamp', 'Error Details', 'Retried', 'Export Date'],
+      ...filteredEvents.map(event => [
+        event.id, event.status, event.employeeDbName || event.deviceName || 'Unknown',
+        event.employeeCode, event.action, event.signType, event.timestamp,
+        event.deviceTimestamp, event.status === 'error' ? event.errorMessage : '',
+        event.retried ? 'Yes' : 'No', exportDate
+      ])
+    ];
+    const csv = rows.map(row => row.map(value => {
+      const text = String(value ?? '');
+      const safeText = /^[\s]*[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safeText.replace(/"/g, '""')}"`;
+    }).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `biometric-events-${filterStatus}-${exportDate}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const retryEvent = (event) => {
+    const employeeName = event.employeeDbName || event.deviceName;
+    if (!employeeName?.trim()) {
+      alert('No employee name is available. Select a suggested employee to retry.');
+      return;
+    }
+    return retryWithEmployee(event, employeeName);
+  };
+
   // Compact View Component
   const CompactView = () => (
     <div className="max-h-96 overflow-y-auto">
@@ -299,6 +337,14 @@ function BiometricStatus() {
                 {event.status === 'error' && (
                   <div className="mt-2 p-2 bg-red-50 rounded text-xs text-red-700">
                     <span className="font-medium">❌ Error:</span> {event.errorMessage}
+                    <button
+                      type="button"
+                      onClick={() => retryEvent(event)}
+                      disabled={retryingEventId !== null}
+                      className="block mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {retryingEventId === event.id ? 'Retrying...' : 'Retry'}
+                    </button>
                     {event.suggestedNames && event.suggestedNames.length > 0 && (
                       <div className="mt-2 pt-1 border-t border-red-200">
                         <span className="font-medium text-xs">💡 Click a name to retry:</span>
@@ -415,6 +461,20 @@ function BiometricStatus() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-gray-200">
+        <span className="text-xs text-gray-500">
+          Export includes matching recent events loaded in this panel.
+        </span>
+        <button
+          type="button"
+          onClick={exportFilteredEvents}
+          disabled={filteredEvents.length === 0}
+          className="px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Export {filterStatus === 'success' ? 'Success' : filterStatus === 'error' ? 'Errors' : 'All'} CSV ({filteredEvents.length})
+        </button>
+      </div>
+
       {/* Events Table */}
       <div className="flex-1 overflow-auto">
         <table className="min-w-full divide-y divide-gray-200">
@@ -469,6 +529,14 @@ function BiometricStatus() {
                         <div className="text-xs text-red-600 mb-2">
                           {event.errorMessage}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => retryEvent(event)}
+                          disabled={retryingEventId !== null}
+                          className="mb-2 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {retryingEventId === event.id ? 'Retrying...' : 'Retry'}
+                        </button>
                         {event.suggestedNames && event.suggestedNames.length > 0 && (
                           <div className="flex flex-wrap gap-2">
                             {event.suggestedNames.map((name, idx) => (
@@ -503,8 +571,8 @@ function BiometricStatus() {
           Last updated: {new Date().toLocaleTimeString()}
         </div>
         <button
-          onClick={() => {
-            if (window.confirm('Clear all biometric event history?')) {
+          onClick={async () => {
+            if (await window.appConfirm('Clear all biometric event history?')) {
               setBiometricEvents([]);
               setUnreadCount(0);
             }

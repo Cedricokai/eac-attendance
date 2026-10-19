@@ -23,6 +23,8 @@ export const SettingsProvider = ({ children }) => {
     timeAndHalfAfter8Hours: false,
     weekendRate: 0,
     holidayRate: 0,
+    // No frontend fallback. Display exactly what the backend returns.
+    defaultOvertimeMultiplier: null,
     
     // Employee Categories
     employeeCategories: [],
@@ -54,11 +56,20 @@ export const SettingsProvider = ({ children }) => {
       enableBiometricIntegration: false,
       defaultShift: "Day",
       attendanceValidationRequired: false
-    }
+    },
+    companyName: 'EAC ELECTRICAL SOLUTION LIMITED',
+    companyEmail: '',
+    companyPhone: '',
+    companyAddress: ''
   });
 
   const [loading, setLoading] = useState(true);
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.1.98:8080';
+  const hostname = window.location.hostname;
+  const API_BASE_URL = hostname === 'localhost' || hostname === '127.0.0.1'
+    ? 'http://localhost:8080'
+    : hostname.startsWith('192.168.')
+      ? import.meta.env.VITE_API_BASE_URL_LOCAL
+      : import.meta.env.VITE_API_BASE_URL_PUBLIC || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
   // Helper function to get JWT token
   const getToken = () => {
@@ -81,9 +92,9 @@ export const SettingsProvider = ({ children }) => {
         return;
       }
 
-      console.log('🔍 Loading settings from:', `http://http://192.168.1.98:8080/api/settings/all`);
+      console.log('Loading settings from:', `${API_BASE_URL}/api/settings/all`);
 
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/all`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/all`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -110,9 +121,15 @@ export const SettingsProvider = ({ children }) => {
         weekendDays: data.weekendDays || [],
         doubleTimeOnSunday: systemSettings.doubleTimeOnSunday || false,
         timeAndHalfAfter8Hours: systemSettings.timeAndHalfAfter8Hours || false,
-        weekendRate: systemSettings.weekendRate || 1.0,
-        holidayRate: systemSettings.holidayRate || 1.0,
+        weekendRate: systemSettings.weekendRate,
+        holidayRate: systemSettings.holidayRate,
+        // Backend is the source of truth; do not substitute a frontend value.
+        defaultOvertimeMultiplier: systemSettings.defaultOvertimeMultiplier,
         employeeCategories: data.employeeCategories || [],
+        companyName: systemSettings.companyName || 'EAC ELECTRICAL SOLUTION LIMITED',
+        companyEmail: systemSettings.companyEmail || '',
+        companyPhone: systemSettings.companyPhone || '',
+        companyAddress: systemSettings.companyAddress || '',
         // Dynamic data
         jobPositions: data.jobPositions || [],
         holidays: data.holidays || []
@@ -138,14 +155,20 @@ export const SettingsProvider = ({ children }) => {
         weekendDays: Array.isArray(newSettings.weekendDays) ? newSettings.weekendDays : [],
         doubleTimeOnSunday: Boolean(newSettings.doubleTimeOnSunday),
         timeAndHalfAfter8Hours: Boolean(newSettings.timeAndHalfAfter8Hours),
-        weekendRate: parseFloat(newSettings.weekendRate) || 1.0,
-        holidayRate: parseFloat(newSettings.holidayRate) || 1.0,
-        employeeCategories: Array.isArray(newSettings.employeeCategories) ? newSettings.employeeCategories : []
+        weekendRate: newSettings.weekendRate,
+        holidayRate: newSettings.holidayRate,
+        // Send exactly the value currently held by the settings form/context.
+        defaultOvertimeMultiplier: newSettings.defaultOvertimeMultiplier,
+        employeeCategories: Array.isArray(newSettings.employeeCategories) ? newSettings.employeeCategories : [],
+        companyName: newSettings.companyName || '',
+        companyEmail: newSettings.companyEmail || '',
+        companyPhone: newSettings.companyPhone || '',
+        companyAddress: newSettings.companyAddress || ''
       };
 
       console.log('📤 Sending system settings to backend:', settingsToSend);
 
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/system`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/system`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -176,7 +199,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log('📤 Adding holiday:', holiday);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/holidays`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/holidays`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -209,7 +232,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log(`📤 Updating holiday ${id}:`, holiday);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/holidays/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/holidays/${id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -240,7 +263,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log(`🗑️ Deleting holiday ${id}`);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/holidays/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/holidays/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -269,7 +292,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log('📤 Adding job position:', position);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/job-positions`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/job-positions`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -300,7 +323,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log(`📤 Updating job position ${id}:`, position);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/job-positions/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/job-positions/${id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -331,7 +354,7 @@ export const SettingsProvider = ({ children }) => {
       const token = getToken();
       console.log(`🗑️ Deleting job position ${id}`);
       
-      const response = await fetch(`http://http://192.168.1.98:8080/api/settings/job-positions/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/settings/job-positions/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -464,6 +487,7 @@ export const SettingsProvider = ({ children }) => {
       timeAndHalfAfter8Hours: false,
       weekendRate: 0,
       holidayRate: 0,
+      defaultOvertimeMultiplier: null,
       employeeCategories: [],
     };
     

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import MainSidebar from "../mainSidebar";
 import Header from "../../../components/Header";
 import * as XLSX from "xlsx";
+import ProjectPayrollReport from '../../../components/ProjectPayrollReport';
 
 function PayrollReports() {
   const [reportData, setReportData] = useState(null);
@@ -472,6 +473,8 @@ function PayrollReports() {
                 onClick={() => {
                   if (activeTab === "reports") {
                     refreshReportData();
+                  } else if (activeTab === "projects") {
+                    setRefreshKey(key => key + 1);
                   } else {
                     refreshCreditsData();
                   }
@@ -499,6 +502,10 @@ function PayrollReports() {
           {/* Tabs */}
           <div className="border-b border-gray-200 mb-6">
             <nav className="flex gap-4">
+              <button onClick={() => setActiveTab('projects')}
+                className={`px-4 py-2 font-medium text-sm rounded-t-lg ${activeTab === 'projects' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                Period &amp; Project Earnings
+              </button>
               <button
                 onClick={() => setActiveTab("reports")}
                 className={`px-4 py-2 font-medium text-sm rounded-t-lg transition-colors ${
@@ -541,6 +548,7 @@ function PayrollReports() {
           )}
 
           {/* ---------- REPORTS TAB ---------- */}
+          {activeTab === 'projects' && <ProjectPayrollReport apiBaseUrl={API_BASE_URL} refreshKey={refreshKey} />}
           {activeTab === "reports" && (
             <>
               {availableMonths.length > 0 && (

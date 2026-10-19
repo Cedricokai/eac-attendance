@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { FiMail, FiLock, FiLogIn, FiEye, FiEyeOff, FiShield, FiPackage, FiCalendar, FiCheckCircle, FiGlobe } from "react-icons/fi";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import { FiMail, FiLock, FiLogIn, FiEye, FiEyeOff, FiShield, FiPackage, FiCalendar, FiCheckCircle, FiGlobe, FiHeadphones, FiPhone, FiSend, FiX } from "react-icons/fi";
 import { toast } from "react-toastify";
+import { apiFetch } from "../../utils/api";
 
 function LoginPage() {
   const [credentials, setCredentials] = useState({
@@ -11,7 +12,12 @@ function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showSupport, setShowSupport] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportTicket, setSupportTicket] = useState(null);
+  const [supportForm, setSupportForm] = useState({ name: "", email: "", category: "LOGIN_PROBLEM", description: "" });
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Create animated bubbles
   useEffect(() => {
@@ -196,7 +202,19 @@ function LoginPage() {
           return;
         }
 
-        if (data.role === "ROLE_ADMIN") {
+        const queryRedirect = new URLSearchParams(location.search).get("redirect");
+        const storedRedirect = sessionStorage.getItem("postLoginRedirect");
+        const requestedRedirect = queryRedirect || storedRedirect;
+        const safeRedirect = requestedRedirect?.startsWith("/") &&
+          !requestedRedirect.startsWith("//")
+          ? requestedRedirect
+          : null;
+
+        sessionStorage.removeItem("postLoginRedirect");
+
+        if (safeRedirect) {
+          navigate(safeRedirect, { replace: true });
+        } else if (data.role === "ROLE_ADMIN") {
           navigate("/centralizedDashboard");
         } else {
           navigate("/employeeDashboard");
@@ -276,11 +294,43 @@ function LoginPage() {
     }
   };
 
+  const submitSupportRequest = async (event) => {
+    event.preventDefault();
+    setSupportLoading(true);
+    try {
+      const result = await apiFetch("/auth/support-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: supportForm.name.trim(),
+          email: supportForm.email.trim().toLowerCase(),
+          category: supportForm.category,
+          description: supportForm.description.trim(),
+          page: "LOGIN",
+        }),
+      });
+      setSupportTicket(result?.reference || result?.ticketNumber || result?.id || "Submitted");
+      toast.success("Your IT support request has been submitted");
+    } catch (supportError) {
+      toast.error(supportError.message || "Unable to submit your request. Please use the phone or email shown.");
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
   // Remove the automatic connection test on mount to reduce console noise
   // Connection test will only run when user clicks the button
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4 overflow-hidden relative">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-100 flex items-center justify-center p-4 overflow-hidden relative">
+      {/* Electrical engineering schematic background */}
+      <div
+        className="absolute inset-0 bg-center bg-cover opacity-90 pointer-events-none"
+        style={{ backgroundImage: "url('/electrical-engineering-bg.svg')" }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-50/45 via-white/70 to-indigo-100/45 pointer-events-none" aria-hidden="true" />
+
       {/* Animated Bubbles Container */}
       <div className="bubble-container absolute inset-0 w-full h-full overflow-hidden pointer-events-none" />
       
@@ -311,28 +361,20 @@ function LoginPage() {
             opacity: 0.8;
             transition: opacity 0.3s ease;
           }
+
         `}
       </style>
 
       {/* Main Login Card */}
       <div className="max-w-6xl w-full grid lg:grid-cols-2 bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl overflow-hidden border border-white/20 relative z-10">
         {/* Left Section - Welcome & Features */}
-        <div className="hidden lg:flex flex-col justify-center p-12 bg-gradient-to-br from-indigo-600 to-purple-700 text-white relative overflow-hidden">
-          {/* Floating particles */}
-          <div className="absolute inset-0 overflow-hidden">
-            {[...Array(5)].map((_, i) => (
-              <div 
-                key={i}
-                className="absolute w-4 h-4 bg-white/10 rounded-full animate-pulse"
-                style={{
-                  top: `${20 + i * 15}%`,
-                  left: `${10 + i * 20}%`,
-                  animationDelay: `${i * 0.5}s`
-                }}
-              />
-            ))}
-          </div>
-          
+        <div className="hidden lg:flex flex-col justify-center p-12 bg-gradient-to-br from-blue-700 via-indigo-700 to-indigo-800 text-white relative overflow-hidden">
+          <img
+            src="/electrical-engineering-bg.svg"
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-30 mix-blend-screen"
+            aria-hidden="true"
+          />
           <div className="relative z-10">
             <div className="flex items-center mb-6">
               <FiShield className="text-3xl mr-3 text-white/90 animate-pulse" />
@@ -564,13 +606,14 @@ function LoginPage() {
                 Password Recovery
               </Link>
               
-              <a 
-                href="#" 
+              <button
+                type="button"
+                onClick={() => { setSupportTicket(null); setShowSupport(true); }}
                 className="text-gray-600 hover:text-gray-800 font-medium hover:underline transition-colors duration-200 flex items-center"
               >
                 <span className="mr-2">📞</span>
                 IT Support
-              </a>
+              </button>
             </div>
             
             <p className="text-xs text-gray-500 text-center mt-6 pt-4 border-t border-gray-100">
@@ -579,6 +622,38 @@ function LoginPage() {
           </div>
         </div>
       </div>
+
+      {showSupport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="support-title" onMouseDown={(event) => event.target === event.currentTarget && setShowSupport(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-white/40 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-700 to-blue-700 px-6 py-5 text-white flex items-start justify-between">
+              <div className="flex gap-3"><FiHeadphones className="text-2xl mt-0.5" /><div><h2 id="support-title" className="text-xl font-bold">IT Support</h2><p className="text-sm text-blue-100 mt-1">Help with access, accounts, and login problems</p></div></div>
+              <button type="button" onClick={() => setShowSupport(false)} className="p-1 rounded-lg hover:bg-white/15" aria-label="Close IT support"><FiX className="text-2xl" /></button>
+            </div>
+            <div className="p-6">
+              <div className="grid sm:grid-cols-2 gap-3 mb-6">
+                <a href={`mailto:${import.meta.env.VITE_IT_SUPPORT_EMAIL || "it.support@eac.com"}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 hover:border-indigo-300 transition"><span className="flex items-center text-xs font-semibold uppercase tracking-wide text-gray-500"><FiMail className="mr-2" />Email</span><span className="mt-1 block text-sm text-indigo-700 break-all">{import.meta.env.VITE_IT_SUPPORT_EMAIL || "it.support@eac.com"}</span></a>
+                <a href={`tel:${import.meta.env.VITE_IT_SUPPORT_PHONE || "+233000000000"}`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 hover:border-indigo-300 transition"><span className="flex items-center text-xs font-semibold uppercase tracking-wide text-gray-500"><FiPhone className="mr-2" />Phone</span><span className="mt-1 block text-sm text-indigo-700">{import.meta.env.VITE_IT_SUPPORT_PHONE || "+233 00 000 0000"}</span></a>
+              </div>
+
+              {supportTicket ? (
+                <div className="text-center py-6"><FiCheckCircle className="mx-auto text-5xl text-emerald-600" /><h3 className="mt-4 text-xl font-bold text-gray-900">Request submitted</h3><p className="mt-2 text-gray-600">Keep this reference for follow-up:</p><p className="mt-3 inline-block rounded-xl bg-emerald-50 border border-emerald-200 px-5 py-3 font-bold text-emerald-800">{supportTicket}</p><button type="button" onClick={() => setShowSupport(false)} className="block mx-auto mt-6 text-indigo-700 font-semibold hover:text-indigo-900">Close</button></div>
+              ) : (
+                <form onSubmit={submitSupportRequest} className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <label className="block"><span className="block text-sm font-medium text-gray-700 mb-1">Your name</span><input required value={supportForm.name} onChange={(e) => setSupportForm({ ...supportForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" /></label>
+                    <label className="block"><span className="block text-sm font-medium text-gray-700 mb-1">Work email</span><input required type="email" value={supportForm.email} onChange={(e) => setSupportForm({ ...supportForm, email: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" /></label>
+                  </div>
+                  <label className="block"><span className="block text-sm font-medium text-gray-700 mb-1">Issue type</span><select value={supportForm.category} onChange={(e) => setSupportForm({ ...supportForm, category: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"><option value="LOGIN_PROBLEM">Login problem</option><option value="LOCKED_ACCOUNT">Locked account</option><option value="FORGOTTEN_USERNAME">Forgotten username</option><option value="ACCOUNT_REQUEST">Account request</option><option value="CONNECTION_PROBLEM">Connection problem</option><option value="OTHER">Other</option></select></label>
+                  <label className="block"><span className="block text-sm font-medium text-gray-700 mb-1">Describe the problem</span><textarea required minLength="10" maxLength="1000" rows="4" value={supportForm.description} onChange={(e) => setSupportForm({ ...supportForm, description: e.target.value })} placeholder="Include any error message you see. Do not enter your password." className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" /></label>
+                  <p className="text-xs text-gray-500">Support hours: Monday–Friday, 8:00 AM–5:00 PM. Never include your password.</p>
+                  <button type="submit" disabled={supportLoading} className="w-full rounded-xl bg-indigo-600 py-3 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50"><span className="flex items-center justify-center"><FiSend className="mr-2" />{supportLoading ? "Submitting..." : "Submit support request"}</span></button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,11 +1,10 @@
+// src/App.jsx
 import { Routes, Route } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
-import MainLayout from './layouts/MainLayout';
-import LunchLayout from './layouts/LunchLayout'; // New Lunch Layout with dedicated sidebar
 
 // Auth Pages
 import LoginPage from './pages/Auth/LoginPage';
@@ -14,7 +13,7 @@ import ForgotPasswordPage from "./pages/Auth/forgot-password";
 import ResetPasswordPage from "./pages/Auth/reset-password";
 import MustChangePasswordPage from "./pages/Auth/MustChangePasswordPage";
 
-// Attendance & HR Pages (existing)
+// Attendance & HR Pages
 import EmployeeDashboard from "./pages/Eac-attendance/attendance/employeeDashboard";
 import SupervisorDashboard from "./pages/Eac-attendance/attendance/supervisorDashboard";
 import PlannerDashboard from "./pages/Eac-attendance/attendance/plannerDashboard";
@@ -37,17 +36,20 @@ import LeaveStatus from "./pages/Eac-attendance/attendance/leave-status";
 import Payslip from "./pages/Eac-attendance/attendance/payslip";
 import PayslipCard from "./pages/Eac-attendance/attendance/PayslipCard";
 import JobsManagement from "./pages/Eac-attendance/attendance/JobsManagement";
-import JobDetailView from "./pages/Eac-attendance/attendance/JobDetailView";
+import JobDetailView from "./pages/Eac-attendance/attendance/JobDetailView"; // ADD THIS IMPORT
 import GenerateInvoice from "./pages/Eac-attendance/attendance/GenerateInvoice";
 import LeaveBalanceTracker from "./pages/Eac-attendance/attendance/LeaveBalanceTracker";
 import QuotationMaster from "./pages/Eac-attendance/attendance/quotationMaster";
 import EmployeeOvertimeRequest from "./pages/Eac-attendance/attendance/employeeOvertimeRequest";
+import AttendanceRequests from "./pages/Eac-attendance/attendance/attendanceRequests";
+import AttendanceRequestReview from "./pages/Eac-attendance/attendance/attendanceRequestReview";
 import EmployeeLoanRequest from "./pages/Eac-attendance/attendance/employeeLoanRequest";
 import LoanManagementDashboard from "./pages/Eac-attendance/attendance/loanManagementDashboard";
 import ExcelComparator from "./pages/Eac-attendance/attendance/excel-comparator";
 import AdminLeaveBalanceView from "./pages/Eac-attendance/attendance/AdminLeaveBalanceView";
+import WeeklyAttendanceEmail from "./pages/Eac-attendance/attendance/weeklyAttendanceEmail";
 
-// Inventory Pages (existing)
+// Inventory Pages
 import InventoryDashboard from './pages/Eac-inventory/InventoryDashboard';
 import Products from './pages/Eac-inventory/products';
 import Received from './pages/Eac-inventory/received';
@@ -56,6 +58,7 @@ import InventoryRequest from "./pages/Eac-inventory/InventoryRequest";
 import StorekeeperRequests from "./pages/Eac-inventory/storekeeperRequests";
 import History from "./pages/Eac-inventory/history";
 import PPES from "./pages/Eac-inventory/ppe";
+import EmployeeIssuedItems from "./pages/Eac-attendance/employee/EmployeeIssuedItems";
 import ProcurementManagerReview from "./pages/Eac-inventory/procurementManagerReview";
 import ProductRequestForm from "./pages/Eac-inventory/ProductRequestForm";
 import StoreOfficerApproval from "./pages/Eac-inventory/StoreOfficerApproval";
@@ -63,8 +66,9 @@ import CostCenterManagement from "./pages/Eac-inventory/CostCenterManagement";
 import ReportsDashboard from "./pages/Eac-inventory/ReportsDashboard";
 import PlannerProductsReview from "./pages/Eac-inventory/plannerProductsReview";
 import ProcurementPurchases from "./pages/Eac-inventory/procurementPurchases";
+import WaybillDocuments from "./pages/Eac-inventory/WaybillDocuments";
 
-// Transport Pages (existing)
+// Transport Pages
 import AdminDashboard from "./pages/Transport/admindashboard";
 import Drivers from "./pages/Transport/drivers";
 import Fuel from "./pages/Transport/fuel";
@@ -73,11 +77,13 @@ import UsersManagement from "./pages/Transport/usersmanagement";
 import Vehicles from "./pages/Transport/vehicles";
 import TransportReports from "./pages/Transport/transportReports";
 
-// Other Pages (existing)
+// Other Pages
 import CentralizedDashboard from './pages/Central-Dashboard/centralizedDashboard';
 import Home from './pages/Eac-attendance/home';
 import Userpage from './pages/Userpage';
 import PagePermissionManagement from "./pages/pagePermissionManagement";
+import PortalRequestsPage from "./pages/PortalRequestsPage";
+import PettyCashPage from "./pages/PettyCashPage";
 import Search from "./components/search";
 import MainSidebar from './pages/Eac-attendance/mainSidebar';
 import Sidebar from "./pages/Transport/Sidebar";
@@ -86,13 +92,21 @@ import QuickApprove from "./pages/Eac-attendance/attendance/QuickApprove";
 import QuickReject from "./pages/Eac-attendance/attendance/QuickReject";
 import PayrollReports from "./pages/Eac-attendance/attendance/PayrollReports.jsx";
 import ActivityLogs from "./pages/Eac-attendance/attendance/ActivityLogs.jsx";
+import HospitalPublicForm from "./pages/Eac-attendance/hospital/HospitalPublicForm.jsx";
+import HospitalManagement from "./pages/Eac-attendance/hospital/HospitalManagement.jsx";
+import MedicalVisitReview from "./pages/Eac-attendance/hospital/MedicalVisitReview.jsx";
+import MedicalVisitDetails from "./pages/Eac-attendance/hospital/MedicalVisitDetails.jsx";
+import EmployeeMedicalHistory from "./pages/Eac-attendance/hospital/EmployeeMedicalHistory.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
+import AccountsFundingReview from "./pages/AccountsFundingReview";
 import DirectPurchase from "./pages/Eac-inventory/DirectPurchase.jsx";
 import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx";
+import ThemeToggle from "./components/ThemeToggle";
+import { useTheme } from "./context/ThemeContext";
 
-// ============================================================
-// LUNCH MODULE IMPORTS
-// ============================================================
+import LunchLayout from './layouts/LunchLayout';
+import MainLayout from './layouts/MainLayout';
+
 import LunchDashboard from "./pages/Lunch/Dashboard";
 import WeeklyLunchAssignment from "./pages/Lunch/WeeklyLunchAssignment";
 import EmployeeLunchAssignment from "./pages/Lunch/EmployeeLunchAssignment";
@@ -101,11 +115,13 @@ import AttendanceVerification from "./pages/Lunch/AttendanceVerification";
 import KitchenReport from "./pages/Lunch/KitchenReport";
 import LunchReports from "./pages/Lunch/LunchReports";
 import LunchSettings from "./pages/Lunch/LunchSettings";
+import MealPlanning from "./pages/Lunch/MealPlanning";
 import MealManagement from "./pages/Lunch/MealManagement";
-// NEW: Employee self-service meal selection
-import EmployeeMealSelection from './pages/Lunch/EmployeeMealSelection'; // placed inside pages/Lunch/
+import EmployeeMealSelection from "./pages/Lunch/EmployeeMealSelection";
 
 function App() {
+  const { theme } = useTheme();
+
   return (
     <>
       <ToastContainer
@@ -117,7 +133,9 @@ function App() {
         pauseOnFocusLoss
         draggable
         pauseOnHover
+        theme={theme}
       />
+      <ThemeToggle />
       
       <Routes>
         {/* Public routes - no authentication required */}
@@ -126,49 +144,196 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/must-change-password" element={<MustChangePasswordPage />} />
-
-        {/* Centralized Dashboard – standalone (uses its own sidebar) */}
-        <Route path="/centralizedDashboard" element={
-          <ProtectedRoute>
-            <CentralizedDashboard />
-          </ProtectedRoute>
-        } />
+        <Route path="/hospital/portal/:token" element={<HospitalPublicForm />} />
 
         {/* ============================================================
-            MAIN APPLICATION – uses MainLayout (with main sidebar)
-            ============================================================ */}
-        <Route element={<MainLayout />}>
+    LUNCH MODULE - uses LunchLayout (dedicated sidebar)
+    ============================================================ */}
+<Route element={<LunchLayout />}>
+  <Route
+    path="/lunch/dashboard"
+    element={
+      <ProtectedRoute>
+        <LunchDashboard />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/weekly-assignment"
+    element={
+      <ProtectedRoute>
+        <WeeklyLunchAssignment />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/employee-assignment"
+    element={
+      <ProtectedRoute>
+        <EmployeeLunchAssignment />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/daily-serving"
+    element={
+      <ProtectedRoute>
+        <DailyLunchServing />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/attendance-verification"
+    element={
+      <ProtectedRoute>
+        <AttendanceVerification />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/meal-planning"
+    element={<ProtectedRoute><MealPlanning /></ProtectedRoute>}
+  />
+
+  <Route
+    path="/lunch/kitchen-report"
+    element={
+      <ProtectedRoute>
+        <KitchenReport />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/reports"
+    element={
+      <ProtectedRoute>
+        <LunchReports />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+  path="/lunch/meal-selection"
+  element={
+    <ProtectedRoute>
+      <EmployeeMealSelection />
+    </ProtectedRoute>
+  }
+/>
+
+  <Route
+    path="/lunch/meals"
+    element={
+      <ProtectedRoute>
+        <MealManagement />
+      </ProtectedRoute>
+    }
+  />
+
+  <Route
+    path="/lunch/settings"
+    element={
+      <ProtectedRoute>
+        <LunchSettings />
+      </ProtectedRoute>
+    }
+  />
+</Route>
+
+        {/* Protected routes - wrapped in MainLayout with sidebar and header */}
+        <Route>
+          
+          {/* Admin Routes - Centralized Dashboard Access */}
+          <Route path="/centralizedDashboard" element={
+            <ProtectedRoute>
+              <CentralizedDashboard />
+            </ProtectedRoute>
+          } />
+          
           {/* Dashboard Routes */}
           <Route path="/employeeDashboard" element={
             <ProtectedRoute>
               <EmployeeDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/HRDashboard" element={
             <ProtectedRoute>
               <HRDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/plannerDashboard" element={
             <ProtectedRoute>
               <PlannerDashboard />
             </ProtectedRoute>
           } />
+
+          <Route path="/QuickApprove" element={
+            <ProtectedRoute>
+              <QuickApprove />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/QuickReject" element={
+            <ProtectedRoute>
+              <QuickReject />
+            </ProtectedRoute>
+          } />
+
+             <Route path="/ActivityLogs" element={
+            <ProtectedRoute>
+              <ActivityLogs />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/PayrollReports" element={
+            <ProtectedRoute>
+              <PayrollReports/>
+            </ProtectedRoute>
+          } />
+
+      <Route path="/accountsFundingReview" element={<ProtectedRoute><AccountsFundingReview /></ProtectedRoute>} />
+      <Route path="/DirectPurchase" element={<DirectPurchase />} />
+<Route path="/DirectPurchase/:id" element={<DirectPurchaseDetail />} />
+
+          <Route path="/NotificationsPage" element={
+            <ProtectedRoute>
+              <NotificationsPage/>
+            </ProtectedRoute>
+          } />
+
+
           <Route path="/supervisorDashboard" element={
             <ProtectedRoute>
               <SupervisorDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/InventoryDashboard" element={
             <ProtectedRoute>
               <InventoryDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/attendancedashboard" element={
             <ProtectedRoute>
               <AttendanceDashboard />
             </ProtectedRoute>
           } />
+
+          <Route path="/leaveDetailsModal" element={
+            <ProtectedRoute>
+              <LeaveDetailsModal />
+            </ProtectedRoute>
+          } />
+          
           <Route path="/admindashboard" element={
             <ProtectedRoute>
               <AdminDashboard />
@@ -181,136 +346,186 @@ function App() {
               <Home />
             </ProtectedRoute>
           } />
+          
           <Route path="/attendance" element={
             <ProtectedRoute>
               <Attendance />
             </ProtectedRoute>
           } />
+          
           <Route path="/overview" element={
             <ProtectedRoute>
               <Overview />
             </ProtectedRoute>
           } />
+          
           <Route path="/employee" element={
             <ProtectedRoute>
               <Employee />
             </ProtectedRoute>
           } />
+          
           <Route path="/profile/:id" element={
             <ProtectedRoute>
               <Profile />
             </ProtectedRoute>
           } />
+          
           <Route path="/overtime" element={
             <ProtectedRoute>
               <Overtime />
             </ProtectedRoute>
           } />
+          
           <Route path="/leave" element={
             <ProtectedRoute>
               <Leave />
             </ProtectedRoute>
           } />
+          
           <Route path="/timesheets" element={
             <ProtectedRoute>
               <Timesheet />
             </ProtectedRoute>
           } />
+          
           <Route path="/biometricAttendanceFeed" element={
             <ProtectedRoute>
               <BiometricAttendanceFeed />
             </ProtectedRoute>
           } />
+          
           <Route path="/payroll" element={
             <ProtectedRoute>
               <Payroll />
             </ProtectedRoute>
           } />
+          
           <Route path="/reports" element={
             <ProtectedRoute>
               <Reports />
             </ProtectedRoute>
           } />
+          <Route path="/employee-issued-items" element={<ProtectedRoute><EmployeeIssuedItems /></ProtectedRoute>} />
+          <Route path="/weekly-attendance-email" element={
+            <ProtectedRoute>
+              <WeeklyAttendanceEmail />
+            </ProtectedRoute>
+          } />
+          
           <Route path="/settingspage" element={
             <ProtectedRoute>
               <SettingsPage />
             </ProtectedRoute>
           } />
+          
           <Route path="/dailyAttendanceReport" element={
             <ProtectedRoute>
               <DailyAttendanceReport />
             </ProtectedRoute>
           } />
+          
           <Route path="/leaveRequestForm" element={
             <ProtectedRoute>
               <LeaveRequestForm />
             </ProtectedRoute>
           } />
+          
           <Route path="/leave-status" element={
             <ProtectedRoute>
               <LeaveStatus />
             </ProtectedRoute>
           } />
+          
           <Route path="/payslip" element={
             <ProtectedRoute>
               <Payslip />
             </ProtectedRoute>
           } />
+          
           <Route path="/PayslipCard" element={
             <ProtectedRoute>
               <PayslipCard />
             </ProtectedRoute>
           } />
+          
+          {/* Job Routes - ADD THESE TWO */}
           <Route path="/JobsManagement" element={
             <ProtectedRoute>
               <JobsManagement />
             </ProtectedRoute>
           } />
+          
+          {/* NEW: Direct job view route - opens specific job */}
           <Route path="/jobs/:jobId" element={
             <ProtectedRoute>
               <JobDetailView />
             </ProtectedRoute>
           } />
+          
           <Route path="/generateInvoice" element={
             <ProtectedRoute>
               <GenerateInvoice />
             </ProtectedRoute>
           } />
+          
           <Route path="/LeaveBalanceTracker" element={
             <ProtectedRoute>
               <LeaveBalanceTracker />
             </ProtectedRoute>
           } />
+          
           <Route path="/quotationMaster" element={
             <ProtectedRoute>
               <QuotationMaster />
             </ProtectedRoute>
           } />
+          
           <Route path="/employeeOvertimeRequest" element={
             <ProtectedRoute>
               <EmployeeOvertimeRequest />
             </ProtectedRoute>
           } />
+          
           <Route path="/employeeLoanRequest" element={
             <ProtectedRoute>
               <EmployeeLoanRequest />
             </ProtectedRoute>
           } />
+          
           <Route path="/loanManagementDashboard" element={
             <ProtectedRoute>
               <LoanManagementDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/excel-comparator" element={
             <ProtectedRoute>
               <ExcelComparator />
             </ProtectedRoute>
           } />
+          
           <Route path="/adminLeaveBalanceView" element={
             <ProtectedRoute>
               <AdminLeaveBalanceView />
             </ProtectedRoute>
           } />
+
+          <Route path="/attendanceRequests" element={
+            <ProtectedRoute>
+              <AttendanceRequests />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/attendanceRequestReview" element={
+            <ProtectedRoute>
+              <AttendanceRequestReview />
+            </ProtectedRoute>
+          } />
+          <Route path="/hospitals" element={<ProtectedRoute><HospitalManagement /></ProtectedRoute>} />
+          <Route path="/medical-visits" element={<ProtectedRoute><MedicalVisitReview /></ProtectedRoute>} />
+          <Route path="/medical-visits/:id" element={<ProtectedRoute><MedicalVisitDetails /></ProtectedRoute>} />
+          <Route path="/my-medical-visits" element={<ProtectedRoute><EmployeeMedicalHistory /></ProtectedRoute>} />
           
           {/* Inventory Routes */}
           <Route path="/InventoryRequest" element={
@@ -318,66 +533,79 @@ function App() {
               <InventoryRequest />
             </ProtectedRoute>
           } />
+          
           <Route path="/products" element={
             <ProtectedRoute>
               <Products />
             </ProtectedRoute>
           } />
+          
           <Route path="/received" element={
             <ProtectedRoute>
               <Received />
             </ProtectedRoute>
           } />
+          
           <Route path="/outgoing" element={
             <ProtectedRoute>
               <Outgoing />
             </ProtectedRoute>
           } />
+          
           <Route path="/storeKeeperRequests" element={
             <ProtectedRoute>
               <StorekeeperRequests />
             </ProtectedRoute>
           } />
+          
           <Route path="/history" element={
             <ProtectedRoute>
               <History />
             </ProtectedRoute>
           } />
+          
           <Route path="/ppe" element={
             <ProtectedRoute>
               <PPES />
             </ProtectedRoute>
           } />
+          
           <Route path="/procurementManagerReview" element={
             <ProtectedRoute>
               <ProcurementManagerReview />
             </ProtectedRoute>
           } />
+          
           <Route path="/product-request-form" element={
             <ProtectedRoute>
               <ProductRequestForm />
             </ProtectedRoute>
           } />
+          
           <Route path="/StoreOfficerApproval" element={
             <ProtectedRoute>
               <StoreOfficerApproval />
             </ProtectedRoute>
           } />
+          
           <Route path="/CostCenterManagement" element={
             <ProtectedRoute>
               <CostCenterManagement />
             </ProtectedRoute>
           } />
+          
           <Route path="/ReportsDashboard" element={
             <ProtectedRoute>
               <ReportsDashboard />
             </ProtectedRoute>
           } />
+          
           <Route path="/plannerProductsReview" element={
             <ProtectedRoute>
               <PlannerProductsReview />
             </ProtectedRoute>
           } />
+          
           <Route path="/procurementPurchases" element={
             <ProtectedRoute>
               <ProcurementPurchases />
@@ -390,26 +618,31 @@ function App() {
               <Drivers />
             </ProtectedRoute>
           } />
+          
           <Route path="/fuel" element={
             <ProtectedRoute>
               <Fuel />
             </ProtectedRoute>
           } />
+          
           <Route path="/maintenance" element={
             <ProtectedRoute>
               <Maintenance />
             </ProtectedRoute>
           } />
+          
           <Route path="/usersmanagement" element={
             <ProtectedRoute>
               <UsersManagement />
             </ProtectedRoute>
           } />
+          
           <Route path="/vehicles" element={
             <ProtectedRoute>
               <Vehicles />
             </ProtectedRoute>
           } />
+          
           <Route path="/transportReports" element={
             <ProtectedRoute>
               <TransportReports />
@@ -422,126 +655,50 @@ function App() {
               <Userpage />
             </ProtectedRoute>
           } />
+          
           <Route path="/pagePermissionManagement" element={
             <ProtectedRoute>
               <PagePermissionManagement />
             </ProtectedRoute>
           } />
+          <Route path="/inventory-documents" element={
+            <ProtectedRoute>
+              <WaybillDocuments />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/portalRequests" element={
+            <ProtectedRoute>
+              <PortalRequestsPage />
+            </ProtectedRoute>
+          } />
+
+          <Route element={<MainLayout />}>
+            <Route path="/pettyCash" element={
+              <ProtectedRoute>
+                <PettyCashPage />
+              </ProtectedRoute>
+            } />
+          </Route>
+          
           <Route path="/search" element={
             <ProtectedRoute>
               <Search />
             </ProtectedRoute>
           } />
+          
           <Route path="/mainsidebar" element={
             <ProtectedRoute>
               <MainSidebar />
             </ProtectedRoute>
           } />
+          
           <Route path="/Sidebar" element={
             <ProtectedRoute>
               <Sidebar />
             </ProtectedRoute>
           } />
-          <Route path="/QuickApprove" element={
-            <ProtectedRoute>
-              <QuickApprove />
-            </ProtectedRoute>
-          } />
-          <Route path="/QuickReject" element={
-            <ProtectedRoute>
-              <QuickReject />
-            </ProtectedRoute>
-          } />
-          <Route path="/ActivityLogs" element={
-            <ProtectedRoute>
-              <ActivityLogs />
-            </ProtectedRoute>
-          } />
-          <Route path="/PayrollReports" element={
-            <ProtectedRoute>
-              <PayrollReports />
-            </ProtectedRoute>
-          } />
-          <Route path="/DirectPurchase" element={
-            <ProtectedRoute>
-              <DirectPurchase />
-            </ProtectedRoute>
-          } />
-          <Route path="/DirectPurchase/:id" element={
-            <ProtectedRoute>
-              <DirectPurchaseDetail />
-            </ProtectedRoute>
-          } />
-          <Route path="/NotificationsPage" element={
-            <ProtectedRoute>
-              <NotificationsPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/leaveDetailsModal" element={
-            <ProtectedRoute>
-              <LeaveDetailsModal />
-            </ProtectedRoute>
-          } />
-
-          {/* ============================================================
-              EMPLOYEE SELF-SERVICE – My Meals
-              ============================================================ */}
-          <Route path="/my-meals" element={
-            <ProtectedRoute>
-              <EmployeeMealSelection />
-            </ProtectedRoute>
-          } />
-        </Route>
-
-        {/* ============================================================
-            LUNCH MODULE – uses LunchLayout (dedicated sidebar)
-            ============================================================ */}
-        <Route element={<LunchLayout />}>
-          <Route path="/lunch/dashboard" element={
-            <ProtectedRoute>
-              <LunchDashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/weekly-assignment" element={
-            <ProtectedRoute>
-              <WeeklyLunchAssignment />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/employee-assignment" element={
-            <ProtectedRoute>
-              <EmployeeLunchAssignment />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/daily-serving" element={
-            <ProtectedRoute>
-              <DailyLunchServing />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/attendance-verification" element={
-            <ProtectedRoute>
-              <AttendanceVerification />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/kitchen-report" element={
-            <ProtectedRoute>
-              <KitchenReport />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/reports" element={
-            <ProtectedRoute>
-              <LunchReports />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/meals" element={
-            <ProtectedRoute>
-              <MealManagement />
-            </ProtectedRoute>
-          } />
-          <Route path="/lunch/settings" element={
-            <ProtectedRoute>
-              <LunchSettings />
-            </ProtectedRoute>
-          } />
+          
         </Route>
       </Routes>
     </>

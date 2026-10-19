@@ -2,4 +2,97 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --app-bg: #f8fafc;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f1f5f9;
+  --app-text: #1f2937;
+  --app-text-muted: #64748b;
+  --app-border: #e2e8f0;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-surface: #1e293b;
+  --app-surface-muted: #334155;
+  --app-text: #e5e7eb;
+  --app-text-muted: #94a3b8;
+  --app-border: #475569;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.theme-toggle {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--app-border);
+  border-radius: 9999px;
+  padding: 0.65rem 0.9rem;
+  background: var(--app-surface);
+  color: var(--app-text);
+  box-shadow: 0 10px 30px rgb(15 23 42 / 0.2);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 150ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.theme-toggle:hover { transform: translateY(-2px); }
+.theme-toggle:focus-visible { outline: 3px solid rgb(99 102 241 / 0.45); outline-offset: 2px; }
+
+/* Compatibility layer for screens that predate theme support. */
+.dark body,
+.dark .bg-gray-50,
+.dark .bg-gray-100 { background-color: var(--app-bg) !important; }
+.dark .bg-white { background-color: var(--app-surface) !important; }
+.dark .bg-gray-200,
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-gray-50:hover { background-color: var(--app-surface-muted) !important; }
+.dark .text-black,
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 { color: var(--app-text) !important; }
+.dark .text-gray-600,
+.dark .text-gray-500,
+.dark .text-gray-400 { color: var(--app-text-muted) !important; }
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--app-border) !important; }
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: var(--app-surface) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-border) !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: var(--app-text-muted); }
+.dark table { color: var(--app-text); }
+
+@media (max-width: 640px) {
+  .theme-toggle span { display: none; }
+  .theme-toggle { right: 1rem; bottom: 1rem; padding: 0.7rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body, .theme-toggle { transition: none; }
+}
+
 
