@@ -1,7 +1,11 @@
+import WeeklyOffDays from "./WeeklyOffDays";
 import React, { useState, useEffect, useRef } from 'react';
 import MainSidebar from '../mainSidebar';
 import Header from '../../../components/Header';
 import EmailSettings from '../../../components/settings/EmailSettings';
+import NightDutySmsSettings from '../../../components/settings/NightDutySmsSettings';
+import DatabaseBackups from '../../../components/settings/DatabaseBackups';
+import PpeReplacementSettings from '../../../components/settings/PpeReplacementSettings';
 import { useSettings } from '../context/SettingsContext';
 
 // ===================================================================
@@ -526,11 +530,11 @@ const SettingsPage = () => {
     jobPositions: [],
     categories: [],
     specialWeekends: [],
-    defaultOvertimeMultiplier: 1.5,
-    sundayOvertimeMultiplier: 2.0,
-    holidayOvertimeMultiplier: 2.5,
+    defaultOvertimeMultiplier: null,
+    sundayOvertimeMultiplier: null,
+    holidayOvertimeMultiplier: null,
     enableTimeAndHalfAfter8Hours: true,
-    timeAndHalfMultiplier: 1.5,
+    timeAndHalfMultiplier: null,
     companyName: '',
     companyEmail: '',
     companyPhone: '',
@@ -548,7 +552,8 @@ const SettingsPage = () => {
   });
 
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('general');
+  const [jobs, setJobs] = useState([]);
+  const [activeTab, setActiveTab] = useState(() => ['ppeReplacement', 'sms'].includes(new URLSearchParams(window.location.search).get('tab')) ? new URLSearchParams(window.location.search).get('tab') : 'general');
   const [message, setMessage] = useState({ type: '', text: '' });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -610,11 +615,15 @@ const SettingsPage = () => {
     name: '',
     standardRateHours: 8,
     workStartTime: '09:00',
+    absenceCutoffTime: '',
+    overnightShift: false,
+    weeklyOffDays: '',
     useNonTaxableAllowances: false,
     excludeWeekendsFromLeave: true,
     annualLeaveDays: 20,
     skipAutoAbsent: false,
     applyWithholdingTax: false,
+    weekendAttendanceAsOvertime: false,
     supervisorEmails: '',
     plannerEmails: '',
     hrEmails: '',
@@ -648,6 +657,9 @@ const SettingsPage = () => {
     financeNotificationEnabled: true
   });
   const [savingDirectPurchaseNotifications, setSavingDirectPurchaseNotifications] = useState(false);
+
+  // Procurement Purchase uses the configured purchasing reviewer + inventory store recipients
+  const [savingProcurementPurchaseNotifications, setSavingProcurementPurchaseNotifications] = useState(false);
 
   // Leave Settings
   const [leaveSettings, setLeaveSettings] = useState({
@@ -685,8 +697,8 @@ const SettingsPage = () => {
 
   // Attendance Schedule
   const [attendanceSchedule, setAttendanceSchedule] = useState({
-    enabled: true,
-    runTime: "00:30",
+    enabled: false,
+    runTime: "",
     skipCategories: []
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -925,7 +937,7 @@ const saveInventoryNotificationSettings = async () => {
       const token = getToken();
       if (!token) { setLoading(false); return; }
 
-      const [systemRes, holidaysRes, positionsRes, categoriesRes, specialWeekendsRes, leaveSettingsRes, loanSettingsRes, deptRes] = await Promise.all([
+      const [systemRes, holidaysRes, positionsRes, categoriesRes, specialWeekendsRes, leaveSettingsRes, loanSettingsRes, deptRes, jobsRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/settings/system`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/api/settings/holidays`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/api/settings/job-positions`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -933,7 +945,8 @@ const saveInventoryNotificationSettings = async () => {
         fetch(`${API_BASE_URL}/api/settings/special-weekends`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/api/settings/leave`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_BASE_URL}/api/settings/loanSettings`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE_URL}/api/settings/departments`, { headers: { Authorization: `Bearer ${token}` } })
+        fetch(`${API_BASE_URL}/api/settings/departments`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/api/jobs`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
 
       const systemSettings = systemRes.ok ? await systemRes.json() : {};
@@ -953,7 +966,9 @@ const saveInventoryNotificationSettings = async () => {
         if (arr.length > 0) loanSettingsData = arr[0];
       }
       const departmentsData = deptRes.ok ? await deptRes.json() : [];
+      const jobsData = jobsRes.ok ? await jobsRes.json() : [];
       setDepartments(departmentsData);
+      setJobs(jobsData);
 
       setSettings(prev => ({
         ...prev,
@@ -965,11 +980,11 @@ const saveInventoryNotificationSettings = async () => {
         hourlyRate: systemSettings.hourlyRate || 10,
         overtimeHourlyRate: systemSettings.overtimeHourlyRate || 15,
         standardWorkHours: systemSettings.standardWorkHours || 8,
-        defaultOvertimeMultiplier: systemSettings.defaultOvertimeMultiplier || 1.5,
-        sundayOvertimeMultiplier: systemSettings.sundayOvertimeMultiplier || 2.0,
-        holidayOvertimeMultiplier: systemSettings.holidayOvertimeMultiplier || 2.5,
+        defaultOvertimeMultiplier: systemSettings.defaultOvertimeMultiplier ?? null,
+        sundayOvertimeMultiplier: systemSettings.sundayOvertimeMultiplier ?? null,
+        holidayOvertimeMultiplier: systemSettings.holidayOvertimeMultiplier ?? null,
         enableTimeAndHalfAfter8Hours: systemSettings.enableTimeAndHalfAfter8Hours ?? true,
-        timeAndHalfMultiplier: systemSettings.timeAndHalfMultiplier || 1.5,
+        timeAndHalfMultiplier: systemSettings.timeAndHalfMultiplier ?? null,
         lateArrivalTime: systemSettings.lateArrivalTime || '09:00',
         companyName: systemSettings.companyName || '',
         companyEmail: systemSettings.companyEmail || '',
@@ -1007,9 +1022,9 @@ const saveInventoryNotificationSettings = async () => {
       if (res.ok) {
         const data = await res.json();
         setAttendanceSchedule({
-          enabled: data.enabled ?? true,
-          runTime: data.runTime || "00:30",
-          skipCategories: data.skipCategories || []
+          enabled: data.autoAbsentEnabled ?? false,
+          runTime: data.autoAbsentCutoffTime?.slice(0, 5) || "",
+          skipCategories: data.autoAbsentSkipCategories || []
         });
       }
     } catch (error) { console.error(error); }
@@ -1078,6 +1093,73 @@ const saveInventoryNotificationSettings = async () => {
     }
   };
 
+
+  // ---------- saveProcurementPurchaseNotificationSettings ----------
+  // Reuses the existing persisted Reviewer settings and Inventory Store settings,
+  // so no database schema change is required.
+  const saveProcurementPurchaseNotificationSettings = async () => {
+    setSavingProcurementPurchaseNotifications(true);
+    try {
+      const reviewerEmails = parseEmailRecipients(
+        directPurchaseNotificationSettings.reviewerRecipients
+      );
+      const storeEmails = parseEmailRecipients(
+        inventoryEmailSettings.inventoryStoreRecipients
+      );
+
+      const invalidReviewer = reviewerEmails.find(email => !isValidEmail(email));
+      const invalidStore = storeEmails.find(email => !isValidEmail(email));
+
+      if (directPurchaseNotificationSettings.reviewerNotificationEnabled && reviewerEmails.length === 0) {
+        throw new Error('Add at least one Procurement Purchase reviewer email');
+      }
+      if (inventoryEmailSettings.inventoryStoreNotificationEnabled && storeEmails.length === 0) {
+        throw new Error('Add at least one Store notification email');
+      }
+      if (invalidReviewer) {
+        throw new Error(`Invalid reviewer email: ${invalidReviewer}`);
+      }
+      if (invalidStore) {
+        throw new Error(`Invalid store email: ${invalidStore}`);
+      }
+
+      const token = getToken();
+
+      const [reviewerResponse, storeResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/settings/direct-purchase-notifications`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(directPurchaseNotificationSettings)
+        }),
+        fetch(`${API_BASE_URL}/api/settings/inventory-notifications`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(inventoryEmailSettings)
+        })
+      ]);
+
+      if (!reviewerResponse.ok || !storeResponse.ok) {
+        throw new Error('Failed to save Procurement Purchase notification settings');
+      }
+
+      showMessage(
+        'success',
+        'Procurement Purchase email settings saved. Reviewers will be notified on creation and Store will be notified when Notify Store is used.'
+      );
+    } catch (error) {
+      console.error(error);
+      showMessage('error', error.message || 'Failed to save Procurement Purchase email settings');
+    } finally {
+      setSavingProcurementPurchaseNotifications(false);
+    }
+  };
+
   // ---------- saveLoanNotificationSettings ----------
   const saveLoanNotificationSettings = async () => {
     setSavingLoanNotifications(true);
@@ -1105,7 +1187,11 @@ const saveInventoryNotificationSettings = async () => {
       const res = await fetch(`${API_BASE_URL}/api/settings/attendance-schedule`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(attendanceSchedule)
+        body: JSON.stringify({
+          autoAbsentEnabled: attendanceSchedule.enabled,
+          autoAbsentCutoffTime: attendanceSchedule.runTime || null,
+          autoAbsentSkipCategories: attendanceSchedule.skipCategories
+        })
       });
       if (res.ok) showMessage('success', 'Attendance schedule saved');
       else throw new Error('Failed');
@@ -1326,6 +1412,13 @@ const saveInventoryNotificationSettings = async () => {
     e.preventDefault();
     try {
       const token = getToken();
+      const jobMissingMinimum = jobs.find(job =>
+        job.enforceMinimumOvertime && !(Number(job.minimumOvertimeHours) > 0)
+      );
+      if (jobMissingMinimum) {
+        showMessage('error', `Enter minimum overtime hours for ${jobMissingMinimum.name}`);
+        return;
+      }
       const payload = {
         hourlyRate: parseFloat(settings.hourlyRate) || 10,
         overtimeHourlyRate: parseFloat(settings.overtimeHourlyRate) || 15,
@@ -1335,11 +1428,19 @@ const saveInventoryNotificationSettings = async () => {
         timeAndHalfAfter8Hours: settings.timeAndHalfAfter8Hours,
         weekendRate: parseFloat(settings.weekendRate) || 1.0,
         holidayRate: parseFloat(settings.holidayRate) || 1.0,
-        defaultOvertimeMultiplier: parseFloat(settings.defaultOvertimeMultiplier) || 1.5,
-        sundayOvertimeMultiplier: parseFloat(settings.sundayOvertimeMultiplier) || 2.0,
-        holidayOvertimeMultiplier: parseFloat(settings.holidayOvertimeMultiplier) || 2.5,
+        defaultOvertimeMultiplier: settings.defaultOvertimeMultiplier === null || settings.defaultOvertimeMultiplier === ''
+          ? null
+          : Number(settings.defaultOvertimeMultiplier),
+        sundayOvertimeMultiplier: settings.sundayOvertimeMultiplier === null || settings.sundayOvertimeMultiplier === ''
+          ? null
+          : Number(settings.sundayOvertimeMultiplier),
+        holidayOvertimeMultiplier: settings.holidayOvertimeMultiplier === null || settings.holidayOvertimeMultiplier === ''
+          ? null
+          : Number(settings.holidayOvertimeMultiplier),
         enableTimeAndHalfAfter8Hours: settings.enableTimeAndHalfAfter8Hours,
-        timeAndHalfMultiplier: parseFloat(settings.timeAndHalfMultiplier) || 1.5,
+        timeAndHalfMultiplier: settings.timeAndHalfMultiplier === null || settings.timeAndHalfMultiplier === ''
+          ? null
+          : Number(settings.timeAndHalfMultiplier),
         lateArrivalTime: settings.lateArrivalTime || '09:00',
         companyName: settings.companyName || '',
         companyEmail: settings.companyEmail || '',
@@ -1358,6 +1459,25 @@ const saveInventoryNotificationSettings = async () => {
         body: JSON.stringify(payload)
       });
       if (res.ok) {
+        const jobSaveResponses = await Promise.all(jobs.map(job => fetch(
+          `${API_BASE_URL}/api/jobs/${job.id}/overtime-settings`,
+          {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              overtimeMultiplier: job.overtimeMultiplier === '' ? null : Number(job.overtimeMultiplier),
+              applyOvertimeMultiplierToHours: Boolean(job.applyOvertimeMultiplierToHours),
+              enforceMinimumOvertime: Boolean(job.enforceMinimumOvertime),
+              minimumOvertimeHours: job.enforceMinimumOvertime && job.minimumOvertimeHours !== ''
+                ? Number(job.minimumOvertimeHours)
+                : null,
+              autoApproveOvertime: Boolean(job.autoApproveOvertime)
+            })
+          }
+        )));
+        if (jobSaveResponses.some(response => !response.ok)) {
+          throw new Error('One or more project overtime settings could not be saved');
+        }
         showMessage('success', 'System settings updated');
         await loadAllSettings();
         await refreshSettings();
@@ -1517,7 +1637,7 @@ const saveInventoryNotificationSettings = async () => {
       const res = await fetch(url, {
         method,
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(categoryForm)
+        body: JSON.stringify({ ...categoryForm, absenceCutoffTime: categoryForm.absenceCutoffTime || null })
       });
       if (res.ok) {
         showMessage('success', editingCategory ? 'Category updated' : 'Category added');
@@ -1525,11 +1645,15 @@ const saveInventoryNotificationSettings = async () => {
           name: '',
           standardRateHours: 8,
           workStartTime: '09:00',
+    absenceCutoffTime: '',
+    overnightShift: false,
+    weeklyOffDays: '',
           useNonTaxableAllowances: false,
           excludeWeekendsFromLeave: true,
           annualLeaveDays: 20,
           skipAutoAbsent: false,
           applyWithholdingTax: false,
+          weekendAttendanceAsOvertime: false,
           supervisorEmails: '',
           plannerEmails: '',
           hrEmails: '',
@@ -1549,11 +1673,15 @@ const saveInventoryNotificationSettings = async () => {
       name: cat.name,
       standardRateHours: cat.standardRateHours,
       workStartTime: cat.workStartTime || '09:00',
+      absenceCutoffTime: cat.absenceCutoffTime?.slice(0, 5) || '',
+      overnightShift: Boolean(cat.overnightShift),
+      weeklyOffDays: cat.weeklyOffDays || '',
       useNonTaxableAllowances: cat.useNonTaxableAllowances || false,
       excludeWeekendsFromLeave: cat.excludeWeekendsFromLeave !== false,
       annualLeaveDays: cat.annualLeaveDays || 20,
       skipAutoAbsent: cat.skipAutoAbsent || false,
       applyWithholdingTax: cat.applyWithholdingTax || false,
+      weekendAttendanceAsOvertime: cat.weekendAttendanceAsOvertime || false,
       supervisorEmails: cat.supervisorEmails || '',
       plannerEmails: cat.plannerEmails || '',
       hrEmails: cat.hrEmails || '',
@@ -1587,11 +1715,15 @@ const saveInventoryNotificationSettings = async () => {
       name: '',
       standardRateHours: 8,
       workStartTime: '09:00',
+    absenceCutoffTime: '',
+    overnightShift: false,
+    weeklyOffDays: '',
       useNonTaxableAllowances: false,
       excludeWeekendsFromLeave: true,
       annualLeaveDays: 20,
       skipAutoAbsent: false,
       applyWithholdingTax: false,
+      weekendAttendanceAsOvertime: false,
       supervisorEmails: '',
       plannerEmails: '',
       hrEmails: '',
@@ -2081,11 +2213,15 @@ const saveInventoryNotificationSettings = async () => {
   //  COMPUTED VALUES
   // ================================================================
   const tabs = [
+    ...(['admin', 'role_admin'].includes((localStorage.getItem('userRole') || '').toLowerCase())
+      ? [{ id: 'databaseBackups', label: 'Database Backups', icon: '💾' }] : []),
     { id: 'general', label: 'General', icon: '⚙️' },
     { id: 'attendance', label: 'Attendance', icon: '⏰' },
+    { id: 'ppeReplacement', label: 'PPE Replacement', icon: '🛡️' },
     { id: 'leave', label: 'Leave', icon: '🏖️' },
     { id: 'loan', label: 'Loan', icon: '💰' },
     { id: 'email', label: 'Email', icon: '📧' },
+    { id: 'sms', label: 'SMS', icon: '📱' },
     { id: 'categories', label: 'Categories', icon: '📁' },
     { id: 'specialWeekends', label: 'Special Weekends', icon: '🎯' },
     { id: 'holidays', label: 'Holidays', icon: '🎉' },
@@ -2194,9 +2330,13 @@ const saveInventoryNotificationSettings = async () => {
 
             {/* Content area */}
             <div className="flex-1 min-w-0">
+              {activeTab === 'databaseBackups' && ['admin', 'role_admin'].includes((localStorage.getItem('userRole') || '').toLowerCase()) && (
+                <DatabaseBackups apiBaseUrl={API_BASE_URL} getToken={getToken} />
+              )}
               {/* ============================================================ */}
               {/*  GENERAL TAB */}
               {/* ============================================================ */}
+              {activeTab === 'ppeReplacement' && <PpeReplacementSettings />}
               {activeTab === 'general' && (
                 <Card
                   title="General Settings"
@@ -2349,8 +2489,12 @@ const saveInventoryNotificationSettings = async () => {
                             type="number"
                             step="0.1"
                             id="defaultOvertimeMultiplier"
-                            value={settings.defaultOvertimeMultiplier}
-                            onChange={(e) => handleSystemSettingsChange('defaultOvertimeMultiplier', parseFloat(e.target.value))}
+                            value={settings.defaultOvertimeMultiplier ?? ''}
+                            onChange={(e) => handleSystemSettingsChange(
+                              'defaultOvertimeMultiplier',
+                              e.target.value === '' ? null : Number(e.target.value)
+                            )}
+                            placeholder="Enter multiplier"
                             className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors"
                           />
                         </FormField>
@@ -2359,8 +2503,12 @@ const saveInventoryNotificationSettings = async () => {
                             type="number"
                             step="0.1"
                             id="sundayOvertimeMultiplier"
-                            value={settings.sundayOvertimeMultiplier}
-                            onChange={(e) => handleSystemSettingsChange('sundayOvertimeMultiplier', parseFloat(e.target.value))}
+                            value={settings.sundayOvertimeMultiplier ?? ''}
+                            onChange={(e) => handleSystemSettingsChange(
+                              'sundayOvertimeMultiplier',
+                              e.target.value === '' ? null : Number(e.target.value)
+                            )}
+                            placeholder="Enter multiplier"
                             className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors"
                           />
                         </FormField>
@@ -2369,8 +2517,12 @@ const saveInventoryNotificationSettings = async () => {
                             type="number"
                             step="0.1"
                             id="holidayOvertimeMultiplier"
-                            value={settings.holidayOvertimeMultiplier}
-                            onChange={(e) => handleSystemSettingsChange('holidayOvertimeMultiplier', parseFloat(e.target.value))}
+                            value={settings.holidayOvertimeMultiplier ?? ''}
+                            onChange={(e) => handleSystemSettingsChange(
+                              'holidayOvertimeMultiplier',
+                              e.target.value === '' ? null : Number(e.target.value)
+                            )}
+                            placeholder="Enter multiplier"
                             className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors"
                           />
                         </FormField>
@@ -2381,8 +2533,12 @@ const saveInventoryNotificationSettings = async () => {
                             type="number"
                             step="0.1"
                             id="timeAndHalfMultiplier"
-                            value={settings.timeAndHalfMultiplier}
-                            onChange={(e) => handleSystemSettingsChange('timeAndHalfMultiplier', parseFloat(e.target.value))}
+                            value={settings.timeAndHalfMultiplier ?? ''}
+                            onChange={(e) => handleSystemSettingsChange(
+                              'timeAndHalfMultiplier',
+                              e.target.value === '' ? null : Number(e.target.value)
+                            )}
+                            placeholder="Enter multiplier"
                             className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors"
                           />
                         </FormField>
@@ -2440,12 +2596,63 @@ const saveInventoryNotificationSettings = async () => {
                       </div>
                     </div>
 
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                      <div className="mb-4">
+                        <h4 className="font-semibold text-slate-900">Project Overtime Rules</h4>
+                        <p className="text-sm text-slate-600">Project multipliers override the default overtime multiplier above.</p>
+                      </div>
+                      <div className="space-y-3">
+                        {jobs.map((job, index) => (
+                          <div key={job.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_140px]">
+                              <div>
+                                <div className="font-medium text-slate-900">{job.name}</div>
+                                <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                                  <input type="checkbox" checked={Boolean(job.applyOvertimeMultiplierToHours)} onChange={(e) => setJobs(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, applyOvertimeMultiplierToHours: e.target.checked } : item))} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                                  Apply multiplier to overtime hours
+                                </label>
+                              </div>
+                              <FormField label="Project multiplier" id={`jobMultiplier-${job.id}`}>
+                                <input type="number" min="0.1" step="0.1" id={`jobMultiplier-${job.id}`} value={job.overtimeMultiplier ?? ''} onChange={(e) => setJobs(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, overtimeMultiplier: e.target.value } : item))} placeholder={settings.defaultOvertimeMultiplier != null
+                                  ? `${settings.defaultOvertimeMultiplier} system setting`
+                                  : 'No system multiplier set'} className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                              </FormField>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_140px] md:items-center">
+                              <label className="flex items-center gap-2 text-sm text-slate-700">
+                                <input type="checkbox" checked={Boolean(job.enforceMinimumOvertime)} onChange={(e) => setJobs(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, enforceMinimumOvertime: e.target.checked } : item))} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                                Enforce minimum overtime before multiplying
+                              </label>
+                              <input type="number" min="0.25" step="0.25" value={job.minimumOvertimeHours ?? ''} onChange={(e) => setJobs(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, minimumOvertimeHours: e.target.value } : item))} placeholder="Minimum hours" disabled={!job.enforceMinimumOvertime} className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />
+                            </div>
+                            <label className="mt-3 flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+                              <input type="checkbox" checked={Boolean(job.autoApproveOvertime)} onChange={(e) => setJobs(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, autoApproveOvertime: e.target.checked } : item))} className="h-4 w-4 rounded border-emerald-300 text-emerald-600" />
+                              Auto-approve overtime created for this project
+                            </label>
+                          </div>
+                        ))}
+                        {jobs.length === 0 && <p className="text-sm text-slate-500">No projects are available.</p>}
+                      </div>
+                    </div>
+
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
                       <h4 className="text-sm font-medium text-blue-800 mb-2">Overtime Calculation Preview</h4>
                       <div className="text-sm text-blue-700 space-y-1">
-                        <p>• Regular: {settings.hourlyRate} × {settings.defaultOvertimeMultiplier || 1.5} = ₵{(settings.hourlyRate * (settings.defaultOvertimeMultiplier || 1.5)).toFixed(2)}</p>
-                        <p>• Sunday: {settings.hourlyRate} × {settings.sundayOvertimeMultiplier || 2.0} = ₵{(settings.hourlyRate * (settings.sundayOvertimeMultiplier || 2.0)).toFixed(2)}</p>
-                        <p>• Holiday: {settings.hourlyRate} × {settings.holidayOvertimeMultiplier || 2.5} = ₵{(settings.hourlyRate * (settings.holidayOvertimeMultiplier || 2.5)).toFixed(2)}</p>
+                        <p>
+                          • Regular: {settings.defaultOvertimeMultiplier != null
+                            ? `${settings.hourlyRate} × ${settings.defaultOvertimeMultiplier} = ₵${(Number(settings.hourlyRate) * Number(settings.defaultOvertimeMultiplier)).toFixed(2)}`
+                            : 'Not configured on the backend'}
+                        </p>
+                        <p>
+                          • Sunday: {settings.sundayOvertimeMultiplier != null
+                            ? `${settings.hourlyRate} × ${settings.sundayOvertimeMultiplier} = ₵${(Number(settings.hourlyRate) * Number(settings.sundayOvertimeMultiplier)).toFixed(2)}`
+                            : 'Not configured on the backend'}
+                        </p>
+                        <p>
+                          • Holiday: {settings.holidayOvertimeMultiplier != null
+                            ? `${settings.hourlyRate} × ${settings.holidayOvertimeMultiplier} = ₵${(Number(settings.hourlyRate) * Number(settings.holidayOvertimeMultiplier)).toFixed(2)}`
+                            : 'Not configured on the backend'}
+                        </p>
                       </div>
                     </div>
 
@@ -2466,12 +2673,14 @@ const saveInventoryNotificationSettings = async () => {
                       checked={attendanceSchedule.enabled}
                       onChange={(val) => setAttendanceSchedule({ ...attendanceSchedule, enabled: val })}
                       label="Enable Auto‑Absent Marking"
-                      description="Automatically mark employees as absent when they have no attendance record for the previous day"
+                      description="After the cutoff, mark employees OFF on their weekly off days or Absent on other days if they have no attendance record or approved leave. Employee off-day overrides take priority over category settings. Excluded categories are skipped."
                     />
-                    <FormField label="Daily Run Time" id="runTime" help="The system checks the previous day’s attendance at this time">
+                    <p className="text-sm text-slate-600">A check-in after the employee category’s Start Time is Late, with no grace period. An absence is corrected when a check-in arrives. Set the email report time after the absence cutoff to include today’s absences.</p>
+                    <FormField label="Absent After (Ghana time)" id="runTime" help="Checked every minute from this time onward. Categories whose Start Time has not passed are skipped. Choose a cutoff to activate same-day marking.">
                       <input
                         type="time"
                         id="runTime"
+                        required={attendanceSchedule.enabled}
                         value={attendanceSchedule.runTime}
                         onChange={(e) => setAttendanceSchedule({ ...attendanceSchedule, runTime: e.target.value })}
                         className="block w-48 rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors disabled:bg-slate-100"
@@ -2645,11 +2854,12 @@ const saveInventoryNotificationSettings = async () => {
               {/* ============================================================ */}
               {/*  EMAIL TAB - UPDATED WITH DIRECT PURCHASE */}
               {/* ============================================================ */}
+              {activeTab === 'sms' && <NightDutySmsSettings apiBaseUrl={API_BASE_URL} />}
               {activeTab === 'email' && (
                 <Card title="Email Notifications">
                   <div className="border-b border-slate-200 mb-6">
                     <nav className="flex space-x-6" aria-label="Email sub-tabs">
-                      {['attendance', 'leaves', 'payroll', 'loans', 'direct-purchase', 'general', 'inventory'].map(sub => (
+                      {['attendance', 'leaves', 'payroll', 'loans', 'direct-purchase', 'procurement-purchase', 'general', 'inventory'].map(sub => (
                         <button
                           key={sub}
                           onClick={() => setEmailSubTab(sub)}
@@ -2657,7 +2867,13 @@ const saveInventoryNotificationSettings = async () => {
                             emailSubTab === sub ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
                           }`}
                         >
-                          {sub === 'direct-purchase' ? 'Direct Purchase' : sub.charAt(0).toUpperCase() + sub.slice(1)}
+                          {sub === 'direct-purchase'
+                            ? 'Direct Purchase'
+                            : sub === 'procurement-purchase'
+                              ? 'Procurement Purchase'
+                            : sub === 'general'
+                              ? 'Other notifications'
+                              : sub.charAt(0).toUpperCase() + sub.slice(1)}
                         </button>
                         
                       ))}
@@ -3194,6 +3410,131 @@ const saveInventoryNotificationSettings = async () => {
                     </div>
                   )}
 
+
+                  {/* ============================================================ */}
+                  {/*  PROCUREMENT PURCHASE EMAIL TAB                              */}
+                  {/* ============================================================ */}
+                  {emailSubTab === 'procurement-purchase' && (
+                    <div className="space-y-6">
+                      <div className="rounded-xl border border-violet-200 bg-violet-50 p-5">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl">🛒</span>
+                          <div>
+                            <h3 className="text-lg font-semibold text-violet-950">
+                              Procurement Purchase Email Notifications
+                            </h3>
+                            <p className="mt-1 text-sm text-violet-700">
+                              A reviewer receives an email when a Procurement Purchase is created.
+                              Store recipients receive an email only when Procurement clicks Notify Store.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                        <div className="rounded-xl border border-blue-200 bg-white p-5 shadow-sm">
+                          <h4 className="mb-4 font-semibold text-blue-950">
+                            New Procurement Purchase → Reviewer
+                          </h4>
+
+                          <Toggle
+                            checked={directPurchaseNotificationSettings.reviewerNotificationEnabled}
+                            onChange={checked =>
+                              setDirectPurchaseNotificationSettings(prev => ({
+                                ...prev,
+                                reviewerNotificationEnabled: checked
+                              }))
+                            }
+                            label="Reviewer Notification"
+                            description="Send an email immediately after a Procurement Purchase is created."
+                          />
+
+                          <div className="mt-4">
+                            <FormField
+                              label="Procurement Purchase Reviewer Email(s)"
+                              id="procurementPurchaseReviewerRecipients"
+                              help="Comma-separated email addresses. These use the existing Reviewer recipients setting."
+                            >
+                              <input
+                                id="procurementPurchaseReviewerRecipients"
+                                type="text"
+                                value={directPurchaseNotificationSettings.reviewerRecipients}
+                                onChange={event =>
+                                  setDirectPurchaseNotificationSettings(prev => ({
+                                    ...prev,
+                                    reviewerRecipients: event.target.value
+                                  }))
+                                }
+                                placeholder="reviewer@company.com, manager@company.com"
+                                className="block w-full rounded-lg border border-slate-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
+                            </FormField>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-emerald-200 bg-white p-5 shadow-sm">
+                          <h4 className="mb-4 font-semibold text-emerald-950">
+                            Notify Store → Store Officer
+                          </h4>
+
+                          <Toggle
+                            checked={inventoryEmailSettings.inventoryStoreNotificationEnabled}
+                            onChange={checked =>
+                              setInventoryEmailSettings(prev => ({
+                                ...prev,
+                                inventoryStoreNotificationEnabled: checked
+                              }))
+                            }
+                            label="Store Email Notification"
+                            description="Send an email when Procurement explicitly clicks Notify Store."
+                          />
+
+                          <div className="mt-4">
+                            <FormField
+                              label="Procurement Purchase Store Email(s)"
+                              id="procurementPurchaseStoreRecipients"
+                              help="Comma-separated email addresses. These use the existing Inventory Store recipients setting."
+                            >
+                              <input
+                                id="procurementPurchaseStoreRecipients"
+                                type="text"
+                                value={inventoryEmailSettings.inventoryStoreRecipients}
+                                onChange={event =>
+                                  setInventoryEmailSettings(prev => ({
+                                    ...prev,
+                                    inventoryStoreRecipients: event.target.value
+                                  }))
+                                }
+                                placeholder="store@company.com, stores.manager@company.com"
+                                className="block w-full rounded-lg border border-slate-300 px-4 py-2.5 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 sm:text-sm"
+                              />
+                            </FormField>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                        <h4 className="text-sm font-semibold text-slate-900">Notification flow</h4>
+                        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                          <li>✓ Procurement Purchase created → Reviewer email(s)</li>
+                          <li>✓ Procurement clicks Notify Store → Store email(s)</li>
+                          <li>✓ Emails include the purchase number, supplier, amount, items and a link back to Procurement Purchases.</li>
+                        </ul>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          onClick={saveProcurementPurchaseNotificationSettings}
+                          disabled={savingProcurementPurchaseNotifications}
+                        >
+                          {savingProcurementPurchaseNotifications
+                            ? 'Saving...'
+                            : 'Save Procurement Purchase Email Settings'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {emailSubTab === 'general' && <EmailSettings />}
                 </Card>
               )}
@@ -3224,6 +3565,11 @@ const saveInventoryNotificationSettings = async () => {
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Annual Leave</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Start Time</th>
                             <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Tax Type</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Weekend Payroll</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Leave Rules</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Attendance</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Allowances</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Approval Routing</th>
                             <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Actions</th>
                           </tr>
                         </thead>
@@ -3233,12 +3579,42 @@ const saveInventoryNotificationSettings = async () => {
                               <td className="px-4 py-4 text-sm font-medium text-slate-900">{cat.name}</td>
                               <td className="px-4 py-4 text-sm text-slate-500">{cat.standardRateHours}</td>
                               <td className="px-4 py-4 text-sm text-slate-500">{cat.annualLeaveDays || 20}</td>
-                              <td className="px-4 py-4 text-sm text-slate-500">{cat.workStartTime || '09:00'}</td>
+                              <td className="px-4 py-4 text-sm text-slate-500">{cat.workStartTime || '09:00'}<span className="block text-xs text-slate-400">{cat.overnightShift ? 'Overnight · ' : ''}Absent after: {cat.absenceCutoffTime?.slice(0, 5) || 'General cutoff'}</span></td>
                               <td className="px-4 py-4 text-sm">
                                 {cat.applyWithholdingTax ? (
                                   <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">Withholding</span>
                                 ) : (
                                   <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">PAYE</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-sm">
+                                {cat.weekendAttendanceAsOvertime ? (
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Overtime</span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Regular</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-sm whitespace-nowrap">
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${cat.excludeWeekendsFromLeave ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                                  {cat.excludeWeekendsFromLeave ? 'Exclude weekends' : 'Include weekends'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm whitespace-nowrap">
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${cat.skipAutoAbsent ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                                  {cat.skipAutoAbsent ? 'Skip auto-absent' : 'Auto-absent on'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm whitespace-nowrap">
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${cat.useNonTaxableAllowances ? 'bg-violet-100 text-violet-800' : 'bg-slate-100 text-slate-600'}`}>
+                                  {cat.useNonTaxableAllowances ? 'Non-taxable' : 'Taxable'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm min-w-44">
+                                <div className="font-medium text-slate-700">{cat.useCustomApprovers ? 'Custom approvers' : 'Default workflow'}</div>
+                                {cat.useCustomApprovers && (
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    {[cat.supervisorEmails, cat.plannerEmails, cat.hrEmails].filter(Boolean).length} routing group(s)
+                                  </div>
                                 )}
                               </td>
                               <td className="px-4 py-4 text-right text-sm font-medium">
@@ -3257,6 +3633,7 @@ const saveInventoryNotificationSettings = async () => {
               {/* Category Modal */}
               <Modal isOpen={showCategoryModal} onClose={handleCancelCategory} title={editingCategory ? 'Edit Category' : 'Add Category'}>
                 <form onSubmit={handleCategorySubmit} className="space-y-4">
+                  <WeeklyOffDays value={categoryForm.weeklyOffDays || ""} onChange={weeklyOffDays => setCategoryForm({...categoryForm, weeklyOffDays})} />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField label="Name" id="catName" required>
                       <input type="text" id="catName" value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors" />
@@ -3270,6 +3647,11 @@ const saveInventoryNotificationSettings = async () => {
                     <FormField label="Work Start Time" id="catStartTime" required>
                       <input type="time" id="catStartTime" value={categoryForm.workStartTime} onChange={(e) => setCategoryForm({ ...categoryForm, workStartTime: e.target.value })} className="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-4 py-2.5 transition-colors" />
                     </FormField>
+                    <FormField label="Absence cutoff override (Ghana time)" id="catAbsenceCutoff" help="Leave blank to use the general Attendance cutoff. For overnight shifts, a cutoff earlier than Start Time means the next morning.">
+                      <input type="time" id="catAbsenceCutoff" value={categoryForm.absenceCutoffTime || ''} onChange={(e) => setCategoryForm({ ...categoryForm, absenceCutoffTime: e.target.value })} className="block w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm" />
+                    </FormField>
+                    <label className="flex items-start gap-3 text-sm sm:col-span-2"><input type="checkbox" checked={Boolean(categoryForm.overnightShift)} onChange={(e) => setCategoryForm({ ...categoryForm, overnightShift: e.target.checked })} className="mt-1 h-4 w-4"/><span><strong>Overnight shift</strong><span className="mt-1 block text-slate-500">For categories such as night security. Morning checkouts belong to the previous evening's shift. Set Start Time and the absence cutoff for this category.</span></span></label>
+
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
@@ -3283,6 +3665,16 @@ const saveInventoryNotificationSettings = async () => {
                     <div className="flex items-center gap-3">
                       <input type="checkbox" checked={categoryForm.applyWithholdingTax} onChange={(e) => setCategoryForm({ ...categoryForm, applyWithholdingTax: e.target.checked })} className="h-4 w-4 text-blue-600 rounded border-slate-300" />
                       <label className="text-sm text-slate-700">Apply Withholding Tax</label>
+                    </div>
+                    <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+                      <div className="flex items-start gap-3">
+                        <input type="checkbox" checked={categoryForm.weekendAttendanceAsOvertime} onChange={(e) => setCategoryForm({ ...categoryForm, weekendAttendanceAsOvertime: e.target.checked })} className="mt-0.5 h-4 w-4 text-purple-600 rounded border-slate-300" />
+                        <label className="text-sm text-slate-700">
+                          <span className="block font-medium">Treat weekend attendance as overtime</span>
+                          <span className="mt-0.5 block text-xs text-slate-500">Hours recorded on configured weekend days are removed from regular hours, multiplied by the Default overtime multiplier, and paid as overtime for this category.</span>
+                        </label>
+                      </div>
+
                     </div>
                     <div className="flex items-center gap-3">
                       <input type="checkbox" checked={categoryForm.useNonTaxableAllowances} onChange={(e) => setCategoryForm({ ...categoryForm, useNonTaxableAllowances: e.target.checked })} className="h-4 w-4 text-blue-600 rounded border-slate-300" />
@@ -3395,6 +3787,11 @@ const saveInventoryNotificationSettings = async () => {
                     </>
                   }
                 >
+                  <p className="mb-4 text-sm text-slate-600">
+                    Holidays automatically give active employees 8 normal hours when they have no attendance,
+                    leave, overtime, or timesheet record for that date. Future holidays are processed when the
+                    date arrives. Existing records are kept.
+                  </p>
                   {settings.holidays.length === 0 ? (
                     <div className="text-center py-8 text-slate-400">No holidays defined.</div>
                   ) : (

@@ -77,6 +77,10 @@ const Products = () => {
     newStock: 0
   });
 
+  // Tracks when the Add Stock modal was opened from a Procurement Purchase item.
+  // This lets us update both inventory stock and the related procurement item after confirmation.
+  const [procurementStockContext, setProcurementStockContext] = useState(null);
+
   const [updatedProduct, setUpdatedProduct] = useState({
     name: '',
     description: '',
@@ -189,7 +193,7 @@ const Products = () => {
         setPurchaseOrders(data);
       }
     } catch (err) {
-      console.error('Error fetching purchase orders:', err);
+      console.error('Error fetching procurement purchases:', err);
     }
   };
 
@@ -777,6 +781,7 @@ const Products = () => {
   };
 
   const openStockModal = (product, adjustmentType = 'add') => {
+    setProcurementStockContext(null);
     setCurrentProduct(product);
     setStockAdjustment({
       quantity: '',
@@ -785,6 +790,45 @@ const Products = () => {
       notes: '',
       oldStock: product.stock || 0,
       newStock: product.stock || 0
+    });
+    setIsStockModalOpen(true);
+    setError('');
+  };
+
+  const openProcurementStockModal = (order, item) => {
+    const existingProduct = products.find(product =>
+      product.id === item.productId ||
+      (item.productCode && product.code === item.productCode)
+    );
+
+    if (!existingProduct) {
+      toast.error('Existing inventory product could not be found. Refresh the page and try again.');
+      return;
+    }
+
+    const alreadyReceived = Number(item.receivedQuantity || 0);
+    const pendingQuantity = Math.max(0, Number(item.quantity || 0) - alreadyReceived);
+
+    if (pendingQuantity <= 0) {
+      toast.info('This procurement purchase item has already been fully added to stock.');
+      return;
+    }
+
+    setCurrentProduct(existingProduct);
+    setProcurementStockContext({
+      orderId: order.id,
+      itemId: item.id,
+      purchaseNumber: order.purchaseOrderNumber,
+      previousReceivedQuantity: alreadyReceived,
+      pendingQuantity
+    });
+    setStockAdjustment({
+      quantity: String(pendingQuantity),
+      adjustmentType: 'add',
+      reason: 'purchase_order',
+      notes: `Added from procurement purchase ${order.purchaseOrderNumber}`,
+      oldStock: existingProduct.stock || 0,
+      newStock: (existingProduct.stock || 0) + pendingQuantity
     });
     setIsStockModalOpen(true);
     setError('');
@@ -832,6 +876,17 @@ const Products = () => {
       return;
     }
 
+    if (procurementStockContext) {
+      if (stockAdjustment.adjustmentType !== 'add') {
+        setError('Procurement purchase items can only be added to stock.');
+        return;
+      }
+      if (parseInt(stockAdjustment.quantity) > procurementStockContext.pendingQuantity) {
+        setError(`You cannot add more than the pending procurement quantity (${procurementStockContext.pendingQuantity}).`);
+        return;
+      }
+    }
+
     try {
       const token = getAuthToken();
       if (!token) {
@@ -864,15 +919,34 @@ const Products = () => {
         throw new Error(`Failed to adjust stock: ${errorText}`);
       }
 
+      if (procurementStockContext && stockAdjustment.adjustmentType === 'add') {
+        const addedQuantity = parseInt(stockAdjustment.quantity);
+        const newReceivedQuantity = procurementStockContext.previousReceivedQuantity + addedQuantity;
+        const purchaseUpdated = await updatePurchaseOrderItem(
+          procurementStockContext.orderId,
+          procurementStockContext.itemId,
+          newReceivedQuantity
+        );
+
+        if (!purchaseUpdated) {
+          throw new Error('Stock was updated, but the procurement purchase item could not be synchronized. Please do not add the stock again; refresh and check the item status.');
+        }
+      }
+
       await fetchProducts();
+      if (procurementStockContext) {
+        await fetchPurchaseOrdersForStore();
+      }
 
       setSuccessMessage(
-        `Stock ${stockAdjustment.adjustmentType === 'add' ? 'added' : 'removed'} successfully! ` +
-        `Old: ${stockAdjustment.oldStock}, New: ${stockAdjustment.newStock}`
+        procurementStockContext
+          ? `Stock added successfully from procurement purchase ${procurementStockContext.purchaseNumber}. Old: ${stockAdjustment.oldStock}, New: ${stockAdjustment.newStock}`
+          : `Stock ${stockAdjustment.adjustmentType === 'add' ? 'added' : 'removed'} successfully! Old: ${stockAdjustment.oldStock}, New: ${stockAdjustment.newStock}`
       );
 
       setTimeout(() => setSuccessMessage(''), 5000);
       setIsStockModalOpen(false);
+      setProcurementStockContext(null);
       setStockAdjustment({
         quantity: '',
         adjustmentType: 'add',
@@ -951,8 +1025,8 @@ const Products = () => {
   const getPendingAddToInventoryCount = () => {
     return purchaseOrders.flatMap(order => 
       order.items.filter(item => 
-        (item.status === 'DELIVERED' || item.status === 'RECEIVED') &&
-        (item.quantity > (item.receivedQuantity || 0) || item.isNewProduct)
+        (item.status === 'DELIVERED' || item.status === 'RECEIVED' || item.status === 'PROCUREMENT_RECEIVED') &&
+        item.quantity > (item.receivedQuantity || 0)
       )
     ).length;
   };
@@ -967,7 +1041,7 @@ const Products = () => {
         const productData = {
           name: item.productName,
           code: item.productCode || `PO-${order.purchaseOrderNumber}-${item.id}`,
-          description: item.description || `From purchase order ${order.purchaseOrderNumber}`,
+          description: item.description || `From procurement purchase ${order.purchaseOrderNumber}`,
           stock: pendingQuantity,
           unitCost: item.unitPrice || 0,
           productType: item.productType || 'GENERAL',
@@ -990,35 +1064,15 @@ const Products = () => {
         if (productResponse.ok) {
           const createdProduct = await productResponse.json();
           
-          await updatePurchaseOrderItem(order.id, item.id, pendingQuantity);
+          await updatePurchaseOrderItem(order.id, item.id, (item.receivedQuantity || 0) + pendingQuantity);
           
           toast.success('Product created and added to inventory!');
           fetchProducts();
           fetchPurchaseOrdersForStore();
         }
       } else {
-        const updateResponse = await fetch(`${API_BASE_URL}/api/stock/adjust`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            productId: item.productId,
-            quantity: pendingQuantity,
-            adjustmentType: 'ADD',
-            reason: 'PURCHASE_ORDER_RECEIPT',
-            notes: `Added from purchase order ${order.purchaseOrderNumber}`
-          })
-        });
-
-        if (updateResponse.ok) {
-          await updatePurchaseOrderItem(order.id, item.id, pendingQuantity);
-          
-          toast.success('Stock added to existing product!');
-          fetchProducts();
-          fetchPurchaseOrdersForStore();
-        }
+        // Existing products must use the same Add Stock modal as the Products table.
+        openProcurementStockModal(order, item);
       }
     } catch (err) {
       toast.error(`Error saving product: ${err.message}`);
@@ -1042,7 +1096,7 @@ const Products = () => {
       });
       return response.ok;
     } catch (err) {
-      console.error('Error updating purchase order item:', err);
+      console.error('Error updating procurement purchase item:', err);
       return false;
     }
   };
@@ -1242,7 +1296,7 @@ const Products = () => {
                 <BuildingStorefrontIcon className="h-6 w-6 text-purple-500" />
               </div>
               <div>
-                <p className="text-sm text-gray-600">Purchase Orders</p>
+                <p className="text-sm text-gray-600">Procurement Purchases</p>
                 <p className="text-2xl font-bold text-gray-900">{purchaseOrders.length}</p>
               </div>
             </div>
@@ -1273,7 +1327,7 @@ const Products = () => {
                 }`}
               >
                 <TruckIcon className="h-5 w-5" />
-                Purchase Orders ({purchaseOrders.length})
+                Procurement Purchases ({purchaseOrders.length})
                 {getPendingAddToInventoryCount() > 0 && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                     {getPendingAddToInventoryCount()} to add
@@ -1390,7 +1444,7 @@ const Products = () => {
                       <th className="p-3 border-b border-gray-200 w-12">
                         <div className="text-xs font-semibold">Select</div>
                       </th>
-                      {["Name", "Code", "Unit Cost", "Description", "Brand", "Type", "Stock", "PPE", "Kitchen Store", "Returnable", "Entry Date","shelf", "Actions"].map((head) => (
+                      {["Name", "Code", "Unit Cost (GHS)", "Description", "Brand", "Type", "Stock", "PPE", "Kitchen Store", "Returnable", "Entry Date","shelf", "Actions"].map((head) => (
                         <th key={head} className="p-3 border-b border-gray-200">
                           <div className="text-xs font-semibold whitespace-nowrap">{head}</div>
                         </th>
@@ -1574,17 +1628,17 @@ const Products = () => {
           </>
         ) : (
           <>
-            {/* Purchase Orders Section */}
+            {/* Procurement Purchases Section */}
             <div className="mb-8">
               <div className="flex items-center gap-3 mb-4">
                 <TruckIcon className="h-6 w-6 text-gray-700" />
-                <h4 className="text-lg font-semibold text-gray-900">Products from Purchase Orders</h4>
+                <h4 className="text-lg font-semibold text-gray-900">Products from Procurement Purchases</h4>
                 <span className="text-sm text-gray-500">(Ready to be added to inventory)</span>
                 {getPendingNotificationCount() > 0 && (
                   <div className="flex items-center gap-2 ml-4">
                     <BellAlertIcon className="h-5 w-5 text-yellow-500" />
                     <span className="text-sm font-medium text-yellow-700">
-                      {getPendingNotificationCount()} purchase orders need store notification
+                      {getPendingNotificationCount()} procurement purchases need store notification
                     </span>
                     <button
                       className="text-sm text-blue-600 hover:text-blue-800 underline"
@@ -1606,7 +1660,7 @@ const Products = () => {
                   </div>
                   <input
                     type="text"
-                    placeholder="Search products in purchase orders..."
+                    placeholder="Search products in procurement purchases..."
                     value={purchaseOrderSearchTerm}
                     onChange={(e) => setPurchaseOrderSearchTerm(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1637,7 +1691,7 @@ const Products = () => {
                           <div className="text-xs font-semibold">Quantity Available</div>
                         </th>
                         <th className="p-3 border-b border-gray-200">
-                          <div className="text-xs font-semibold">Unit Cost</div>
+                          <div className="text-xs font-semibold">Unit Cost (GHS)</div>
                         </th>
                         <th className="p-3 border-b border-gray-200">
                           <div className="text-xs font-semibold">Status</div>
@@ -1650,12 +1704,12 @@ const Products = () => {
                     <tbody>
                       {filteredPurchaseOrders.length > 0 ? (
                         filteredPurchaseOrders.flatMap(order => 
-                          order.items
-                            .filter(item => item.status === 'DELIVERED' || item.status === 'RECEIVED')
-                            .filter(item => item.quantity > (item.receivedQuantity || 0) || item.isNewProduct)
+                          (order.items || [])
                             .map(item => {
-                              const pendingQuantity = item.quantity - (item.receivedQuantity || 0);
+                              const receivedQuantity = item.receivedQuantity || 0;
+                              const pendingQuantity = Math.max(0, item.quantity - receivedQuantity);
                               const isNewProduct = item.isNewProduct || !item.productId;
+                              const isFullyAdded = pendingQuantity <= 0;
                               
                               return (
                                 <tr key={`${order.id}-${item.id}`} className="hover:bg-gray-50 transition-colors">
@@ -1680,41 +1734,45 @@ const Products = () => {
                                   <td className="p-3 border-b border-gray-200">
                                     <div className="flex items-center gap-2">
                                       <div className="text-sm font-medium">{pendingQuantity} units</div>
-                                      {item.receivedQuantity > 0 && (
+                                      {receivedQuantity > 0 && (
                                         <div className="text-xs text-gray-500">
-                                          ({item.receivedQuantity} already received)
+                                          ({receivedQuantity} added to inventory)
                                         </div>
                                       )}
                                     </div>
                                   </td>
                                   <td className="p-3 border-b border-gray-200">
                                     <div className="text-sm font-medium">
-                                      ${item.unitPrice ? parseFloat(item.unitPrice).toFixed(2) : '0.00'}
+                                      {formatCurrency(item.unitPrice)}
                                     </div>
                                   </td>
                                   <td className="p-3 border-b border-gray-200">
                                     <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                      item.status === 'DELIVERED' 
-                                        ? 'bg-purple-100 text-purple-800' 
-                                        : 'bg-green-100 text-green-800'
+                                      isFullyAdded
+                                        ? 'bg-green-100 text-green-800'
+                                        : receivedQuantity > 0
+                                          ? 'bg-amber-100 text-amber-800'
+                                          : 'bg-purple-100 text-purple-800'
                                     }`}>
-                                      {item.status === 'DELIVERED' ? 'Ready to Add' : 'Partially Added'}
+                                      {isFullyAdded ? 'Added to Inventory' : receivedQuantity > 0 ? 'Partially Added' : 'Ready to Add'}
                                     </span>
                                   </td>
                                   <td className="p-3 border-b border-gray-200">
                                     <div className="flex gap-2">
                                       <button
-                                        onClick={() => handleSaveProductToInventory(order, item)}
+                                        onClick={() => !isFullyAdded && handleSaveProductToInventory(order, item)}
                                         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
-                                          isNewProduct
-                                            ? 'bg-green-600 text-white hover:bg-green-700'
-                                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                                          isFullyAdded
+                                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                            : isNewProduct
+                                              ? 'bg-green-600 text-white hover:bg-green-700'
+                                              : 'bg-blue-600 text-white hover:bg-blue-700'
                                         }`}
-                                        disabled={pendingQuantity <= 0}
-                                        title={isNewProduct ? "Add new product to inventory" : "Add stock to existing product"}
+                                        disabled={isFullyAdded}
+                                        title={isFullyAdded ? 'This procurement purchase item has already been added to inventory' : isNewProduct ? "Add new product to inventory" : "Add stock to existing product"}
                                       >
-                                        <PlusIcon className="h-4 w-4" />
-                                        {isNewProduct ? 'Create Product' : 'Add Stock'}
+                                        {isFullyAdded ? <CheckCircleIcon className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
+                                        {isFullyAdded ? 'Added' : isNewProduct ? 'Create Product' : 'Add Stock'}
                                       </button>
                                       <button
                                         onClick={() => viewPurchaseOrderItemDetails(order, item)}
@@ -1737,12 +1795,12 @@ const Products = () => {
                             <div className="text-sm">
                               {purchaseOrderSearchTerm 
                                 ? 'No matching products found' 
-                                : 'All products have been added to inventory'}
+                                : 'No procurement purchase records found'}
                             </div>
                             {getPendingNotificationCount() > 0 && (
                               <div className="mt-4">
                                 <p className="text-sm text-yellow-600 mb-2">
-                                  Note: There are {getPendingNotificationCount()} purchase orders waiting for store notification.
+                                  Note: There are {getPendingNotificationCount()} procurement purchases waiting for store notification.
                                 </p>
                                 <button
                                   className="text-sm text-blue-600 hover:text-blue-800 underline"
@@ -1780,7 +1838,7 @@ const Products = () => {
               </>
             ) : (
               <>
-                Showing {filteredPurchaseOrders.length} of {purchaseOrders.length} purchase orders • 
+                Showing {filteredPurchaseOrders.length} of {purchaseOrders.length} procurement purchases • 
                 {getPendingAddToInventoryCount()} items ready to add • 
                 {getPendingNotificationCount()} pending notifications
               </>
@@ -1840,7 +1898,7 @@ const Products = () => {
                   <input 
                     type="number" 
                     step="0.01"
-                    placeholder="Unit Cost *"
+                    placeholder="Unit Cost (GHS) *"
                     name="unitCost" 
                     value={newProduct.unitCost} 
                     onChange={handleInputChange} 
@@ -1988,7 +2046,7 @@ const Products = () => {
                   <input 
                     type="number" 
                     step="0.01"
-                    placeholder="Unit Cost *"
+                    placeholder="Unit Cost (GHS) *"
                     name="unitCost" 
                     value={updatedProduct.unitCost} 
                     onChange={handleInputChange} 
@@ -2139,6 +2197,12 @@ const Products = () => {
                 </div>
               </div>
 
+              {procurementStockContext && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                  <strong>Procurement Purchase:</strong> {procurementStockContext.purchaseNumber} · Pending quantity: {procurementStockContext.pendingQuantity}
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Adjustment Type
@@ -2162,13 +2226,16 @@ const Products = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleStockAdjustmentChange({ 
+                    onClick={() => !procurementStockContext && handleStockAdjustmentChange({ 
                       target: { name: 'adjustmentType', value: 'remove' }
                     })}
+                    disabled={Boolean(procurementStockContext)}
                     className={`flex-1 px-4 py-2 rounded-lg border ${
-                      stockAdjustment.adjustmentType === 'remove'
-                        ? 'border-red-500 bg-red-50 text-red-700'
-                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                      procurementStockContext
+                        ? 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed'
+                        : stockAdjustment.adjustmentType === 'remove'
+                          ? 'border-red-500 bg-red-50 text-red-700'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
                     }`}
                   >
                     <div className="flex items-center justify-center gap-2">
@@ -2208,7 +2275,7 @@ const Products = () => {
                 >
                   <option value="">Select a reason</option>
                   <option value="new_shipment">New Shipment Received</option>
-                  <option value="purchase_order">Purchase Order Fulfilled</option>
+                  <option value="purchase_order">Procurement Purchase Fulfilled</option>
                   <option value="damaged">Damaged/Expired Items</option>
                   <option value="theft">Theft/Loss</option>
                   <option value="internal_use">Internal Use</option>
@@ -2247,6 +2314,7 @@ const Products = () => {
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 onClick={() => {
                   setIsStockModalOpen(false);
+                  setProcurementStockContext(null);
                   setError('');
                 }}
               >
@@ -2362,7 +2430,7 @@ const Products = () => {
         </div>
       )}
 
-      {/* View Purchase Order Item Details Modal */}
+      {/* View Procurement Purchase Item Details Modal */}
       {isViewPurchaseOrderModalOpen && selectedPurchaseOrder && selectedItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -2404,8 +2472,8 @@ const Products = () => {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-500">Unit Cost</label>
-                  <p className="font-medium text-gray-900">${selectedItem.unitPrice?.toFixed(2) || '0.00'}</p>
+                  <label className="block text-sm font-medium text-gray-500">Unit Cost (GHS)</label>
+                  <p className="font-medium text-gray-900">{formatCurrency(selectedItem.unitPrice)}</p>
                 </div>
                 
                 {selectedItem.description && (

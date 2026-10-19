@@ -12,6 +12,7 @@ import MainSidebar from "../mainSidebar";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import ExcelTemplateViewer from './ExcelTemplateViewer';
 import TimesheetAttendanceSync from "../../../components/sync/TimesheetAttendanceSync";
+import TimesheetPayrollApproval from "../../../components/TimesheetPayrollApproval";
 import * as XLSX from 'xlsx';
 
 const AttendanceCodes = {
@@ -43,7 +44,8 @@ function Timesheet() {
   const [selectedPeriod, setSelectedPeriod] = useState("week");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [attendances, setAttendances] = useState([]);
-  const [overviews, setOverviews] = useState([]);
+  const [syncAttendanceLoading, setSyncAttendanceLoading] = useState(false);
+  const [syncAttendanceError, setSyncAttendanceError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters] = useState({
@@ -139,6 +141,18 @@ function Timesheet() {
   });
   
   const [missingSourceEntries, setMissingSourceEntries] = useState({});
+  const [resolveMissingSourceModal, setResolveMissingSourceModal] = useState({
+    open: false,
+    employeeId: null,
+    dateStr: '',
+    note: 'Hard copy received — worker did not work on this date'
+  });
+  const [viewSourceResolutionModal, setViewSourceResolutionModal] = useState({
+    open: false,
+    employeeName: '',
+    dateStr: '',
+    note: ''
+  });
   const [showMissingSourceModal, setShowMissingSourceModal] = useState(false);
   const [missingSourceFilter, setMissingSourceFilter] = useState("all");
   const [missingSourceModalData, setMissingSourceModalData] = useState({
@@ -186,7 +200,16 @@ function Timesheet() {
   });
   
   const [attendanceData, setAttendanceData] = useState({});
-  const [selectedJob, setSelectedJob] = useState("");
+  const [selectedJob, setSelectedJob] = useState(() => searchParams.get('jobId') || "");
+  const [showInvoiceExport, setShowInvoiceExport] = useState(false);
+  const [invoiceJobId, setInvoiceJobId] = useState("");
+  const timesheetRequestRef = useRef(0);
+  const timesheetAbortRef = useRef(null);
+  const employeeLoadRef = useRef(null);
+
+  useEffect(() => {
+    setSelectedJob(searchParams.get('jobId') || '');
+  }, [searchParams]);
   const [systemSettings, setSystemSettings] = useState({
     weekendDays: [0, 6],
     doubleTimeOnSunday: false,
@@ -299,6 +322,16 @@ function Timesheet() {
   };
 
   const toggleMissingSourceFlag = (employeeId, dateStr, currentFlag) => {
+    if (currentFlag) {
+      setResolveMissingSourceModal({
+        open: true,
+        employeeId,
+        dateStr,
+        note: 'Hard copy received — worker did not work on this date'
+      });
+      return;
+    }
+
     const key = `${employeeId}_${dateStr}`;
     setMissingSourceEntries(prev => ({
       ...prev,
@@ -309,6 +342,32 @@ function Timesheet() {
         flaggedBy: user?.name || "Unknown"
       }
     }));
+  };
+
+  const resolveMissingSourceAsNotWorked = () => {
+    const { employeeId, dateStr, note } = resolveMissingSourceModal;
+    const trimmedNote = note.trim();
+    if (!trimmedNote) {
+      setSaveMessage({ type: 'error', text: 'Please enter a resolution note' });
+      return;
+    }
+
+    const key = `${employeeId}_${dateStr}`;
+    setMissingSourceEntries(prev => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        flagged: false,
+        reason: null,
+        resolution: 'NOT_WORKED',
+        resolutionNote: trimmedNote,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: user?.name || 'Unknown'
+      }
+    }));
+    handleAttendanceStatusChange(employeeId, dateStr, AttendanceCodes.ABSENT);
+    setResolveMissingSourceModal({ open: false, employeeId: null, dateStr: '', note: '' });
+    setSaveMessage({ type: 'success', text: 'Hard copy recorded; worker marked absent for this date. Save the timesheet to persist the change.' });
   };
 
   const bulkMarkMissingSource = () => {
@@ -367,9 +426,14 @@ function Timesheet() {
     return missingSourceEntries[key]?.reason || "No source document";
   };
 
+  const getSourceResolution = (employeeId, dateStr) => {
+    const key = `${employeeId}_${dateStr}`;
+    return missingSourceEntries[key]?.resolutionNote || '';
+  };
+
   const handleExportInvoice = async () => {
-    if (!selectedJob || selectedJob === '' || selectedJob === 'no-job') {
-        setSaveMessage({ type: "error", text: "Please select a job first" });
+    if (!invoiceJobId || !jobs.some(job => String(job.id) === String(invoiceJobId))) {
+        setSaveMessage({ type: "error", text: "Please select a project first" });
         return;
     }
     
@@ -388,7 +452,7 @@ function Timesheet() {
     try {
         const token = localStorage.getItem("jwtToken");
         const response = await fetch(
-            `${API_BASE_URL}/api/timesheets/invoice/export-with-attachments?jobId=${selectedJob}&startDate=${startDate}&endDate=${endDate}`,
+            `${API_BASE_URL}/api/timesheets/invoice/export-with-attachments?jobId=${encodeURIComponent(invoiceJobId)}&startDate=${startDate}&endDate=${endDate}`,
             {
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -407,7 +471,7 @@ function Timesheet() {
         a.href = url;
         
         const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = `Invoice_${selectedJob}_${startDate}_to_${endDate}.zip`;
+        let filename = `Invoice_${invoiceJobId}_${startDate}_to_${endDate}.zip`;
         if (contentDisposition && contentDisposition.includes('filename=')) {
             const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
             if (match && match[1]) {
@@ -421,6 +485,7 @@ function Timesheet() {
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
         
+        setShowInvoiceExport(false);
         setSaveMessage({ type: "success", text: "Invoice ZIP generated successfully!" });
         
     } catch (err) {
@@ -532,7 +597,8 @@ function Timesheet() {
               const earnings = calculateEarnings(employee, new Date(dateStr), nh, ot);
               
               const employeeJob = employees.find(e => e.id === employee.id)?.job;
-              const jobId = employeeJob?.id;
+              const savedRow = timesheets.find(row => String(row.employeeId || row.employee?.id) === String(employee.id) && row.date === dateStr);
+              const jobId = savedRow ? (savedRow.jobId ?? savedRow.job?.id ?? null) : employeeJob?.id;
 
               timesheetData.push({
                 employeeId: employee.id,
@@ -544,7 +610,9 @@ function Timesheet() {
                 earnings: earnings.totalPay,
                 attendanceCode: attendanceStatus,
                 sourceDocumentMissing: sourceMissing,
-                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingReason: sourceMissing
+                  ? (missingSourceEntries[key]?.reason || null)
+                  : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                 sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                 jobId: jobId
               });
@@ -559,7 +627,9 @@ function Timesheet() {
                 earnings: 0,
                 attendanceCode: attendanceStatus,
                 sourceDocumentMissing: sourceMissing,
-                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingReason: sourceMissing
+                  ? (missingSourceEntries[key]?.reason || null)
+                  : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                 sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                 jobId: jobId
               });
@@ -635,7 +705,19 @@ function Timesheet() {
       const defaultNH = (settings.defaultNH ?? stdHours);
       const nh = settings.capNH ? Math.min(defaultNH, stdHours) : defaultNH;
       const finalNH = (attendanceCode === 'A' || attendanceCode === 'OFF') ? 0 : nh;
-      const finalOT = settings.allowOT ? "0" : "0";
+      // Expected OT is a raw job value. It auto-fills alongside standard NH
+      // for worked attendance codes. When this job applies its multiplier to
+      // hours, calculate it here once; the backend persists this final value
+      // without multiplying again on later saves.
+      const expectedOT = Number(employee?.job?.expectedOvertimeHours ?? 0);
+      const overtimeMultiplier = Number(
+        employee?.job?.overtimeMultiplier ?? systemSettings.defaultOvertimeMultiplier ?? 1.5
+      );
+      const applyMultiplierToHours = Boolean(employee?.job?.applyOvertimeMultiplierToHours);
+      const displayedOT = applyMultiplierToHours ? expectedOT * overtimeMultiplier : expectedOT;
+      const finalOT = settings.allowOT && isCountCodes(attendanceCode)
+        ? String(Math.max(displayedOT, 0))
+        : "0";
 
       setEmployeeNormalHours(prev => ({
         ...prev,
@@ -644,7 +726,7 @@ function Timesheet() {
 
       setEmployeeHours(prev => ({
         ...prev,
-        [employeeId]: { ...(prev[employeeId] || {}), [dateStr]: String(finalNH) }
+        [employeeId]: { ...(prev[employeeId] || {}), [dateStr]: String(finalNH + Number(finalOT)) }
       }));
 
       setEmployeeOvertime(prev => ({
@@ -789,33 +871,16 @@ function Timesheet() {
       const jobMap = {};
       jobsData.forEach(job => { jobMap[job.id] = job; });
       
-      const enhancedEmployees = await Promise.all(
-        employeesData.map(async (employee) => {
-          if (employee.job && employee.job.id && employee.job.name) return employee;
-          
-          if (employee.jobId && jobMap[employee.jobId]) {
-            return { ...employee, job: jobMap[employee.jobId] };
-          }
-          
-          try {
-            if (employee.jobId) {
-              const jobAssignmentRes = await fetch(`${API_BASE_URL}/api/employee/${employee.id}/job`, { headers });
-              if (jobAssignmentRes.ok) {
-                const jobData = await jobAssignmentRes.json();
-                return { ...employee, job: jobData };
-              }
-            }
-          } catch (err) {
-            console.warn(`Error fetching job for employee ${employee.id}:`, err);
-          }
-          
-          return employee;
-        })
-      );
-      
+      const enhancedEmployees = employeesData.map(employee => ({
+        ...employee,
+        job: employee.job || (employee.jobId
+          ? jobMap[employee.jobId] || { id: employee.jobId, name: employee.jobName || 'Unassigned' }
+          : null)
+      }));
+
       return enhancedEmployees;
     } catch (err) {
-      console.error("Error fetching employees with jobs:", err);
+      console.error("Error fetching employees with projects:", err);
       throw err;
     }
   };
@@ -1331,7 +1396,8 @@ function Timesheet() {
                         const earnings = calculateEarnings(employee, day, nh, ot);
                         
                         const employeeJob = employees.find(e => e.id === employee.id)?.job;
-                        const jobId = employeeJob?.id;
+                        const savedRow = timesheets.find(row => String(row.employeeId || row.employee?.id) === String(employee.id) && row.date === dateStr);
+                        const jobId = savedRow ? (savedRow.jobId ?? savedRow.job?.id ?? null) : employeeJob?.id;
 
                         timesheetData.push({
                             employeeId: employee.id,
@@ -1343,7 +1409,9 @@ function Timesheet() {
                             earnings: earnings.totalPay,
                             attendanceCode: attendanceStatus,
                             sourceDocumentMissing: sourceMissing,
-                            sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                            sourceDocumentMissingReason: sourceMissing
+                              ? (missingSourceEntries[key]?.reason || null)
+                              : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                             sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                             jobId: jobId
                         });
@@ -1358,7 +1426,9 @@ function Timesheet() {
                             earnings: 0,
                             attendanceCode: attendanceStatus,
                             sourceDocumentMissing: sourceMissing,
-                            sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                            sourceDocumentMissingReason: sourceMissing
+                              ? (missingSourceEntries[key]?.reason || null)
+                              : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                             sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                             jobId: jobId
                         });
@@ -1408,10 +1478,10 @@ function Timesheet() {
   // Convert the lightweight backend projection into the object shape already
   // used throughout this component. This lets the matrix, editing, exports,
   // source-document flags and bulk actions continue to work unchanged.
-  const normalizeTimesheetDTO = (row, employeesList = employees) => {
+  const normalizeTimesheetDTO = (row, employeesList = employees, employeeById = null) => {
     if (!row) return null;
 
-    const employeeFromList = employeesList.find(
+    const employeeFromList = employeeById ? employeeById.get(String(row.employeeId)) : employeesList.find(
       (employee) => String(employee.id) === String(row.employeeId)
     );
 
@@ -1480,7 +1550,11 @@ function Timesheet() {
     };
   };
 
-  const fetchTimesheets = async (employeesList = employees) => {
+  const fetchTimesheets = async (employeesList = employees, employeeLoad = null) => {
+    const requestId = ++timesheetRequestRef.current;
+    timesheetAbortRef.current?.abort();
+    const controller = new AbortController();
+    timesheetAbortRef.current = controller;
     setLoading(true);
 
     const att = {};
@@ -1544,6 +1618,7 @@ function Timesheet() {
       const response = await fetch(
         `${API_BASE_URL}/api/timesheets/rows?${params.toString()}`,
         {
+          signal: controller.signal,
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -1559,8 +1634,11 @@ function Timesheet() {
       }
 
       const raw = await response.json();
+      if (employeeLoad) employeesList = await employeeLoad;
+      const employeeById = new Map(employeesList.map(employee => [String(employee.id), employee]));
+      if (requestId !== timesheetRequestRef.current) return [];
       const fixed = (Array.isArray(raw) ? raw : [])
-        .map((row) => normalizeTimesheetDTO(row, employeesList))
+        .map((row) => normalizeTimesheetDTO(row, employeesList, employeeById))
         .filter(Boolean)
         .map((timesheet) => {
           const status = String(timesheet.status || '').toUpperCase();
@@ -1618,27 +1696,41 @@ function Timesheet() {
             flaggedAt: timesheet.sourceDocumentMissingFlaggedAt,
             flaggedBy: timesheet.sourceDocumentMissingFlaggedBy
           };
+        } else if (String(timesheet.sourceDocumentMissingReason || '').startsWith('[NOT WORKED]')) {
+          missingMap[`${employeeId}_${dateStr}`] = {
+            flagged: false,
+            resolution: 'NOT_WORKED',
+            resolutionNote: String(timesheet.sourceDocumentMissingReason).replace(/^\[NOT WORKED\]\s*/, ''),
+            resolvedAt: timesheet.verifiedAt,
+            resolvedBy: timesheet.verifiedBy
+          };
         }
       });
 
       setTimesheets(fixed);
-      setAttendanceData((previous) => ({ ...previous, ...att }));
-      setEmployeeHours((previous) => ({ ...previous, ...hrs }));
-      setEmployeeOvertime((previous) => ({ ...previous, ...ot }));
-      setEmployeeNormalHours((previous) => ({ ...previous, ...nhMap }));
-      setMissingSourceEntries((previous) => ({ ...previous, ...missingMap }));
+      setAttendanceData(att);
+      setEmployeeHours(hrs);
+      setEmployeeOvertime(ot);
+      setEmployeeNormalHours(nhMap);
+      setMissingSourceEntries(missingMap);
 
       return fixed;
     } catch (error) {
+      if (requestId !== timesheetRequestRef.current) return [];
       console.error('Error fetching timesheets:', error);
       setSaveMessage({
         type: 'error',
         text: `Failed to fetch timesheets: ${error.message}`
       });
       setTimesheets([]);
+      setAttendanceData({});
+      setEmployeeHours({});
+      setEmployeeOvertime({});
+      setEmployeeNormalHours({});
+      setMissingSourceEntries({});
       return [];
     } finally {
-      setLoading(false);
+      if (requestId === timesheetRequestRef.current) setLoading(false);
     }
   };
 
@@ -1876,132 +1968,83 @@ function Timesheet() {
 
   const days = getDaysArray();
 
+  // Reference data is independent of the selected date and table filters.
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const token = localStorage.getItem("jwtToken");
-        const headers = {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        };
-        
-        const jobIdFromUrl = searchParams.get('jobId');
-        if (jobIdFromUrl) setSelectedJob(jobIdFromUrl);
-        
-        const { start, end } = getDateRange();
-        const startDate = toYMD(start);
-        const endDate = toYMD(end);
-
-        const jobsPromise = fetch(`${API_BASE_URL}/api/jobs`, { headers });
-        const employeesResponsePromise = fetch(`${API_BASE_URL}/api/employee`, { headers });
-        const [
-          jobsRes,
-          attendancesRes,
-          overviewsRes,
-          settingsRes,
-          holidaysRes,
-          specialWeekendsRes
-        ] = await Promise.all([
-          jobsPromise,
-          fetch(`${API_BASE_URL}/api/attendance?startDate=${startDate}&endDate=${endDate}`, { headers }),
-          fetch(`${API_BASE_URL}/api/overview?startDate=${startDate}&endDate=${endDate}`, { headers }),
-          fetch(`${API_BASE_URL}/api/settings/system`, { headers }),
-          fetch(`${API_BASE_URL}/api/settings/holidays`, { headers }),
-          fetch(`${API_BASE_URL}/api/settings/special-weekends`, { headers })
-        ]);
-
-        const jobsData = jobsRes.ok ? await jobsRes.json() : [];
-        const employeesPromise = employeesResponsePromise.then((employeesResponse) =>
-          fetchEmployeesWithJobs(jobsData, employeesResponse)
-        );
-        const attendancesData = attendancesRes.ok ? await attendancesRes.json() : [];
-        const overviewsData = overviewsRes.ok ? await overviewsRes.json() : [];
-        const holidaysData = holidaysRes.ok ? await holidaysRes.json() : [];
-        const specialWeekendsData = specialWeekendsRes.ok ? await specialWeekendsRes.json() : [];
-        
-        if (settingsRes.ok) {
-          const settingsData = await settingsRes.json();
-          setSystemSettings(prev => ({
-            ...prev,
-            ...settingsData,
-            weekendDays: settingsData.weekendDays || [0, 6],
-            weekendRate: settingsData.weekendRate || 1.5,
-            holidayRate: settingsData.holidayRate || 2.0,
-            standardWorkHours: settingsData.standardWorkHours || 8
-          }));
-        }
-        
-        const employeesData = await employeesPromise;
-        
+    let cancelled = false;
+    const headers = { Authorization: 'Bearer ' + localStorage.getItem('jwtToken') };
+    const get = async path => {
+      const response = await fetch(API_BASE_URL + path, { headers });
+      if (!response.ok) throw new Error('Failed to load ' + path);
+      return response.json();
+    };
+    employeeLoadRef.current = Promise.all([
+      get('/api/jobs'),
+      fetch(API_BASE_URL + '/api/employee', { headers })
+    ]).then(async ([jobsData, employeesResponse]) => {
+      const employeesData = await fetchEmployeesWithJobs(jobsData, employeesResponse);
+      if (!cancelled) {
         setEmployees(employeesData);
         setJobs(jobsData);
-        setAttendances(attendancesData);
-        setOverviews(overviewsData);
-        setHolidays(holidaysData);
-        setSpecialWeekends(specialWeekendsData);
-        
-        initializeAttendanceData(employeesData);
-        initializeHoursData(employeesData);
-
-        await fetchTimesheets(employeesData);
-        
-        if (jobIdFromUrl) {
-          const jobExists = jobsData.some(job => job.id === parseInt(jobIdFromUrl));
-          if (jobExists) setSelectedJob(jobIdFromUrl);
-        }
-        
-        if (jobsData.length > 0) {
-          const activeJob = jobsData.find(job => job.status === 'ACTIVE');
-          if (activeJob) {
-            setBillingCycle({
-              startDate: new Date(activeJob.startDate),
-              endDate: activeJob.endDate ? new Date(activeJob.endDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-              type: activeJob.billingCycle || 'monthly'
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching data:", err);
-        alert('Error loading timesheet data. Please check your connection.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchData();
-  }, [searchParams, selectedPeriod, currentDate, customDays]);
-
-  const initializeAttendanceData = (employeesData) => {
-    const daysArray = getDaysArray().map(d => toYMD(d));
-    setAttendanceData(prev => {
-      const next = { ...prev };
-      employeesData.forEach(emp => {
-        if (!next[emp.id]) next[emp.id] = {};
-        daysArray.forEach(dateStr => {
-          if (next[emp.id][dateStr] === undefined) next[emp.id][dateStr] = "";
+        const activeJob = jobsData.find(job => job.status === 'ACTIVE');
+        if (activeJob) setBillingCycle({
+          startDate: new Date(activeJob.startDate),
+          endDate: activeJob.endDate ? new Date(activeJob.endDate) : new Date(Date.now() + 30 * 86400000),
+          type: activeJob.billingCycle || 'monthly'
         });
-      });
-      return next;
+      }
+      return employeesData;
     });
-  };
+    // Attach a rejection handler immediately while rows load concurrently.
+    employeeLoadRef.current.catch(error => {
+      if (!cancelled) setSaveMessage({ type: 'error', text: error.message });
+    });
+    for (const [path, apply] of [
+      ['/api/settings/system', data => setSystemSettings(previous => ({
+        ...previous, ...data, weekendDays: data.weekendDays || [0, 6],
+        weekendRate: data.weekendRate ?? 1.5, holidayRate: data.holidayRate ?? 2,
+        standardWorkHours: data.standardWorkHours ?? 8
+      }))],
+      ['/api/settings/holidays', setHolidays],
+      ['/api/settings/special-weekends', setSpecialWeekends]
+    ]) {
+      get(path).then(data => { if (!cancelled) apply(data); }).catch(error => {
+        if (!cancelled) setSaveMessage({ type: 'error', text: error.message });
+      });
+    }
+    return () => { cancelled = true; };
+  }, []);
 
-  const initializeHoursData = (employeesData) => {
-    const initialNH = {};
-    const initialOH = {};
-    employeesData.forEach(employee => {
-      initialNH[employee.id] = {};
-      initialOH[employee.id] = {};
-      const daysArray = getDaysArray();
-      daysArray.forEach(day => {
-        const dateStr = toYMD(day);
-        initialNH[employee.id][dateStr] = '';
-        initialOH[employee.id][dateStr] = '';
-      });
+  useEffect(() => {
+    fetchTimesheets(employees, employeeLoadRef.current);
+    return () => {
+      timesheetRequestRef.current += 1;
+      timesheetAbortRef.current?.abort();
+    };
+  }, [selectedJob, selectedCategory, missingSourceFilter, filters.status, selectedPeriod, currentDate, customDays]);
+
+  // Only the optional sync tool needs attendance entities.
+  useEffect(() => {
+    if (!showSyncPanel) return;
+    const controller = new AbortController();
+    const { start, end } = getDateRange();
+    const params = new URLSearchParams({ startDate: toYMD(start), endDate: toYMD(end) });
+    setSyncAttendanceLoading(true);
+    setSyncAttendanceError('');
+    setAttendances([]);
+    fetch(API_BASE_URL + '/api/attendance?' + params, {
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('jwtToken') },
+      signal: controller.signal
+    }).then(async response => {
+      if (!response.ok) throw new Error('Attendance for sync could not be loaded. Close and reopen sync to retry.');
+      const data = await response.json();
+      if (!controller.signal.aborted) setAttendances(data);
+    }).catch(error => {
+      if (!controller.signal.aborted) setSyncAttendanceError(error.message);
+    }).finally(() => {
+      if (!controller.signal.aborted) setSyncAttendanceLoading(false);
     });
-    setEmployeeNormalHours(initialNH);
-    setEmployeeOvertime(initialOH);
-  };
+    return () => controller.abort();
+  }, [showSyncPanel, selectedPeriod, currentDate, customDays]);
 
   const filteredEmployeesBase = useMemo(() => {
     let filtered = employees;
@@ -2186,7 +2229,8 @@ function Timesheet() {
           const attendanceStatus = attendanceData[employee.id]?.[dateStr];
 
           const employeeJob = employees.find(e => e.id === employee.id)?.job;
-          const jobId = employeeJob?.id;
+          const savedRow = timesheets.find(row => String(row.employeeId || row.employee?.id) === String(employee.id) && row.date === dateStr);
+          const jobId = savedRow ? (savedRow.jobId ?? savedRow.job?.id ?? null) : employeeJob?.id;
           
           if (attendanceStatus && attendanceStatus !== '') {
             hasData = true;
@@ -2210,7 +2254,9 @@ function Timesheet() {
                 earnings: earnings.totalPay,
                 attendanceCode: attendanceStatus,
                 sourceDocumentMissing: sourceMissing,
-                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingReason: sourceMissing
+                  ? (missingSourceEntries[key]?.reason || null)
+                  : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                 sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                 jobId: jobId
               });
@@ -2225,7 +2271,9 @@ function Timesheet() {
                 earnings: 0,
                 attendanceCode: attendanceStatus,
                 sourceDocumentMissing: sourceMissing,
-                sourceDocumentMissingReason: sourceMissing ? (missingSourceEntries[key]?.reason || null) : null,
+                sourceDocumentMissingReason: sourceMissing
+                  ? (missingSourceEntries[key]?.reason || null)
+                  : (missingSourceEntries[key]?.resolutionNote ? `[NOT WORKED] ${missingSourceEntries[key].resolutionNote}` : null),
                 sourceDocumentMissingFlaggedBy: sourceMissing ? (missingSourceEntries[key]?.flaggedBy || null) : null,
                 jobId: jobId
               });
@@ -2389,7 +2437,7 @@ function Timesheet() {
     setExportLoading(true);
     try {
       const exportData = [];
-      const headers = ['ID', 'Employee Name', 'Employee ID', 'Position', 'Job', 'Rate/Hour'];
+      const headers = ['ID', 'Employee Name', 'Employee ID', 'Position', 'Project', 'Rate/Hour'];
       days.forEach(day => {
         headers.push(
           `${day.toLocaleDateString('en-US', { weekday: 'short' })} ${day.getDate()}`,
@@ -2563,13 +2611,13 @@ function Timesheet() {
 
   const generateQuickInvoice = () => {
     if (!selectedJob || selectedJob === 'no-job') {
-      alert("Please select a job first");
+      alert("Please select a project first");
       return;
     }
     
     const job = jobs.find(j => j.id === parseInt(selectedJob));
     if (!job) {
-      alert("Selected job not found");
+      alert("Selected project not found");
       return;
     }
     
@@ -3001,6 +3049,8 @@ function Timesheet() {
   const selectedJobData = jobs.find(j => j.id === parseInt(selectedJob));
 
   const getEmployeeStandardHours = (employee) => {
+    const jobHours = Number(employee?.job?.standardWorkHours);
+    if (!Number.isNaN(jobHours) && jobHours > 0) return jobHours;
     const catHours = Number(employee?.category?.standardRateHours);
     if (!Number.isNaN(catHours) && catHours > 0) return catHours;
     const posHours = Number(
@@ -3045,6 +3095,25 @@ function Timesheet() {
 
   return (
     <div className="relative min-h-screen bg-gray-50">
+      {showInvoiceExport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <form role="dialog" aria-modal="true" aria-labelledby="invoice-export-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onSubmit={(event) => { event.preventDefault(); handleExportInvoice(); }}>
+            <h2 id="invoice-export-title" className="text-lg font-semibold">Export invoice for a project</h2>
+            <p className="mt-2 text-sm text-gray-600">Choose the project to invoice for {toYMD(getDateRange().start)} to {toYMD(getDateRange().end)}.</p>
+            <label htmlFor="invoice-export-job" className="mt-4 block text-sm font-medium">Project</label>
+            <select id="invoice-export-job" autoFocus required disabled={isGenerating} value={invoiceJobId} onChange={(event) => setInvoiceJobId(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2">
+              <option value="">Select a project</option>
+              {jobs.map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
+            </select>
+            {jobs.length === 0 && <p className="mt-2 text-sm text-amber-700">No projects are available to invoice.</p>}
+            {saveMessage.type === 'error' && <p role="alert" className="mt-2 text-sm text-red-600">{saveMessage.text}</p>}
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" disabled={isGenerating} onClick={() => setShowInvoiceExport(false)} className="rounded-lg border px-4 py-2">Cancel</button>
+              <button type="submit" disabled={isGenerating || !invoiceJobId} className="rounded-lg bg-emerald-600 px-4 py-2 text-white disabled:opacity-50">{isGenerating ? 'Generating...' : 'Export invoice'}</button>
+            </div>
+          </form>
+        </div>
+      )}
       <div 
         className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 ${
           sidebarOpen ? 'w-64' : 'w-16'
@@ -3238,7 +3307,7 @@ function Timesheet() {
                           />
                           <div>
                             <div className="text-sm font-medium text-gray-800">Auto-sync billing period</div>
-                            <div className="text-xs text-gray-500">Follow the selected job billing cycle</div>
+                            <div className="text-xs text-gray-500">Follow the selected project billing cycle</div>
                           </div>
                         </label>
 
@@ -3280,20 +3349,22 @@ function Timesheet() {
                           </div>
                         </button>
 
-                        {selectedJob && selectedJob !== 'no-job' && (
                           <button
                             type="button"
-                            onClick={() => { setControlsOpen(false); handleExportInvoice(); }}
+                            onClick={() => {
+                              setControlsOpen(false);
+                              setInvoiceJobId(selectedJob && selectedJob !== 'no-job' ? String(selectedJob) : '');
+                              setShowInvoiceExport(true);
+                            }}
                             disabled={isGenerating}
                             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-emerald-50 disabled:opacity-50"
                           >
                             <Receipt size={17} className="text-emerald-600" />
                             <div>
                               <div className="text-sm font-medium text-gray-800">Export invoice</div>
-                              <div className="text-xs text-gray-500">Generate invoice with job attachments</div>
+                              <div className="text-xs text-gray-500">Generate invoice with project attachments</div>
                             </div>
                           </button>
-                        )}
 
                         <button
                           type="button"
@@ -3419,6 +3490,7 @@ function Timesheet() {
         </header>
 
         <main className="p-6">
+          <TimesheetPayrollApproval apiBase={API_BASE_URL} startDate={days.length ? toYMD(days[0]) : ''} endDate={days.length ? toYMD(days[days.length - 1]) : ''} jobId={selectedJob} />
           {saveMessage.text && (
             <div className={`mb-6 p-4 rounded-lg shadow-sm ${
               saveMessage.type === 'success' ? 'bg-gradient-to-r from-green-50 to-green-100 border border-green-200 text-green-800' :
@@ -3484,7 +3556,7 @@ function Timesheet() {
                     <h3 className="font-semibold text-blue-800 text-sm">{selectedJobData.name}</h3>
                   </div>
                   <p className="text-xs text-blue-600 mt-0.5">
-                    {filteredEmployees.length} employees • Standard: {selectedJobData.standardWorkHours || 8}h/day
+                    {filteredEmployees.length} employees • Standard: {selectedJobData.standardWorkHours || 8}h/day • Billing: {selectedJobData.billingHours ?? selectedJobData.standardWorkHours ?? 8}h/day • Expected OT: {selectedJobData.expectedOvertimeHours ?? 0}h
                   </p>
                   <button onClick={() => navigate(`/generateinvoice?jobId=${selectedJob}&startDate=${getDateRange().start.toISOString().split('T')[0]}&endDate=${getDateRange().end.toISOString().split('T')[0]}`)} className="mt-1 flex items-center gap-1.5 px-2 py-0.5 bg-green-500 text-white text-xs rounded hover:bg-green-600 transition-colors">
                     <Receipt size={12} />
@@ -3554,8 +3626,8 @@ function Timesheet() {
               </div>
               
               <select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-sm">
-                <option value="">All Jobs ({employees.length})</option>
-                <option value="no-job">No Job ({employees.filter(emp => !emp.job || !emp.job.id).length})</option>
+                <option value="">All Projects ({employees.length})</option>
+                <option value="no-job">No Project ({employees.filter(emp => !emp.job || !emp.job.id).length})</option>
                 {jobs.map(job => {
                   const assignedEmployeesCount = employees.filter(emp => emp.job && emp.job.id === job.id).length;
                   return (
@@ -3584,7 +3656,7 @@ function Timesheet() {
                     {billingCycle.startDate.toLocaleDateString()} - {billingCycle.endDate.toLocaleDateString()}
                   </p>
                   <p className="text-sm text-blue-500">
-                    {selectedJob ? `Job: ${selectedJobData?.name}` : 'All Jobs'} • {filteredEmployees.length} employees
+                    {selectedJob ? `Project: ${selectedJobData?.name}` : 'All Projects'} • {filteredEmployees.length} employees
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -3634,7 +3706,9 @@ function Timesheet() {
           )}
 
           <div className="mb-4">
-            {showSyncPanel && (
+            {showSyncPanel && syncAttendanceLoading && <p role="status">Loading attendance for sync…</p>}
+            {showSyncPanel && syncAttendanceError && <p role="alert" className="text-red-600">{syncAttendanceError}</p>}
+            {showSyncPanel && !syncAttendanceLoading && !syncAttendanceError && (
               <TimesheetAttendanceSync 
                 timesheets={timesheets}
                 attendances={attendances}
@@ -3763,13 +3837,13 @@ function Timesheet() {
                             <div className="text-xl font-semibold text-gray-500 mb-2">No employees found</div>
                             <div className="text-gray-400 mb-6">
                               {selectedJob 
-                                ? `No employees are assigned to the selected job.`
+                                ? `No employees are assigned to the selected project.`
                                 : 'No employees match the current filters.'
                               }
                             </div>
                             {selectedJob && selectedJob !== 'no-job' && (
                               <button onClick={() => window.location.href = `/jobs?selectJob=${selectedJob}`} className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow">
-                                Assign Employees to Job
+                                Assign Employees to Project
                               </button>
                             )}
                           </div>
@@ -3778,6 +3852,12 @@ function Timesheet() {
                     ) : (
                       pagedEmployees.map((employee) => {
                         const jobStandardHours = employee.job?.standardWorkHours || systemSettings.standardWorkHours;
+                        const jobBillingHours = employee.job?.billingHours ?? jobStandardHours;
+                        const jobExpectedOvertimeHours = Number(employee.job?.expectedOvertimeHours ?? 0);
+                        const jobOvertimeMultiplier = Number(
+                          employee.job?.overtimeMultiplier ?? systemSettings.defaultOvertimeMultiplier ?? 1.5
+                        );
+                        const adjustedExpectedOvertimeHours = jobExpectedOvertimeHours * jobOvertimeMultiplier;
                         const employeeJob = employee.job;
                         
                         return (
@@ -3807,7 +3887,7 @@ function Timesheet() {
                                   {!employeeJob && selectedJob && selectedJob !== '' && selectedJob !== 'no-job' && (
                                     <div className="flex items-center text-amber-600">
                                       <Building size={12} className="mr-2 text-amber-400" />
-                                      <span className="text-xs font-medium">Not assigned to this job</span>
+                                      <span className="text-xs font-medium">Not assigned to this project</span>
                                     </div>
                                   )}
 
@@ -3815,6 +3895,14 @@ function Timesheet() {
                                     <Clock size={12} className="mr-2 text-gray-400" />
                                     <span>Standard: {jobStandardHours}h/day</span>
                                   </div>
+                                  <div className="flex items-center">
+                                    <Clock size={12} className="mr-2 text-emerald-500" />
+                                    <span className="text-emerald-700">Billing: {jobBillingHours}h/day</span>
+                                  </div>
+                                  {jobExpectedOvertimeHours > 0 && <div className="flex items-center text-orange-700">
+                                    <Clock size={12} className="mr-2 text-orange-500" />
+                                    <span>Expected OT: {jobExpectedOvertimeHours}h × {jobOvertimeMultiplier} = {adjustedExpectedOvertimeHours.toFixed(1)}h</span>
+                                  </div>}
 
                                   <div className="flex items-center">
                                     <DollarSign size={12} className="mr-2 text-gray-400" />
@@ -3838,9 +3926,10 @@ function Timesheet() {
                                 const attendanceStatus = attendanceData[employee.id]?.[dateStr] || '';
                                 const dateType = getDateTypeBadge(day);
                                 const missingSource = isMissingSource(employee.id, dateStr);
+                                const sourceResolution = getSourceResolution(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="px-1 py-2 text-center border-r border-gray-100 align-top relative" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
+                                  <td key={dayIndex} className="px-1 py-2 text-center border-r border-gray-100 align-top relative" style={{ backgroundColor: missingSource ? '#fef3c7' : sourceResolution ? '#ecfdf5' : 'white' }}>
                                     <div className="flex items-center justify-center gap-1">
                                       <select 
                                         value={attendanceStatus} 
@@ -3863,11 +3952,19 @@ function Timesheet() {
                                       
                                       <div className="relative group">
                                         <button
-                                          onClick={() => toggleMissingSourceFlag(employee.id, dateStr, missingSource)}
-                                          className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${missingSource ? 'bg-amber-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-amber-100'}`}
-                                          title={missingSource ? "Mark as has source document" : "Mark as missing source document"}
+                                          onClick={() => sourceResolution
+                                            ? setViewSourceResolutionModal({
+                                                open: true,
+                                                employeeName: `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || employee.employeeNumber || 'Worker',
+                                                dateStr,
+                                                note: sourceResolution
+                                              })
+                                            : toggleMissingSourceFlag(employee.id, dateStr, missingSource)
+                                          }
+                                          className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${missingSource ? 'bg-amber-500 text-white' : sourceResolution ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-amber-100'}`}
+                                          title={missingSource ? "Resolve missing hard copy" : sourceResolution || "Mark as missing source document"}
                                         >
-                                          {missingSource ? <AlertTriangle size={12} /> : <Flag size={12} />}
+                                          {missingSource ? <AlertTriangle size={12} /> : sourceResolution ? <Check size={12} /> : <Flag size={12} />}
                                         </button>
                                         {missingSource && (
                                           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20">
@@ -3922,9 +4019,10 @@ function Timesheet() {
                                 const overtimeHours = parseFloat(employeeOvertime[employee.id]?.[dateStr] || 0);
                                 const normalHours = parseFloat(employeeNormalHours?.[employee.id]?.[dateStr] || 0);
                                 const missingSource = isMissingSource(employee.id, dateStr);
+                                const sourceResolution = getSourceResolution(employee.id, dateStr);
                                 
                                 return (
-                                  <td key={dayIndex} className="border-r border-gray-100 px-1 py-2" style={{ backgroundColor: missingSource ? '#fef3c7' : 'white' }}>
+                                  <td key={dayIndex} className="border-r border-gray-100 px-1 py-2" style={{ backgroundColor: missingSource ? '#fef3c7' : sourceResolution ? '#ecfdf5' : 'white' }}>
                                     {isPresent ? (
                                       <div className="space-y-1">
                                         <div className="flex items-center justify-between">
@@ -3972,6 +4070,9 @@ function Timesheet() {
                                         
                                         <div className="text-center text-xs font-medium text-gray-700 bg-gray-100 py-0.5 rounded">
                                           Total: {totalHours.toFixed(1)}h
+                                        </div>
+                                        <div className="text-center text-xs font-medium text-emerald-700 bg-emerald-50 py-0.5 rounded" title="Project billing hours are not divided into NH and OT">
+                                          Billing: {Number(jobBillingHours).toFixed(1)}h
                                         </div>
                                       </div>
                                     ) : ( 
@@ -4060,9 +4161,9 @@ function Timesheet() {
                     <div className="text-xs text-gray-500 mt-1">No source document</div>
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                    <div className="text-sm text-gray-500 mb-2">Selected Job</div>
+                    <div className="text-sm text-gray-500 mb-2">Selected Project</div>
                     <div className="text-lg font-bold text-gray-800">
-                      {selectedJob ? (selectedJobData?.name || 'Unknown Job') : 'All Jobs'}
+                      {selectedJob ? (selectedJobData?.name || 'Unknown Project') : 'All Projects'}
                     </div>
                     {selectedJob && selectedJob !== 'no-job' && (
                       <button onClick={generateQuickInvoice} className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 transition-colors">
@@ -4079,6 +4180,82 @@ function Timesheet() {
       </div>
 
       {/* ===== MODALS (unchanged) ===== */}
+      {viewSourceResolutionModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="flex justify-between items-start p-6 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <FileText size={20} className="text-emerald-600" />
+                  Hard-copy Resolution Note
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  {viewSourceResolutionModal.employeeName} · {viewSourceResolutionModal.dateStr}
+                </p>
+              </div>
+              <button onClick={() => setViewSourceResolutionModal(prev => ({ ...prev, open: false }))} className="p-2 hover:bg-white rounded-full">
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="text-sm text-gray-800 whitespace-pre-wrap break-words bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-80 overflow-y-auto">
+                {viewSourceResolutionModal.note}
+              </div>
+            </div>
+            <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+              <button onClick={() => setViewSourceResolutionModal(prev => ({ ...prev, open: false }))} className="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resolveMissingSourceModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="flex justify-between items-start p-6 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-teal-50">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <CheckCircle size={20} className="text-emerald-600" />
+                  Resolve Missing Hard Copy
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">Confirm what the received timesheet showed.</p>
+              </div>
+              <button onClick={() => setResolveMissingSourceModal(prev => ({ ...prev, open: false }))} className="p-2 hover:bg-white rounded-full">
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+                The hard copy was received and confirms that the worker did not work on this date. The attendance code will be set to <strong>Absent (A)</strong>.
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Resolution note</label>
+                <textarea
+                  rows={3}
+                  value={resolveMissingSourceModal.note}
+                  onChange={(e) => setResolveMissingSourceModal(prev => ({ ...prev, note: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="Explain what the hard copy showed..."
+                />
+                <p className="text-xs text-gray-500 mt-1">This note will remain visible on the cleared date.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button onClick={() => setResolveMissingSourceModal(prev => ({ ...prev, open: false }))} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
+                Cancel
+              </button>
+              <button onClick={resolveMissingSourceAsNotWorked} disabled={!resolveMissingSourceModal.note.trim()} className="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2">
+                <Check size={16} /> Confirm Did Not Work
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showMissingSourceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">

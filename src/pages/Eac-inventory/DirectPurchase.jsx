@@ -694,6 +694,7 @@ const DirectPurchase = () => {
             onLogout={handleLogout} 
           />
 
+          {(canActForRole(user, "ACCOUNTANT") || canActForRole(user, "FINANCE") || canActForRole(user, "ACCOUNTS")) && <a href="#/accountsFundingReview" className="mx-6 mt-4 inline-block rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">Review inventory funding in Accounts Funding Review →</a>}
           <div className="p-6">
             <div className="mb-8">
               <div className="flex items-center justify-between">

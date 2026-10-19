@@ -1,3 +1,4 @@
+import LeavePageHeader from './LeavePageHeader';
 import { useState, useEffect } from "react";
 
 const EmployeeLeaveStatus = () => {
@@ -71,8 +72,8 @@ const EmployeeLeaveStatus = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">My Leave Requests</h2>
+    <div className="leave-page"><div className="max-w-6xl mx-auto">
+      <LeavePageHeader role="Individual" title="My leave requests" description="Keep track of your time off and follow each request through the approval process." count={leaves.length} loading={loading} />
       
       {loading ? (
         <div className="text-center py-8">
@@ -90,7 +91,7 @@ const EmployeeLeaveStatus = () => {
       ) : (
         <div className="space-y-4">
           {leaves.map((leave) => (
-            <div key={leave.id} className="border border-gray-200 rounded-lg p-4">
+            <div key={leave.id} className="leave-request-card">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold text-gray-800">{leave.leaveType}</h3>
@@ -161,7 +162,7 @@ const EmployeeLeaveStatus = () => {
           ))}
         </div>
       )}
-    </div>
+    </div></div>
   );
 };
 

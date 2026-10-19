@@ -90,7 +90,7 @@ const PlannerProductsReview = () => {
       const processedData = data.map(req => ({
         ...req,
         // If job is an object with an id but no name, or if job is null, set fallback
-        jobName: req.job?.name || req.jobName || 'No Job Assigned',
+        jobName: req.job?.name || req.jobName || 'No Project Assigned',
         // Also ensure items array exists
         items: req.items || []
       }));
@@ -520,7 +520,7 @@ const PlannerProductsReview = () => {
                       Request Details
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Job/Project
+                      Project/Project
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Items
@@ -581,7 +581,7 @@ const PlannerProductsReview = () => {
                               {request.projectName || 'N/A'}
                             </div>
                             <div className="text-sm text-gray-500">
-                              {request.jobDescription || request.jobName || 'No Job Assigned'}
+                              {request.jobDescription || request.jobName || 'No Project Assigned'}
                             </div>
                             <div className="mt-1">
                               <span className={`px-2 py-1 text-xs rounded-full ${urgencyBadge.bg} ${urgencyBadge.text}`}>
@@ -743,15 +743,15 @@ const PlannerProductsReview = () => {
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-2">Job Information</h3>
+                  <h3 className="font-medium text-gray-900 mb-2">Project Information</h3>
                   <div className="space-y-2">
                     <div>
                       <span className="text-sm text-gray-600">Project:</span>
                       <span className="ml-2 text-sm font-medium">{selectedRequest.projectName || 'N/A'}</span>
                     </div>
                     <div>
-                      <span className="text-sm text-gray-600">Job Description:</span>
-                      <span className="ml-2 text-sm font-medium">{selectedRequest.jobDescription || selectedRequest.jobName || 'No Job Assigned'}</span>
+                      <span className="text-sm text-gray-600">Project Description:</span>
+                      <span className="ml-2 text-sm font-medium">{selectedRequest.jobDescription || selectedRequest.jobName || 'No Project Assigned'}</span>
                     </div>
                     <div>
                       <span className="text-sm text-gray-600">Location:</span>

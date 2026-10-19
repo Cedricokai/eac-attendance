@@ -101,7 +101,7 @@ const TimesheetAttendanceSync = ({
     const token = getToken();
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/attendance/batch`, {
+      const response = await fetch(`${API_BASE_URL}/api/attendance/batch?overwriteExisting=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -436,6 +436,7 @@ const saveTimesheetRecords = async (timesheetRecords) => {
           totalHoursWorked: totalHours,
           notes: notes || `Synced from timesheet. Code: ${attendanceCode}`,
           source: "timesheet_sync",
+          timesheetId: record.id ?? null,
         };
 
         attendanceRecords.push(attendanceRecord);
@@ -644,8 +645,23 @@ const convertAttendanceToTimesheet = (attendanceRecords, settings, employees) =>
       const dateFilteredAttendances = filterRecordsByDateRange(attendances);
       
       // Apply employee filtering
-      const filteredTimesheets = filterTimesheetsByEmployees(dateFilteredTimesheets, allowedEmployeeIds);
+      let filteredTimesheets = filterTimesheetsByEmployees(dateFilteredTimesheets, allowedEmployeeIds);
       const filteredAttendances = filterAttendancesByEmployees(dateFilteredAttendances, allowedEmployeeIds);
+
+      if (syncDirection === 'both' || syncDirection === 'timesheetToAttendance') {
+        const query = new URLSearchParams({ startDate: dateRange.start, endDate: dateRange.end });
+        const response = await fetch(`${API_BASE_URL}/api/timesheets/payroll-approvals?${query}`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!response.ok) throw new Error('Could not check project timesheet approvals. Sync was stopped.');
+        const approval = await response.json();
+        const projectRows = new Map(approval.rows.map(row => [String(row.id), row]));
+        filteredTimesheets = filteredTimesheets.filter(record => {
+          const projectRow = projectRows.get(String(record.id));
+          if (projectRow) return projectRow.status === 'APPROVED';
+          return !record.job?.id && !record.jobId;
+        });
+      }
 
       console.log('Sync starting:', {
         direction: syncDirection,
@@ -665,7 +681,7 @@ const convertAttendanceToTimesheet = (attendanceRecords, settings, employees) =>
 
       // Check if any records remain after filtering
       if (syncDirection === 'timesheetToAttendance' && filteredTimesheets.length === 0) {
-        throw new Error('No timesheet records found for the selected employees/category in the date range');
+        throw new Error('No eligible timesheets found. Save and approve project work before syncing it to payroll attendance.');
       }
       if (syncDirection === 'attendanceToTimesheet' && filteredAttendances.length === 0) {
         throw new Error('No attendance records found for the selected employees/category in the date range');
@@ -680,7 +696,7 @@ const convertAttendanceToTimesheet = (attendanceRecords, settings, employees) =>
           if (syncDirection === 'both') {
             console.log('No timesheet records to sync for selected employees');
           } else {
-            throw new Error('No timesheet records found for the selected employees/category in the date range');
+            throw new Error('No eligible timesheets found. Save and approve project work before syncing it to payroll attendance.');
           }
         } else {
           console.log('Converting timesheets to attendance - leave codes will create pending leave requests only...');

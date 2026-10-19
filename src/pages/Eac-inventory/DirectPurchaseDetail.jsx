@@ -171,6 +171,10 @@ const DirectPurchaseDetail = () => {
         </div>
       </div>
 
+      {request.inventoryRequestId && <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm">
+        Inventory request: <b>{request.inventoryRequestNumber}</b> · Created by {request.createdByName}
+        <a href={`#/accountsFundingReview?requestId=${request.inventoryRequestId}`} className="ml-3 text-blue-700 underline">View funding review</a>
+      </div>}
       <Card className="mb-6">
         <CardBody>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -181,7 +185,7 @@ const DirectPurchaseDetail = () => {
               </Typography>
             </div>
             <div>
-              <Typography variant="small" color="gray">Requester (Procurement)</Typography>
+              <Typography variant="small" color="gray">Employee requester</Typography>
               <Typography variant="h6">{request.requester}</Typography>
             </div>
             <div>

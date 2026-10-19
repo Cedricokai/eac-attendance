@@ -117,7 +117,7 @@ const InventoryRequest = () => {
       
       setEmployeeDetails(prev => ({
         ...prev,
-        name: userData.fullName || userData.username || "Employee",
+        name: userData.fullName || userData.name || userData.username || "Employee",
         employeeId: userData.employeeId || userData.username || "N/A",
         department: userData.department || "Not specified",
         position: userData.position || userData.role?.replace('ROLE_', '') || "Employee",
@@ -129,7 +129,7 @@ const InventoryRequest = () => {
         setRequestLocation(userData.location);
       }
 
-      setContactPerson(userData.fullName || userData.username || "");
+      setContactPerson(userData.fullName || userData.name || userData.username || "");
 
     } catch (err) {
       console.error("Error fetching user details:", err);
@@ -219,7 +219,7 @@ const InventoryRequest = () => {
 
       if (!response.ok) {
         if (response.status === 403) {
-          throw new Error("Access denied: You don't have permission to view jobs");
+          throw new Error("Access denied: You don't have permission to view projects");
         }
         throw new Error(`Network response was not ok: ${response.status}`);
       }
@@ -236,7 +236,7 @@ const InventoryRequest = () => {
       setJobsList(formattedJobs);
 
     } catch (err) {
-      console.error("Error fetching jobs:", err);
+      console.error("Error fetching projects:", err);
       setJobsList([]);
     }
   };
@@ -419,7 +419,7 @@ const InventoryRequest = () => {
     }
     
     if (job && job !== "other") {
-      const selectedJob = jobsList.find(j => j.id === job);
+      const selectedJob = jobsList.find(j => String(j.id) === String(job));
       return selectedJob ? selectedJob.name : job;
     }
     
@@ -446,7 +446,7 @@ const InventoryRequest = () => {
 
     const finalJob = getFinalJob();
     if (!finalJob) {
-        setMessage("❌ Please select or enter a job description");
+        setMessage("❌ Please select or enter a project description");
         return;
     }
 
@@ -511,6 +511,9 @@ const InventoryRequest = () => {
         ];
 
         const hasManualProducts = manualProducts.length > 0;
+        const selectedJob = job && job !== "other"
+          ? jobsList.find(item => String(item.id) === String(job))
+          : null;
         
         requestDTO = {
             items: allProducts.map(item => ({
@@ -523,8 +526,10 @@ const InventoryRequest = () => {
             requestedBy: username,
             department: employeeDetails.department,
             projectName: finalJob,
+            jobId: selectedJob?.id || null,
+            jobName: selectedJob?.name || finalJob,
             jobDescription: finalJob,
-            location: requestLocation || employeeDetails.location,
+            location: getFinalLocation(),
             notes: `${additionalNotes ? additionalNotes + ' | ' : ''}Request contains ${manualProducts.length} manual products not in inventory.`.substring(0, 1000),
             urgency: urgency,
             ppeRequest: requestType === "ppe",
@@ -740,7 +745,7 @@ const InventoryRequest = () => {
 
               <div>
                 <label className="block text-gray-700 dark:text-gray-300 mb-2 font-medium">
-                  Job / Project / Task *
+                  Project / Task *
                 </label>
                 <div className="space-y-3">
                   <select
@@ -749,7 +754,7 @@ const InventoryRequest = () => {
                     required
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="">-- Select Job / Project --</option>
+                    <option value="">-- Select Project --</option>
                     {jobsList.map((jobItem) => (
                       <option key={jobItem.id} value={jobItem.id}>
                         {jobItem.name} {jobItem.client ? `- ${jobItem.client}` : ''}
@@ -761,13 +766,13 @@ const InventoryRequest = () => {
                   {showManualJobInput && (
                     <div className="transition-all duration-300 ease-in-out">
                       <label className="block text-gray-700 dark:text-gray-300 mb-2 text-sm">
-                        Please specify the job / project:
+                        Please specify the project:
                       </label>
                       <input
                         type="text"
                         value={manualJob}
                         onChange={handleManualJobChange}
-                        placeholder="Enter job description"
+                        placeholder="Enter project description"
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-3 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         required={showManualJobInput}
                       />

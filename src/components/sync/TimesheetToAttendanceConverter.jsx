@@ -1,3 +1,4 @@
+import { getAttendanceCategory, attendanceShift, timesheetPunches } from '../../utils/nightShiftAttendance';
 import React, { useState } from 'react';
 import { Check, RefreshCw, Calendar } from 'lucide-react';
 
@@ -83,14 +84,9 @@ const TimesheetToAttendanceConverter = ({
         }
       }
       
-      const totalHours = regularHours + overtimeHours;
-      const checkIn = '09:00';
-      let checkOut = '';
-      
-      if (totalHours > 0) {
-        const endHour = 9 + totalHours;
-        checkOut = `${Math.floor(endHour).toString().padStart(2, '0')}:${((endHour % 1) * 60).toString().padStart(2, '0')}`;
-      }
+      const totalHours = Number(regularHours || 0) + Number(overtimeHours || 0);
+      const category = getAttendanceCategory(employee, settings.categories);
+      const { checkIn, checkOut } = timesheetPunches(totalHours, employee.job?.workStartTime || category?.workStartTime || settings.lateArrivalTime || '09:00');
       
       const attendanceRecord = {
         employee: { id: employeeId },
@@ -101,7 +97,7 @@ const TimesheetToAttendanceConverter = ({
         checkIn: totalHours > 0 ? checkIn : null,
         checkOut: totalHours > 0 ? checkOut : null,
         totalHoursWorked: totalHours,
-        shift: determineShift(checkIn),
+        shift: attendanceShift(checkIn, category),
         workType: 'Regular',
         category: employee.category || 'Default',
         notes: `Converted from timesheet. Code: ${attendanceCode}`

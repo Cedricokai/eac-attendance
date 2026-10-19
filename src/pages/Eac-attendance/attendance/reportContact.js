@@ -1,0 +1,1 @@
+export const attendanceReportContactNote = "If you have any questions or concerns about your attendance report, please contact the Human Resource Manager at dianna.mensah@eaconcept.org or call 0595092422.";

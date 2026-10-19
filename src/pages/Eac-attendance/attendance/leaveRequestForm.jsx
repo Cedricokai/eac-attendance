@@ -619,21 +619,22 @@ const LeaveRequestForm = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4 lg:pl-72">
+    <div className="min-h-screen bg-slate-50 py-8 px-4 lg:pl-72">
       <EmployeePortalNavigation
         employeeName={currentEmployee ? `${currentEmployee.firstName || ""} ${currentEmployee.lastName || ""}`.trim() : currentUser?.username}
         jobPosition={currentEmployee?.jobPosition}
       />
       <div className="max-w-2xl mx-auto">
         {/* Header Card */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-gray-100">
+        <div className="bg-white rounded-2xl shadow-sm p-6 mb-8 border border-slate-200">
           <div className="flex items-center space-x-4 mb-4">
             <div className="p-3 bg-blue-100 rounded-xl">
               <CalendarIcon className="h-8 w-8 text-blue-600" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">New Leave Request</h1>
-              <p className="text-gray-600">Submit a new leave request for approval</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-2">My time off</p>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">Request leave</h1>
+              <p className="text-sm text-slate-500 mt-2">Choose your dates and share the details for review.</p>
             </div>
           </div>
           

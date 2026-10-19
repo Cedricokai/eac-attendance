@@ -1,17 +1,13 @@
+import LeavePageHeader from './LeavePageHeader';
 import { useState, useEffect } from "react";
 import { 
   Check, 
   X, 
-  Filter, 
-  Download, 
   Search, 
   Calendar, 
   User, 
   MessageSquare,
   AlertCircle,
-  CheckCircle2,
-  Clock,
-  MoreVertical
 } from "lucide-react";
 
 const PlannerDashboard = () => {
@@ -22,7 +18,6 @@ const PlannerDashboard = () => {
   const [plannerNotes, setPlannerNotes] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
 
   const getToken = () => localStorage.getItem("jwtToken");
 
@@ -182,48 +177,13 @@ const PlannerDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30 p-6">
+    <div className="leave-page">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-8">
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Planner Dashboard</h1>
-              <p className="text-gray-600 text-lg">Review and manage supervisor-approved leave requests</p>
-              
-              <div className="flex flex-wrap items-center gap-4 mt-6">
-                <div className="bg-blue-50 text-blue-700 px-4 py-3 rounded-xl border border-blue-200">
-                  <div className="flex items-center gap-2">
-                    <Clock size={20} />
-                    <span className="font-semibold text-2xl">{leaveRequests.length}</span>
-                  </div>
-                  <p className="text-sm mt-1">Pending Requests</p>
-                </div>
-                
-                <div className="bg-green-50 text-green-700 px-4 py-3 rounded-xl border border-green-200">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 size={20} />
-                    <span className="font-semibold text-2xl">
-                      {leaveRequests.filter(req => req.plannerStatus === "Approved").length}
-                    </span>
-                  </div>
-                  <p className="text-sm mt-1">Approved This Month</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <button className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
-                <Download size={18} />
-                Export
-              </button>
-            </div>
-          </div>
-        </div>
+        <LeavePageHeader role="Planner" title="Planner leave approvals" description="Review supervisor-approved requests and plan for team availability." count={leaveRequests.length} loading={loading} />
 
         {/* Bulk Actions */}
         {selectedIds.length > 0 && (
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex flex-wrap gap-4 items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-blue-100 p-2 rounded-lg">
                 <Check size={20} className="text-blue-600" />
@@ -266,26 +226,13 @@ const PlannerDashboard = () => {
               />
             </div>
             
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-            
-            <button className="flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors">
-              <Filter size={18} />
-              More Filters
-            </button>
+            <div className="flex items-center text-sm text-slate-500 lg:col-span-2">Showing requests awaiting planner review</div>
           </div>
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="leave-table-panel">
+          <div className="leave-table-heading"><h2>Leave requests</h2><p>Review request details and feedback before making a decision.</p></div>
           {loading ? (
             <div className="p-12 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -298,7 +245,7 @@ const PlannerDashboard = () => {
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No requests found</h3>
               <p className="text-gray-600">
-                {searchTerm || statusFilter !== "all" 
+                {searchTerm
                   ? "Try adjusting your search or filters" 
                   : "No supervisor-approved leave requests pending planner review"
                 }
@@ -396,9 +343,6 @@ const PlannerDashboard = () => {
                             <Check size={16} />
                             Review
                           </button>
-                          <button className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors">
-                            <MoreVertical size={16} />
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -411,8 +355,8 @@ const PlannerDashboard = () => {
 
         {/* Modal */}
         {isModalOpen && selectedRequest && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+          <div className="leave-dialog-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="leave-dialog bg-white shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
               <div className="p-6 border-b border-gray-200">
                 <h2 className="text-xl font-bold text-gray-900">Review Leave Request</h2>
                 <p className="text-gray-600 mt-1">Planner decision for {selectedRequest.employee?.firstName} {selectedRequest.employee?.lastName}</p>

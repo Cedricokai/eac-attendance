@@ -1,3 +1,4 @@
+import LeavePageHeader from './LeavePageHeader';
 import { useState, useEffect } from "react";
 
 const LeaveStatus = () => {
@@ -79,7 +80,9 @@ const LeaveStatus = () => {
   const getApprovalStage = (status) => {
     switch (status) {
       case 'Pending': return 1;
+      case 'Supervisor_Approved':
       case 'Supervisor Approved': return 2;
+      case 'Planner_Approved':
       case 'Planner Approved': return 3;
       case 'Approved': return 4;
       case 'Rejected': return 0;
@@ -92,12 +95,12 @@ const LeaveStatus = () => {
   }, []);
 
   if (loading) {
-    return <div className="text-center py-8">Loading...</div>;
+    return <div className="leave-page"><div className="max-w-6xl mx-auto"><LeavePageHeader role="Individual" title="My leave requests" description="Loading your requests and approval progress." loading /><div className="leave-panel p-12 text-center text-slate-500" role="status">Loading leave requests…</div></div></div>;
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Leave Request Status</h1>
+    <div className="leave-page"><div className="max-w-6xl mx-auto">
+      <LeavePageHeader role="Individual" title="My leave requests" description="Keep track of your time off and follow each request through the approval process." count={leaveRequests.length} loading={loading} />
       
       {leaveRequests.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow-md">
@@ -106,7 +109,7 @@ const LeaveStatus = () => {
       ) : (
         <div className="space-y-6">
           {leaveRequests.map((request) => (
-            <div key={request.id} className="bg-white rounded-lg shadow-md p-6">
+            <div key={request.id} className="leave-request-card">
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">{request.leaveType}</h3>
@@ -115,7 +118,7 @@ const LeaveStatus = () => {
                   </p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusBadgeClass(request.status)}`}>
-                  {request.status}
+                  {request.status?.replaceAll('_', ' ')}
                 </span>
               </div>
 
@@ -124,7 +127,7 @@ const LeaveStatus = () => {
               </div>
 
               {/* Approval Progress */}
-              <div className="mt-6">
+              <div className="leave-progress mt-6">
                 <h4 className="text-sm font-medium text-gray-700 mb-3">Approval Progress</h4>
                 <div className="flex items-center justify-between mb-2">
                   {['Submitted', 'Supervisor', 'Planner', 'HR'].map((stage, index) => (
@@ -151,7 +154,7 @@ const LeaveStatus = () => {
           ))}
         </div>
       )}
-    </div>
+    </div></div>
   );
 };
 

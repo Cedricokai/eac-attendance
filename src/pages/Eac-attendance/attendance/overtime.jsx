@@ -24,6 +24,8 @@ function Overtime() {
   });
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [jobsError, setJobsError] = useState('');
   const [overtimes, setOvertimes] = useState([]);
   const [filteredOvertimes, setFilteredOvertimes] = useState([]);
   const [overtimePage, setOvertimePage] = useState(0);
@@ -44,6 +46,7 @@ const [isDeleting, setIsDeleting] = useState(false);
   const [searchFilters, setSearchFilters] = useState({
     employeeName: '',
     category: '',
+    job: '',
     dateFilterType: 'single',
     singleDate: new Date().toISOString().split('T')[0],
     startDate: new Date().toISOString().split('T')[0],
@@ -65,9 +68,15 @@ const [isDeleting, setIsDeleting] = useState(false);
   const [skipDuplicates, setSkipDuplicates] = useState(false);
   const [eligibleEmployees, setEligibleEmployees] = useState([]);
   const [bulkDate, setBulkDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bulkRangeEndDate, setBulkRangeEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [bulkStartTime, setBulkStartTime] = useState('');
   const [bulkEndTime, setBulkEndTime] = useState('');
+  const [showBulkEditTimes, setShowBulkEditTimes] = useState(false);
+  const [bulkEditStartTime, setBulkEditStartTime] = useState('');
+  const [bulkEditEndTime, setBulkEditEndTime] = useState('');
+  const [isBulkEditingTimes, setIsBulkEditingTimes] = useState(false);
   const [multiplierAppliedToHours, setMultiplierAppliedToHours] = useState(false);
+  const [editingOvertimeId, setEditingOvertimeId] = useState(null);
   const [selectAllEmployees, setSelectAllEmployees] = useState(false);
 
   const [newOvertime, setNewOvertime] = useState({
@@ -201,29 +210,37 @@ const [isDeleting, setIsDeleting] = useState(false);
     if (rawHours > 0) {
       const selectedEmployee = employees.find(emp => emp.id === newOvertime.employee.id);
       const employeeRate = selectedEmployee?.minimumRate || settings.hourlyRate;
+      const jobMultiplier = Number(selectedEmployee?.jobOvertimeMultiplier);
+      const effectiveApplyToHours = multiplierAppliedToHours || Boolean(selectedEmployee?.applyOvertimeMultiplierToHours);
+      const minimumHours = selectedEmployee?.enforceMinimumOvertime
+        ? Number(selectedEmployee.minimumOvertimeHours || 0)
+        : 0;
+      const payableBaseHours = minimumHours > 0 ? Math.max(rawHours, minimumHours) : rawHours;
       
       const date = new Date(newOvertime.date);
       const dayOfWeek = date.getDay();
       
-      let multiplier = getDefaultOvertimeMultiplier();
+      let multiplier = jobMultiplier > 0 ? jobMultiplier : getDefaultOvertimeMultiplier();
       
-      if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
-        multiplier = settings.sundayOvertimeMultiplier;
-      }
-      
-      if (settings.enableTimeAndHalfAfter8Hours && rawHours > 8) {
-        multiplier = settings.timeAndHalfMultiplier;
+      if (!effectiveApplyToHours && !(jobMultiplier > 0)) {
+        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
+          multiplier = settings.sundayOvertimeMultiplier;
+        }
+
+        if (settings.enableTimeAndHalfAfter8Hours && rawHours > 8) {
+          multiplier = settings.timeAndHalfMultiplier;
+        }
       }
       
       let finalHours;
       let overtimePay;
       
-      if (multiplierAppliedToHours) {
-        finalHours = rawHours * multiplier;
-        overtimePay = finalHours * employeeRate;
+      if (effectiveApplyToHours) {
+        finalHours = payableBaseHours * multiplier;
+        overtimePay = 0;
       } else {
-        finalHours = rawHours;
-        overtimePay = rawHours * (employeeRate * multiplier);
+        finalHours = payableBaseHours;
+        overtimePay = payableBaseHours * (employeeRate * multiplier);
       }
       
       setNewOvertime(prev => ({
@@ -281,6 +298,141 @@ const [isDeleting, setIsDeleting] = useState(false);
         ...prev,
         [name]: value,
       }));
+    }
+  };
+
+  useEffect(() => {
+    const selectedEmployee = employees.find(emp => emp.id === newOvertime.employee.id);
+    if (selectedEmployee) {
+      setMultiplierAppliedToHours(Boolean(selectedEmployee.applyOvertimeMultiplierToHours));
+    }
+  }, [newOvertime.employee.id, employees]);
+
+  const openEditOvertime = (overtime) => {
+    const employeeId = Number(overtime.employee?.id ?? overtime.employeeId) || '';
+    setEditingOvertimeId(overtime.id);
+    setSelectAllEmployees(false);
+    setMultiplierAppliedToHours(Boolean(overtime.multiplierAppliedToHours));
+    setNewOvertime({
+      employee: { id: employeeId },
+      date: overtime.date || new Date().toISOString().split('T')[0],
+      startTime: overtime.startTime?.substring(0, 5) || '',
+      endTime: overtime.endTime?.substring(0, 5) || '',
+      status: overtime.status || 'Pending',
+      overtimeHours: Number(overtime.overtimeHours ?? 0),
+      rawOvertimeHours: Number(overtime.rawOvertimeHours ?? overtime.overtimeHours ?? 0),
+      totalOvertimePay: Number(overtime.calculatedOvertimePay ?? 0),
+      overtimeMultiplier: Number(overtime.overtimeMultiplier ?? settings.defaultOvertimeMultiplier ?? 1.5),
+      notes: overtime.notes || ''
+    });
+    setError('');
+    setIsCreateMenuOpen(true);
+  };
+
+  const updateOvertimeTimes = async () => {
+    if (!editingOvertimeId || !newOvertime.startTime || !newOvertime.endTime) {
+      setError('Start time and end time are required.');
+      return;
+    }
+
+    if (!newOvertime.rawOvertimeHours || Number(newOvertime.rawOvertimeHours) <= 0) {
+      setError('End time must be after start time.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const formatTime = (time) => time.length === 5 ? `${time}:00` : time;
+      const response = await fetch(`${API_BASE_URL}/api/overtime/${editingOvertimeId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`
+        },
+        body: JSON.stringify({
+          employeeId: newOvertime.employee.id,
+          date: newOvertime.date,
+          startTime: formatTime(newOvertime.startTime),
+          endTime: formatTime(newOvertime.endTime),
+          status: newOvertime.status,
+          overtimeMultiplier: Number(newOvertime.overtimeMultiplier),
+          multiplierAppliedToHours,
+          notes: newOvertime.notes || ''
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update overtime times.');
+      }
+
+      resetForm();
+      setIsCreateMenuOpen(false);
+      await fetchOvertimes(overtimePage);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const bulkEditSelectedTimes = async () => {
+    const selectedRecords = overtimes.filter((item) => selectedOvertimeIds.has(item.id));
+    if (selectedRecords.length === 0) {
+      setError('Select at least one overtime record.');
+      return;
+    }
+    if (!bulkEditStartTime || !bulkEditEndTime) {
+      setError('Start time and end time are required.');
+      return;
+    }
+
+    try {
+      setIsBulkEditingTimes(true);
+      setError('');
+      const formatTime = (time) => time.length === 5 ? `${time}:00` : time;
+      const token = getToken();
+
+      const results = await Promise.allSettled(selectedRecords.map(async (record) => {
+        const response = await fetch(`${API_BASE_URL}/api/overtime/${record.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            employeeId: record.employee?.id ?? record.employeeId,
+            date: record.date,
+            startTime: formatTime(bulkEditStartTime),
+            endTime: formatTime(bulkEditEndTime),
+            status: record.status || 'Pending',
+            overtimeMultiplier: Number(record.overtimeMultiplier ?? settings.defaultOvertimeMultiplier ?? 1.5),
+            multiplierAppliedToHours: Boolean(record.multiplierAppliedToHours),
+            notes: record.notes || ''
+          })
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || `Failed to update overtime #${record.id}`);
+        }
+        return record.id;
+      }));
+
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (failed.length > 0) {
+        setError(`${results.length - failed.length} record(s) updated; ${failed.length} failed.`);
+      } else {
+        setShowBulkEditTimes(false);
+        setBulkEditStartTime('');
+        setBulkEditEndTime('');
+        setSelectedOvertimeIds(new Set());
+      }
+      await fetchOvertimes(overtimePage);
+    } catch (err) {
+      setError(err.message || 'Failed to update selected overtime records.');
+    } finally {
+      setIsBulkEditingTimes(false);
     }
   };
 
@@ -568,6 +720,8 @@ const bulkDeleteOvertimes = async () => {
       const normalizedSearch = query.trim() || searchFilters.employeeName.trim();
       if (normalizedSearch) params.set('search', normalizedSearch);
       if (categoryId) params.set('categoryId', String(categoryId));
+      if (searchFilters.job === 'no-job') params.set('unassignedJob', 'true');
+      else if (searchFilters.job) params.set('jobId', searchFilters.job);
       if (searchFilters.status) params.set('status', searchFilters.status);
       if (searchFilters.minHours !== '') params.set('minHours', String(searchFilters.minHours));
       if (searchFilters.maxHours !== '') params.set('maxHours', String(searchFilters.maxHours));
@@ -615,6 +769,15 @@ const bulkDeleteOvertimes = async () => {
 
   useEffect(() => {
     fetchSettings();
+    const loadJobs = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/jobs`, { headers: { Authorization: `Bearer ${getToken()}` } });
+        if (!response.ok) throw new Error('Project options could not be loaded. Refresh to try again.');
+        const data = await response.json();
+        setJobs(Array.isArray(data) ? data : data.content || []);
+      } catch (err) { setJobsError(err.message); }
+    };
+    loadJobs();
   }, []);
 
   useEffect(() => {
@@ -631,6 +794,7 @@ const bulkDeleteOvertimes = async () => {
     query,
     searchFilters.employeeName,
     searchFilters.category,
+    searchFilters.job,
     searchFilters.dateFilterType,
     searchFilters.singleDate,
     searchFilters.startDate,
@@ -702,6 +866,7 @@ const bulkDeleteOvertimes = async () => {
     setSearchFilters({
       employeeName: '',
       category: '',
+      job: '',
       dateFilterType: 'single',
       singleDate: new Date().toISOString().split('T')[0],
       startDate: new Date().toISOString().split('T')[0],
@@ -810,7 +975,7 @@ const bulkDeleteOvertimes = async () => {
 
         let multiplier = settings.defaultOvertimeMultiplier;
 
-        if (dayOfWeek === 0 && settings.doubleTimeOnSunday) {
+        if (!multiplierAppliedToHours && dayOfWeek === 0 && settings.doubleTimeOnSunday) {
           multiplier = settings.sundayOvertimeMultiplier;
         }
 
@@ -822,7 +987,7 @@ const bulkDeleteOvertimes = async () => {
 
         const rawHours = (endTotal - startTotal) / 60;
 
-        if (settings.enableTimeAndHalfAfter8Hours && rawHours > 8) {
+        if (!multiplierAppliedToHours && settings.enableTimeAndHalfAfter8Hours && rawHours > 8) {
           multiplier = settings.timeAndHalfMultiplier;
         }
 
@@ -838,7 +1003,7 @@ const bulkDeleteOvertimes = async () => {
         }
 
         const overtimePay = multiplierAppliedToHours
-          ? (finalHours * employeeRate).toFixed(2)
+          ? 0
           : (rawHours * (employeeRate * multiplier)).toFixed(2);
 
         const overtimeData = {
@@ -993,7 +1158,7 @@ const bulkDeleteOvertimes = async () => {
   };
 
   const createBulkOvertime = async () => {
-    if (!bulkDate || !bulkStartTime || !bulkEndTime) {
+    if (!bulkDate || !bulkRangeEndDate || !bulkStartTime || !bulkEndTime) {
       setError('Please fill out all required fields.');
       return;
     }
@@ -1007,16 +1172,29 @@ const bulkDeleteOvertimes = async () => {
     
     try {
       const formatTime = (t) => t.length === 5 ? t + ":00" : t;
+      const startDate = new Date(`${bulkDate}T00:00:00Z`);
+      const endDate = new Date(`${bulkRangeEndDate}T00:00:00Z`);
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+        throw new Error('End date must be on or after the start date.');
+      }
+
+      const dates = [];
+      for (let date = new Date(startDate); date <= endDate; date.setUTCDate(date.getUTCDate() + 1)) {
+        dates.push(date.toISOString().split('T')[0]);
+        if (dates.length > 366) {
+          throw new Error('Date range cannot exceed 366 days.');
+        }
+      }
       
       const bulkRequest = {
-        overtimes: bulkOvertimeItems.map(item => ({
-          employeeId: item.employeeId,
-          date: bulkDate,
-          startTime: formatTime(bulkStartTime),
-          endTime: formatTime(bulkEndTime),
-          overtimeMultiplier: effectiveMultiplier,
-          multiplierAppliedToHours: multiplierAppliedToHours,
-        })),
+        overtimes: dates.flatMap(date => bulkOvertimeItems.map(item => ({
+            employeeId: item.employeeId,
+            date,
+            startTime: formatTime(bulkStartTime),
+            endTime: formatTime(bulkEndTime),
+            overtimeMultiplier: multiplierAppliedToHours ? getDefaultOvertimeMultiplier() : effectiveMultiplier,
+            multiplierAppliedToHours: multiplierAppliedToHours,
+          }))),
         skipDuplicates: skipDuplicates
       };
 
@@ -1041,6 +1219,7 @@ const bulkDeleteOvertimes = async () => {
       
       setIsBulkCreateMenuOpen(false);
       setBulkOvertimeItems([]);
+      setBulkRangeEndDate(bulkDate);
       fetchOvertimes(overtimePage);
       
     } catch (error) {
@@ -1088,6 +1267,7 @@ const bulkDeleteOvertimes = async () => {
       overtimeMultiplier: null
     });
     setMultiplierAppliedToHours(false);
+    setEditingOvertimeId(null);
   };
 
 const normalizeEmployee = (item) => {
@@ -1537,6 +1717,15 @@ const normalizeEmployee = (item) => {
           
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-4">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Additional Filters</h3>
+            <div className="mb-4 max-w-sm">
+              <label htmlFor="overtime-job-filter" className="block text-sm font-medium text-gray-700 mb-1">Employee project</label>
+              <select id="overtime-job-filter" name="job" value={searchFilters.job} onChange={handleSearchInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                <option value="">All projects</option>
+                <option value="no-job">No assigned project</option>
+                {jobs.map(job => <option key={job.id} value={String(job.id)}>{job.name}{job.code ? ` (${job.code})` : ''}</option>)}
+              </select>
+              {jobsError && <p role="alert" className="mt-1 text-sm text-red-600">{jobsError}</p>}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Employee Name</label>
@@ -1742,7 +1931,10 @@ const normalizeEmployee = (item) => {
         }`}
       >
         {isCreateMenuOpen && (
-          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setIsCreateMenuOpen(false)}></div>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => {
+            resetForm();
+            setIsCreateMenuOpen(false);
+          }}></div>
         )}
 
         <main className="flex-1 mx-auto px-4 md:px-6 py-6">
@@ -1777,7 +1969,10 @@ const normalizeEmployee = (item) => {
               </div>
 
               <button
-                onClick={() => setIsCreateMenuOpen(true)}
+                onClick={() => {
+                  resetForm();
+                  setIsCreateMenuOpen(true);
+                }}
                 className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1789,6 +1984,8 @@ const normalizeEmployee = (item) => {
               <button
                 onClick={() => {
                   setIsBulkCreateMenuOpen(true);
+                  setBulkDate(newOvertime.date);
+                  setBulkRangeEndDate(newOvertime.date);
                   fetchEligibleEmployeesForBulk(newOvertime.date);
                 }}
                 className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -1958,7 +2155,23 @@ const normalizeEmployee = (item) => {
                 Set Multiplier OFF (Rate)
               </button>
 
-              {/* Add this button next to the Reject button */}
+              <button
+                onClick={() => {
+                  setBulkEditStartTime('');
+                  setBulkEditEndTime('');
+                  setError('');
+                  setShowBulkEditTimes(true);
+                }}
+                disabled={selectedOvertimeIds.size === 0 || isBulkEditingTimes}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium text-sm ${
+                  selectedOvertimeIds.size > 0 && !isBulkEditingTimes
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                Edit Selected Times ({selectedOvertimeIds.size})
+              </button>
+
 <button
   onClick={bulkDeleteOvertimes}
   disabled={selectedOvertimeIds.size === 0 || isDeleting}
@@ -2087,7 +2300,7 @@ const normalizeEmployee = (item) => {
                             }`}>
                               {overtime.multiplierAppliedToHours ? 'ON (Hours)' : 'OFF (Rate)'}
                               <span className="ml-1 text-xs opacity-75">
-                                ({overtime.multiplierAppliedToHours ? '1' : '0'})
+                                ×{Number(overtime.overtimeMultiplier || settings.defaultOvertimeMultiplier || 1.5).toFixed(2)}
                               </span>
                             </span>
                           </td>
@@ -2126,6 +2339,14 @@ const normalizeEmployee = (item) => {
                                 }`}
                               >
                                 {overtime.status === 'Rejected' ? '✗ Rejected' : 'Reject'}
+                              </button>
+
+                              <button
+                                onClick={() => openEditOvertime(overtime)}
+                                disabled={loading}
+                                className="px-3 py-1 rounded-md text-sm bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+                              >
+                                Edit Times
                               </button>
 
                            <button
@@ -2276,9 +2497,14 @@ const normalizeEmployee = (item) => {
               className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 z-50 w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-800">Add Overtime (GHS)</h1>
+                <h1 className="text-2xl font-bold text-gray-800">
+                  {editingOvertimeId ? 'Edit Overtime Times' : 'Add Overtime (GHS)'}
+                </h1>
                 <button 
-                  onClick={() => setIsCreateMenuOpen(false)}
+                  onClick={() => {
+                    resetForm();
+                    setIsCreateMenuOpen(false);
+                  }}
                   className="text-gray-500 hover:text-gray-700"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2324,11 +2550,12 @@ const normalizeEmployee = (item) => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
                     <input
                       type="date"
                       value={newOvertime.date}
                       onChange={(e) => setNewOvertime(prev => ({ ...prev, date: e.target.value }))}
+                      disabled={Boolean(editingOvertimeId)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
@@ -2339,7 +2566,7 @@ const normalizeEmployee = (item) => {
                       name="employeeId"
                       value={newOvertime.employee.id}
                       onChange={handleInputChange}
-                      disabled={selectAllEmployees}
+                      disabled={selectAllEmployees || Boolean(editingOvertimeId)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="">Select Employee</option>
@@ -2365,11 +2592,21 @@ const normalizeEmployee = (item) => {
                           <strong>Rate stays:</strong> {formatCurrency(getEmployeeRate(newOvertime.employee.id))}/hr
                         </span>
                       )}
+                      {employees.find(emp => emp.id === newOvertime.employee.id)?.enforceMinimumOvertime && (
+                        <span className="block mt-1">
+                          <strong>Minimum overtime:</strong> {employees.find(emp => emp.id === newOvertime.employee.id)?.minimumOvertimeHours || 0} hours before multiplication
+                        </span>
+                      )}
+                      {employees.find(emp => emp.id === newOvertime.employee.id)?.autoApproveOvertime && (
+                        <span className="mt-2 inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                          This project auto-approves new overtime
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
 
-                <div className="flex items-center gap-2">
+                {!editingOvertimeId && <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={selectAllEmployees}
@@ -2377,7 +2614,7 @@ const normalizeEmployee = (item) => {
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label className="text-sm font-medium text-gray-700">Select All Available Employees</label>
-                </div>
+                </div>}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -2459,7 +2696,9 @@ const normalizeEmployee = (item) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Total Overtime Pay (GHS)</label>
                     <input
                       type="text"
-                      value={newOvertime.totalOvertimePay ? formatCurrency(newOvertime.totalOvertimePay) : ''}
+                      value={multiplierAppliedToHours
+                        ? 'Calculated in payroll'
+                        : newOvertime.totalOvertimePay ? formatCurrency(newOvertime.totalOvertimePay) : ''}
                       readOnly
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-gray-100 font-semibold text-green-600"
                     />
@@ -2483,9 +2722,7 @@ const normalizeEmployee = (item) => {
                             {newOvertime.overtimeHours?.toFixed(2) || '0'} hrs
                           </span>
                         </p>
-                        <p><strong>Pay:</strong> {newOvertime.overtimeHours?.toFixed(2) || '0'} hrs × {formatCurrency(getEmployeeRate(newOvertime.employee.id) || settings.hourlyRate)} = 
-                          <span className="font-bold text-green-800"> {formatCurrency(newOvertime.totalOvertimePay || 0)}</span>
-                        </p>
+                        <p><strong>Pay:</strong> Calculated later during payroll from the adjusted hours.</p>
                         <p className="text-xs text-green-600 mt-2">
                           ⓘ Database will store <span className="font-bold">{newOvertime.overtimeHours?.toFixed(2) || '0'}</span> hours (adjusted)
                         </p>
@@ -2510,16 +2747,84 @@ const normalizeEmployee = (item) => {
 
                 <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
                   <button
-                    onClick={resetForm}
+                    onClick={() => {
+                      resetForm();
+                      if (editingOvertimeId) setIsCreateMenuOpen(false);
+                    }}
                     className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
                   >
-                    Clear
+                    {editingOvertimeId ? 'Cancel' : 'Clear'}
                   </button>
                   <button
-                    onClick={createOvertime}
+                    onClick={editingOvertimeId ? updateOvertimeTimes : createOvertime}
+                    disabled={loading}
                     className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                   >
-                    Submit Overtime
+                    {loading ? 'Saving…' : editingOvertimeId ? 'Save Times' : 'Submit Overtime'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showBulkEditTimes && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl">
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-800">Edit Selected Overtime Times</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Apply one start and end time to {selectedOvertimeIds.size} selected record(s).
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowBulkEditTimes(false)}
+                    disabled={isBulkEditingTimes}
+                    className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Start Time</label>
+                    <input
+                      type="time"
+                      value={bulkEditStartTime}
+                      onChange={(event) => setBulkEditStartTime(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">End Time</label>
+                    <input
+                      type="time"
+                      value={bulkEditEndTime}
+                      onChange={(event) => setBulkEditEndTime(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <p className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
+                  Hours and overtime pay will be recalculated. Each record keeps its employee, date, status, and multiplier.
+                </p>
+
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowBulkEditTimes(false)}
+                    disabled={isBulkEditingTimes}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={bulkEditSelectedTimes}
+                    disabled={isBulkEditingTimes || !bulkEditStartTime || !bulkEditEndTime}
+                    className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    {isBulkEditingTimes ? 'Updating…' : `Update ${selectedOvertimeIds.size} Records`}
                   </button>
                 </div>
               </div>
@@ -2546,8 +2851,21 @@ const normalizeEmployee = (item) => {
                       value={bulkDate}
                       onChange={(e) => {
                         setBulkDate(e.target.value);
+                        if (!bulkRangeEndDate || bulkRangeEndDate < e.target.value) {
+                          setBulkRangeEndDate(e.target.value);
+                        }
                         fetchEligibleEmployeesForBulk(e.target.value);
                       }}
+                      className="w-full px-3 py-2 border rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                    <input
+                      type="date"
+                      min={bulkDate}
+                      value={bulkRangeEndDate}
+                      onChange={(e) => setBulkRangeEndDate(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg"
                     />
                   </div>
@@ -2596,7 +2914,7 @@ const normalizeEmployee = (item) => {
                     className="h-4 w-4"
                   />
                   <label className="text-sm text-gray-700">
-                    Skip employees with existing overtime on this date
+                    Skip existing employee/date overtime records in this range
                   </label>
                 </div>
 
@@ -2635,6 +2953,11 @@ const normalizeEmployee = (item) => {
                 <div className="bg-blue-50 p-3 rounded-lg mb-4">
                   <p className="text-sm text-blue-800">
                     Selected: {bulkOvertimeItems.length} employees
+                    {bulkDate && bulkRangeEndDate && bulkRangeEndDate >= bulkDate && (
+                      <span className="ml-2">
+                        × {Math.floor((new Date(`${bulkRangeEndDate}T00:00:00Z`) - new Date(`${bulkDate}T00:00:00Z`)) / 86400000) + 1} days
+                      </span>
+                    )}
                   </p>
                 </div>
 
@@ -2650,7 +2973,11 @@ const normalizeEmployee = (item) => {
                     disabled={loading || bulkOvertimeItems.length === 0}
                     className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
                   >
-                    {loading ? 'Creating...' : `Create ${bulkOvertimeItems.length} Records`}
+                    {loading ? 'Creating...' : `Create ${bulkOvertimeItems.length * (
+                      bulkDate && bulkRangeEndDate && bulkRangeEndDate >= bulkDate
+                        ? Math.floor((new Date(`${bulkRangeEndDate}T00:00:00Z`) - new Date(`${bulkDate}T00:00:00Z`)) / 86400000) + 1
+                        : 0
+                    )} Records`}
                   </button>
                 </div>
               </div>

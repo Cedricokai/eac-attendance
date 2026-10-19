@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
+import PropTypes from "prop-types";
 import LeaveBalanceTracker from "./LeaveBalanceTracker";
 import InventoryRequestStatusTracker from "./InventoryRequestStatusTracker";
 import html2pdf from "html2pdf.js";
@@ -42,6 +43,8 @@ import {
   Filter,
   Search,
   X,
+  UtensilsCrossed,
+  LogOut,
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
@@ -62,6 +65,7 @@ const EmployeeDashboard = () => {
   const [employeeInfo, setEmployeeInfo] = useState(null);
   const [showInventoryStatus, setShowInventoryStatus] = useState(false);
   const [showLeaveBalance, setShowLeaveBalance] = useState(false);
+  const [showMyInformation, setShowMyInformation] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState([]);
   const [unreadEmails, setUnreadEmails] = useState(0);
   const [inventoryStats, setInventoryStats] = useState({
@@ -81,6 +85,18 @@ const EmployeeDashboard = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPayslip, setShowPayslip] = useState(false);
+  const [showAttendance, setShowAttendance] = useState(false);
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const attendanceTotals = useMemo(() => attendanceRecords.reduce((totals, record) => ({
+    hours: totals.hours + record.hours,
+    overtime: totals.overtime + record.overtime,
+  }), { hours: 0, overtime: 0 }), [attendanceRecords]);
+  const [attendanceRange, setAttendanceRange] = useState(null);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const attendanceRequestRef = useRef(0);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [attendanceError, setAttendanceError] = useState("");
   const [yearFilter, setYearFilter] = useState(new Date().getFullYear());
   const [monthFilter, setMonthFilter] = useState("");
   const payslipRef = useRef(null);
@@ -105,6 +121,29 @@ const EmployeeDashboard = () => {
   const API_BASE_URL = getApiBaseUrl();
   const getToken = () => localStorage.getItem("jwtToken");
 
+  const handleLogout = async () => {
+    const token = getToken();
+
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+    } catch (logoutError) {
+      console.error("Logout request failed:", logoutError);
+    } finally {
+      localStorage.removeItem("jwtToken");
+      localStorage.removeItem("userRole");
+      localStorage.removeItem("user");
+      localStorage.removeItem("userData");
+      window.location.href = "/";
+    }
+  };
+
   const toNumber = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
@@ -127,6 +166,146 @@ const EmployeeDashboard = () => {
       month: "long",
       day: "numeric",
     });
+  };
+
+  const toDateInputValue = (date) => {
+    const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return offsetDate.toISOString().slice(0, 10);
+  };
+
+const fetchEmployeeAttendance = async (range = attendanceRange) => {
+  const today = toDateInputValue(new Date());
+  const startDate = range?.startDate || today;
+  const endDate = range?.endDate || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    setAttendanceError("Choose a valid start and end date.");
+    return;
+  }
+  const requestId = ++attendanceRequestRef.current;
+  if (!employeeInfo?.id) {
+    setAttendanceRecords([]);
+    setAttendanceError("No employee profile is linked to your account.");
+    return;
+  }
+
+  setAttendanceRecords([]);
+  setLoadingAttendance(true);
+  setAttendanceError("");
+  try {
+    const token = getToken();
+    const singleDay = startDate === endDate;
+    const params = new URLSearchParams({
+      employeeId: String(employeeInfo.id),
+      ...(singleDay ? { date: startDate } : { startDate, endDate }),
+    });
+    const endpoint = singleDay ? 'by-employee-date' : 'by-employee-range';
+
+    // Fetch attendance and approved overtime in parallel.
+    const [attendanceResponse, approvedOvertimeByKey] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/attendance/${endpoint}?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }),
+      fetchApprovedOvertimeForRange(startDate, endDate, employeeInfo.id).catch((err) => {
+        console.error('Overtime lookup failed:', err);
+        return new Map();
+      }),
+    ]);
+
+    if (requestId !== attendanceRequestRef.current) return;
+    if (singleDay && attendanceResponse.status === 404) {
+      setAttendanceRecords([]);
+      return;
+    }
+    if (!attendanceResponse.ok) throw new Error("Could not load your attendance record");
+
+    const data = await attendanceResponse.json();
+    const records = (Array.isArray(data) ? data : data ? [data] : [])
+      .filter((record) =>
+        String(record.employee?.id ?? record.employeeId) === String(employeeInfo.id) &&
+        String(record.date || "").slice(0, 10) >= startDate &&
+        String(record.date || "").slice(0, 10) <= endDate
+      )
+      .map((record) => {
+        const date = String(record.date || "").slice(0, 10);
+        const key = `${employeeInfo.id}-${date}`;
+        const approvedOvertime = approvedOvertimeByKey.get(key) ?? 0;
+
+        return {
+          id: record.id || `${date}-${record.employeeId}`,
+          date,
+          checkIn: record.checkIn || "--:--",
+          checkOut: record.checkOut || "--:--",
+          hours: toNumber(
+            record.minimumHour ?? record.regularHours
+              ?? Math.max(0, toNumber(record.totalHours) - toNumber(record.overtime ?? record.overtimeHours))
+          ),
+          overtime: approvedOvertime,   // only approved OT
+          status: record.status || "Not recorded",
+          shift: record.shift,
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    if (requestId === attendanceRequestRef.current) setAttendanceRecords(records);
+  } catch (err) {
+    if (requestId !== attendanceRequestRef.current) return;
+    console.error("Error fetching employee attendance:", err);
+    setAttendanceError(err.message || "Could not load attendance records");
+    setAttendanceRecords([]);
+  } finally {
+    if (requestId === attendanceRequestRef.current) setLoadingAttendance(false);
+  }
+};
+
+  const fetchApprovedOvertimeForRange = async (startDate, endDate, employeeId) => {
+  const token = getToken();
+  const params = new URLSearchParams({
+    startDate,
+    endDate,
+    page: '0',
+    size: '500',
+  });
+  const response = await fetch(`${API_BASE_URL}/api/overtime/page?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) throw new Error('Could not load overtime records');
+
+  const page = await response.json();
+  const records = Array.isArray(page.content) ? page.content : [];
+
+  // Build a lookup keyed by `${employeeId}-${date}` for approved overtime only.
+  const approvedByEmployeeDate = new Map();
+  for (const record of records) {
+    const recordEmployeeId = record.employeeId ?? record.employee?.id;
+    if (String(recordEmployeeId) !== String(employeeId)) continue;
+    if (String(record.status || '').toLowerCase() !== 'approved') continue;
+
+    const date = String(record.date || '').slice(0, 10);
+    if (!date) continue;
+
+    // The hours that actually count depend on where the multiplier was applied:
+    //   - multiplier applied to hours  -> overtimeHours already includes it
+    //   - multiplier applied to rate   -> rawOvertimeHours is the real hours
+    const hours = record.multiplierAppliedToHours
+      ? Number(record.overtimeHours ?? 0)
+      : Number(record.rawOvertimeHours ?? record.overtimeHours ?? 0);
+
+    const key = `${recordEmployeeId}-${date}`;
+    approvedByEmployeeDate.set(key, (approvedByEmployeeDate.get(key) || 0) + hours);
+  }
+  return approvedByEmployeeDate;
+};
+
+  const openAttendance = () => {
+    const today = toDateInputValue(new Date());
+    setCustomStartDate(today);
+    setCustomEndDate(today);
+    setAttendanceRange(null);
+    if (showAttendance) fetchEmployeeAttendance(null);
+    setShowAttendance(true);
+    window.setTimeout(() => {
+      document.getElementById("my-attendance")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   };
 
   const fetchCurrentUser = async () => {
@@ -670,6 +849,7 @@ const EmployeeDashboard = () => {
             !page.path.includes("/signin") &&
             !page.path.includes("/signup") &&
             !page.path.includes("/register") &&
+            !page.path.includes("/actions/") &&
             !page.name.toLowerCase().includes("signin") &&
             !page.name.toLowerCase().includes("signup") &&
             !page.name.toLowerCase().includes("login") &&
@@ -957,6 +1137,10 @@ const EmployeeDashboard = () => {
   }, [employeeInfo?.id, payrollPeriods]);
 
   useEffect(() => {
+    if (showAttendance) fetchEmployeeAttendance();
+  }, [showAttendance, employeeInfo?.id]);
+
+  useEffect(() => {
     if (location.hash === "#applications-launcher") {
       setShowApplicationsWorkspace(true);
       return;
@@ -1008,6 +1192,12 @@ const EmployeeDashboard = () => {
             <a href="#recent-activity" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
               <Clock className="h-4 w-4" /> Recent activity
             </a>
+            <button onClick={openAttendance} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <CalendarCheck className="h-4 w-4" /> My attendance
+            </button>
+            <button onClick={() => setShowMyInformation(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white">
+              <UserCog className="h-4 w-4" /> My information
+            </button>
           </nav>
 
           <p className="mb-2 mt-7 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Quick actions</p>
@@ -1023,6 +1213,9 @@ const EmployeeDashboard = () => {
             </button>
             <button onClick={() => setShowPayslip(!showPayslip)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-violet-500/10 hover:text-violet-300">
               <CreditCard className="h-4 w-4" /> View payslip
+            </button>
+            <button onClick={openAttendance} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-cyan-500/10 hover:text-cyan-300">
+              <Clock className="h-4 w-4" /> My hours
             </button>
           </div>
 
@@ -1053,6 +1246,12 @@ const EmployeeDashboard = () => {
             <p className="text-xs font-semibold text-slate-200">EAC Employee Portal</p>
             <p className="mt-1 text-[10px] leading-4 text-slate-500">Secure access based on your assigned role.</p>
           </div>
+          <button
+            onClick={handleLogout}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 hover:text-white"
+          >
+            <LogOut className="h-4 w-4" /> Log out
+          </button>
         </div>
       </aside>
 
@@ -1193,7 +1392,19 @@ const EmployeeDashboard = () => {
             <p className="mt-0.5 text-sm text-slate-500">Your most frequently used employee services.</p>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+              <button
+                onClick={() => setShowMyInformation(true)}
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"
+              >
+                <div className="mr-3 rounded-lg bg-sky-100 p-2">
+                  <UserCog className="h-5 w-5 text-sky-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">My Information</h3>
+                  <p className="text-sm text-gray-600">Review your details</p>
+                </div>
+              </button>
               <Link
                 to="/leaveRequestForm"
                 className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-sm"
@@ -1245,10 +1456,129 @@ const EmployeeDashboard = () => {
                   <p className="text-sm text-gray-600">Check your payslip</p>
                 </div>
               </button>
+
+              <button
+                onClick={openAttendance}
+                className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-cyan-200 hover:bg-cyan-50/50 hover:shadow-sm"
+              >
+                <div className="p-2 bg-cyan-100 rounded-lg mr-3">
+                  <Clock className="w-5 h-5 text-cyan-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">View My Attendance</h3>
+                  <p className="text-sm text-gray-600">View today’s attendance record</p>
+                </div>
+              </button>
+
+              <Link
+                to="/lunch/meal-selection"
+                className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-amber-200 hover:bg-amber-50/50 hover:shadow-sm"
+              >
+                <div className="mr-3 rounded-lg bg-amber-100 p-2">
+                  <UtensilsCrossed className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">Select Meals</h3>
+                  <p className="text-sm text-gray-600">Choose your weekly meals</p>
+                </div>
+              </Link>
             </div>
           </div>
         </div>
       </div>
+
+      {showAttendance && (
+        <section id="my-attendance" className="mb-8 scroll-mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-cyan-600" />
+                <h2 className="text-lg font-semibold text-slate-900">{attendanceRange ? "My attendance" : "Today’s attendance"}</h2>
+              </div>
+  <p className="mt-1 text-sm text-slate-500">
+  {attendanceRange
+    ? `${formatDate(attendanceRange.startDate)} – ${formatDate(attendanceRange.endDate)}`
+    : "Your attendance record for today."}
+  {" "}Employee Overtime hours.
+</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => fetchEmployeeAttendance()} disabled={loadingAttendance} className="rounded-lg border border-cyan-200 px-3 py-2 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60">
+                Refresh
+              </button>
+              <button onClick={() => setShowAttendance(false)} aria-label="Close attendance" className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <form className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-6 py-4" onSubmit={(event) => {
+            event.preventDefault();
+            if (!customStartDate || !customEndDate || customStartDate > customEndDate) {
+              setAttendanceError("Choose a valid start and end date.");
+              return;
+            }
+            const range = { startDate: customStartDate, endDate: customEndDate };
+            setAttendanceRange(range);
+            fetchEmployeeAttendance(range);
+          }}>
+            <label className="text-sm text-slate-600">From<input required type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-3 py-2" /></label>
+            <label className="text-sm text-slate-600">To<input required type="date" min={customStartDate} value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-3 py-2" /></label>
+            <button type="submit" disabled={loadingAttendance} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Apply</button>
+            <button type="button" onClick={() => {
+              const today = toDateInputValue(new Date());
+              setCustomStartDate(today); setCustomEndDate(today); setAttendanceRange(null);
+              fetchEmployeeAttendance(null);
+            }} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Today</button>
+          </form>
+
+          <div className="overflow-x-auto">
+            {attendanceError ? (
+              <div className="px-6 py-8 text-center text-sm text-red-600">{attendanceError}</div>
+            ) : loadingAttendance ? (
+              <div className="px-6 py-8 text-center text-sm text-slate-500">Loading your attendance records...</div>
+            ) : attendanceRecords.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-slate-500">{attendanceRange ? "No attendance records found for these dates." : "No attendance record has been recorded for you today."}</div>
+            ) : (
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Check in</th>
+                    <th className="px-5 py-3">Check out</th>
+                    <th className="px-5 py-3">Normal Hours</th>
+                    <th className="px-5 py-3">Overtime</th>
+                    <th className="px-5 py-3">Total Hours</th>
+                    <th className="px-5 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {attendanceRecords.map((record) => (
+                    <tr key={record.id} className="hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-5 py-3 font-medium text-slate-800">{formatDate(record.date)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{record.checkIn}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{record.checkOut}</td>
+                      <td className="whitespace-nowrap px-5 py-3 font-semibold text-cyan-700">{formatHours(record.hours)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 text-orange-700">{formatHours(record.overtime)}</td>
+                      <td className="whitespace-nowrap px-5 py-3 font-semibold text-indigo-700">{formatHours(record.hours + record.overtime)}</td>
+                      <td className="whitespace-nowrap px-5 py-3"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{record.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
+                  <tr>
+                    <th scope="row" colSpan={3} className="px-5 py-3 text-left text-slate-800">{attendanceRange ? 'Selected range total' : 'Today’s total'}</th>
+                    <td className="whitespace-nowrap px-5 py-3 text-cyan-700">{formatHours(attendanceTotals.hours)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-orange-700">{formatHours(attendanceTotals.overtime)}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-indigo-700">{formatHours(attendanceTotals.hours + attendanceTotals.overtime)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        </section>
+      )}
 
       {showPayslip && (
         <div className="mb-8">
@@ -1658,6 +1988,79 @@ const EmployeeDashboard = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMyInformation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="my-information-title">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
+                  <UserCog className="h-5 w-5" /> Employee record
+                </div>
+                <h2 id="my-information-title" className="mt-1 text-xl font-bold text-slate-900">My Information</h2>
+                <p className="mt-1 text-sm text-slate-500">Please review the details held for you and report anything that needs correcting.</p>
+              </div>
+              <button onClick={() => setShowMyInformation(false)} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800" aria-label="Close my information">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5 sm:p-7">
+              <div className="flex flex-col gap-4 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-700 p-5 text-white sm:flex-row sm:items-center">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/15 text-xl font-bold">
+                  {(employeeInfo?.firstName || userInfo.username || "E").charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-lg font-bold">{`${employeeInfo?.firstName || ""} ${employeeInfo?.lastName || ""}`.trim() || userInfo.username || "Employee"}</h3>
+                  <p className="mt-0.5 text-sm text-blue-100">{employeeInfo?.jobPosition || "Job position not assigned"}</p>
+                </div>
+                <span className="self-start rounded-full bg-white/15 px-3 py-1 text-xs font-semibold sm:self-auto">ID: {employeeInfo?.employeeId || "Not assigned"}</span>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <InformationGroup title="Personal & contact details" icon={User}>
+                  <InformationRow label="Full name" value={`${employeeInfo?.firstName || ""} ${employeeInfo?.lastName || ""}`.trim()} />
+                  <InformationRow label="Email address" value={employeeInfo?.email || userInfo.email} />
+                  <InformationRow label="Phone number" value={employeeInfo?.phone} />
+                  <InformationRow label="Date of birth" value={formatDate(employeeInfo?.dateOfBirth)} />
+                  <InformationRow label="Town of residence" value={employeeInfo?.townOfResidence} />
+                  <InformationRow label="House number" value={employeeInfo?.houseNumber} />
+                </InformationGroup>
+
+                <InformationGroup title="Employment details" icon={Briefcase}>
+                  <InformationRow label="Employee ID" value={employeeInfo?.employeeId} />
+                  <InformationRow label="Designation" value={employeeInfo?.jobPosition} />
+                  <InformationRow label="Department" value={employeeInfo?.department} />
+                  <InformationRow label="Location" value={employeeInfo?.location} />
+                  <InformationRow label="Tag number" value={employeeInfo?.tagNumber} />
+                  <InformationRow label="Start date" value={formatDate(employeeInfo?.startDate)} />
+                </InformationGroup>
+
+                <InformationGroup title="Emergency contact" icon={Users}>
+                  <InformationRow label="Emergency contact" value={employeeInfo?.emergencyContact} />
+                  <InformationRow label="Contact person" value={employeeInfo?.contactPerson} />
+                  <InformationRow label="Relationship" value={employeeInfo?.relationship} />
+                  <InformationRow label="Spouse" value={employeeInfo?.spouse} />
+                  <InformationRow label="Number of children" value={employeeInfo?.numberOfChildren} />
+                </InformationGroup>
+
+                <InformationGroup title="Payroll & statutory details" icon={CreditCard}>
+                  <InformationRow label="Bank" value={employeeInfo?.bankName || employeeInfo?.bank} />
+                  <InformationRow label="Bank branch" value={employeeInfo?.bankBranch} />
+                  <InformationRow label="Account name" value={employeeInfo?.accountName} />
+                  <InformationRow label="Account number" value={employeeInfo?.accountNumber} />
+                  <InformationRow label="SSNIT number" value={employeeInfo?.ssnitNumber} />
+                  <InformationRow label="TIN number" value={employeeInfo?.tinNumber} />
+                </InformationGroup>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="font-semibold">Something incorrect?</span> Please contact HR so your employee record can be updated. These details are displayed for review only.
+              </div>
             </div>
           </div>
         </div>
@@ -2263,6 +2666,36 @@ const EmployeeDashboard = () => {
       </div>
     </div>
   );
+};
+
+const InformationGroup = ({ title, icon: Icon, children }) => (
+  <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+      <div className="rounded-lg bg-blue-50 p-2 text-blue-700">
+        <Icon className="h-4 w-4" />
+      </div>
+      <h3 className="font-semibold text-slate-900">{title}</h3>
+    </div>
+    <dl className="divide-y divide-slate-100">{children}</dl>
+  </section>
+);
+
+const InformationRow = ({ label, value }) => (
+  <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3 px-4 py-3 text-sm">
+    <dt className="text-slate-500">{label}</dt>
+    <dd className="break-words text-right font-medium text-slate-800">{value || "Not provided"}</dd>
+  </div>
+);
+
+InformationGroup.propTypes = {
+  title: PropTypes.string.isRequired,
+  icon: PropTypes.elementType.isRequired,
+  children: PropTypes.node.isRequired,
+};
+
+InformationRow.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
 
 export default EmployeeDashboard;

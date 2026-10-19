@@ -1,6 +1,8 @@
+import WeeklyOffDays from "../attendance/WeeklyOffDays";
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { buildImportReview, resolveImportRow, fieldLabel, isEmpty, parseEmployeeImportDate, getImportDuplicateWarnings, applyImportChoice } from "./employeeImport";
 import MainSidebar from "../mainSidebar";
 import Header from "../../../components/Header";
 
@@ -21,12 +23,25 @@ function Employee() {
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [error, setError] = useState(null);
   const [uploadedData, setUploadedData] = useState([]);
+  const [importChoices, setImportChoices] = useState({});
+  const [selectedImportRows, setSelectedImportRows] = useState([]);
+  const selectableImportRows = uploadedData.filter(row => !row.saved && !row.problem && row.changes.some(change => change.conflict));
+  const unresolvedImportConflicts = uploadedData.filter(row => !row.saved).reduce((count, row) => count + row.changes.filter(change => change.conflict && !importChoices[`${row.index}:${change.field}`]).length, 0);
+  const chooseImportValues = (choice, indices = null) => setImportChoices(previous => applyImportChoice(uploadedData, previous, choice, indices));
+  const [importSaving, setImportSaving] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
   const [expandedRows, setExpandedRows] = useState({});
   const menuRefs = useRef({});
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState([]);        // array of category names
+const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
+const categoryFilterRef = useRef(null);
+  const [selectedStartYear, setSelectedStartYear] = useState("");
+  const [minimumBasicSalary, setMinimumBasicSalary] = useState("");
+  const [maximumBasicSalary, setMaximumBasicSalary] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState("");
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [isEditMenuOpen, setIsEditMenuOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -152,13 +167,40 @@ function Employee() {
   // =============================================================
   //  FILTERED EMPLOYEES (including department filter)
   // =============================================================
+  const getStartYear = (date) => {
+    const match = String(date || '').match(/^(\d{4})-\d{2}-\d{2}(?:$|T)/);
+    return match ? match[1] : '';
+  };
+  const startYearCounts = employees.reduce((counts, employee) => {
+    const year = getStartYear(employee.startDate) || 'unknown';
+    counts[year] = (counts[year] || 0) + 1;
+    return counts;
+  }, {});
+  const startYears = Object.keys(startYearCounts).filter(year => year !== 'unknown').sort((a, b) => Number(b) - Number(a));
+
   const filteredEmployees = employees.filter(emp => {
+    if (selectedStartYear && (getStartYear(emp.startDate) || 'unknown') !== selectedStartYear) return false;
     // Category filter
-    if (selectedCategory && emp.category !== selectedCategory) {
-      return false;
-    }
+    if (selectedCategories.length > 0 && !selectedCategories.includes(emp.category)) {
+  return false;
+}
     // ===== NEW: Department filter =====
     if (selectedDepartment && emp.department !== selectedDepartment) {
+      return false;
+    }
+    // Basic salary range filter
+    const basicSalary = Number(emp.basicSalary) || 0;
+    if (minimumBasicSalary !== "" && basicSalary < Number(minimumBasicSalary)) {
+      return false;
+    }
+    if (maximumBasicSalary !== "" && basicSalary > Number(maximumBasicSalary)) {
+      return false;
+    }
+    // Employment status filter
+    if (selectedStatus === "active" && !emp.active) {
+      return false;
+    }
+    if (selectedStatus === "inactive" && emp.active) {
       return false;
     }
     // Search query filter
@@ -185,6 +227,21 @@ function Employee() {
     }
     return true;
   });
+
+const hasActiveFilters = Boolean(
+  query.trim() || selectedCategories.length > 0 || selectedDepartment || selectedStartYear ||
+  minimumBasicSalary !== "" || maximumBasicSalary !== "" || selectedStatus
+);
+
+const clearFilters = () => {
+  setSelectedStartYear("");
+  setQuery("");
+  setSelectedCategories([]);
+  setSelectedDepartment("");
+  setMinimumBasicSalary("");
+  setMaximumBasicSalary("");
+  setSelectedStatus("");
+};
 
   const createMenuRef = useRef(null);
   const editMenuRef = useRef(null);
@@ -707,18 +764,6 @@ function Employee() {
     setSelectedFile(file);
   };
 
-  const parseExcelDate = (value) => {
-    if (!value || value === '-' || value === 'null') return null;
-
-    if (typeof value === 'number') {
-      const date = new Date((value - (25567 + 2)) * 86400 * 1000);
-      return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
-    }
-
-    const date = new Date(value);
-    return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
-  };
-
   const handleDisplayFile = () => {
     if (!selectedFile) {
       setError("Please select a file first");
@@ -727,7 +772,7 @@ function Employee() {
 
     const reader = new FileReader();
 
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const data = new Uint8Array(event.target.result);
         const workbook = XLSX.read(data, { type: "array" });
@@ -759,7 +804,7 @@ function Employee() {
           headers.forEach((header, index) => {
             const value = row[index];
 
-            if (!header || value === undefined) return;
+            if (!header || isEmpty(value)) return;
 
             switch (header) {
               case 'firstname':
@@ -787,21 +832,13 @@ function Employee() {
               case 'job_position':
               case 'position':
               case 'jobtitle':
-                const jobPositionValue = getSafeValue(value);
-                const jobPositionExists = settings.jobPositions?.some(p =>
-                  p.name.toLowerCase() === jobPositionValue.toLowerCase()
-                );
-                employee.jobPosition = jobPositionExists ? jobPositionValue : 'General Worker';
+                employee.jobPosition = String(value).trim();
                 break;
               case 'category':
               case 'empcategory':
               case 'employee_category':
               case 'dept':
-                const categoryName = getSafeValue(value);
-                const validCategory = settings.categories?.find(cat =>
-                  cat.name.toLowerCase() === categoryName.toLowerCase()
-                )?.name || categories[0] || "General";
-                employee.category = validCategory;
+                employee.category = String(value).trim();
                 break;
               case 'worktype':
               case 'work_type':
@@ -845,7 +882,7 @@ function Employee() {
               case 'date_of_birth':
               case 'dob':
               case 'birthdate':
-                employee.dateOfBirth = parseExcelDate(value);
+                employee.dateOfBirth = parseEmployeeImportDate(value, Boolean(workbook.Workbook?.WBProps?.date1904));
                 break;
               case 'emergencycontact':
               case 'emergency_contact':
@@ -863,7 +900,7 @@ function Employee() {
               case 'employee_id':
               case 'empid':
               case 'staffid':
-                if (value) employee.originalEmployeeId = getSafeValue(value);
+                if (value) employee.employeeId = String(value).trim();
                 break;
               case 'department':
               case 'division':
@@ -874,13 +911,13 @@ function Employee() {
               case 'hiredate':
               case 'datehired':
               case 'joiningdate':
-                employee.startDate = parseExcelDate(value);
+                employee.startDate = parseEmployeeImportDate(value, Boolean(workbook.Workbook?.WBProps?.date1904));
                 break;
               case 'enddate':
               case 'end_date':
               case 'terminationdate':
               case 'leavingdate':
-                employee.endDate = parseExcelDate(value);
+                employee.endDate = parseEmployeeImportDate(value, Boolean(workbook.Workbook?.WBProps?.date1904));
                 break;
               case 'basicsalary':
               case 'basic_salary':
@@ -892,7 +929,7 @@ function Employee() {
               case 'jobgrade':
               case 'job_grade':
               case 'level':
-                employee.grade = getSafeValue(value);
+                employee.jobGrade = getSafeValue(value);
                 break;
               case 'rentallowance':
               case 'rent_allowance':
@@ -974,20 +1011,32 @@ function Employee() {
               case 'partner':
                 employee.spouse = getSafeValue(value);
                 break;
-              case 'tierTwoAccountName':
+              case 'tiertwoaccountname':
                 employee.tierTwoAccountName = getSafeValue(value);
                 break;
-              case 'tierTwoAccountNumber':
+              case 'tiertwoaccountnumber':
                 employee.tierTwoAccountNumber = getSafeValue(value);
                 break;
               case 'numberofchildren':
               case 'number_of_children':
               case 'children':
               case 'dependents':
-                employee.numberOfChildren = getSafeValue(value) ? parseInt(getSafeValue(value)) : 0;
+                employee.numberOfChildren = Number(value);
                 break;
               case 'age':
-                employee.age = getSafeValue(value) ? parseInt(getSafeValue(value)) : null;
+                employee.age = Number(value);
+                break;
+              case 'activestatus':
+                employee.active = String(value).toLowerCase() === 'active';
+                break;
+              case 'excludefromssnit':
+                employee.excludeFromSsnit = ['yes', 'true', '1'].includes(String(value).toLowerCase());
+                break;
+              case 'basenumber':
+                employee.baseNumber = String(value).trim();
+                break;
+              case 'overtimerate':
+                employee.overtimeRate = Number(value);
                 break;
               default:
                 if (header.includes('first')) employee.firstName = getSafeValue(value);
@@ -998,24 +1047,31 @@ function Employee() {
             }
           });
 
-          if (!employee.firstName || !employee.lastName) {
-            console.warn(`Skipping row ${rowIndex + 2}: Missing first name or last name`);
-            return null;
+          for (const field of ['startDate', 'endDate', 'dateOfBirth']) {
+            if (employee[field] === null) throw new Error(`Row ${rowIndex + 2}: invalid ${fieldLabel(field)}`);
           }
-
-          if (!employee.category) employee.category = categories[0] || "General";
-          if (!employee.workType) employee.workType = "Regular";
-          if (!employee.jobPosition) employee.jobPosition = "General Worker";
-
+          for (const field of ['minimumRate', 'basicSalary', 'overtimeRate', 'rentAllowance', 'transportAllowance', 'clothingAllowance', 'otherAllowance', 'nssAllowance', 'age', 'numberOfChildren']) {
+            if (employee[field] !== undefined) {
+              employee[field] = Number(employee[field]);
+              if (!Number.isFinite(employee[field])) throw new Error(`Row ${rowIndex + 2}: invalid ${fieldLabel(field)}`);
+            }
+          }
           return employee;
-        }).filter(employee => employee !== null);
+        }).filter(employee => Object.keys(employee).length > 0);
 
         if (employeesData.length === 0) {
           setError("No valid employee data found in the Excel file. Please check if the file contains first name and last name columns.");
           return;
         }
 
-        setUploadedData(employeesData);
+        const response = await fetch(`${API_BASE_URL}/api/employee`, { headers: { Authorization: `Bearer ${getToken()}` } });
+        if (!response.ok) throw new Error('Could not load existing employees for comparison');
+        const existing = await response.json();
+        setEmployees(existing);
+        setUploadedData(buildImportReview(employeesData, existing));
+        setImportChoices({});
+        setSelectedImportRows([]);
+        setImportMessage('');
         setIsPopupOpen(true);
         setError(null);
 
@@ -1033,7 +1089,9 @@ function Employee() {
   };
 
   const exportToExcel = () => {
-    const dataToExport = employees.map(employee => ({
+    if (filteredEmployees.length === 0) return;
+
+    const dataToExport = filteredEmployees.map(employee => ({
       'Employee ID': employee.employeeId,
       'First Name': employee.firstName,
       'Last Name': employee.lastName,
@@ -1049,6 +1107,7 @@ function Employee() {
       'SSNIT Account Name': employee.ssnitAccountName,
       'TIN Number': employee.tinNumber,
       'Start Date': employee.startDate,
+      'Start Year': getStartYear(employee.startDate) || 'Not recorded',
       'End Date': employee.endDate,
       'Account Number': employee.accountNumber,
       'Date of Birth': employee.dateOfBirth,
@@ -1104,119 +1163,46 @@ function Employee() {
   };
 
   const saveUploadedData = async () => {
+    if (importSaving) return;
+    setImportSaving(true);
+    let count = 0;
     try {
-      const token = getToken();
-
-      const employeesToSave = uploadedData.map((employee, index) => {
-        const safeFirstName = employee.firstName ? String(employee.firstName).trim() : '';
-        const safeLastName = employee.lastName ? String(employee.lastName).trim() : '';
-
-        let email = employee.email ? String(employee.email).trim() : '';
-        if (!email && safeFirstName && safeLastName) {
-          email = `${safeFirstName.toLowerCase()}.${safeLastName.toLowerCase()}@company.com`;
-        } else if (!email) {
-          email = `employee${index + 1}@company.com`;
-        }
-
-        const cleanEmployee = {
-          firstName: safeFirstName || '',
-          lastName: safeLastName || '',
-          email: email,
-          phone: employee.phone ? String(employee.phone).trim() : '',
-          jobPosition: employee.jobPosition ? String(employee.jobPosition).trim() : 'General Worker',
-          minimumRate: employee.minimumRate ? parseFloat(employee.minimumRate) : 0,
-          category: employee.category || categories[0] || "General",
-          workType: employee.workType ? String(employee.workType).trim() : 'Regular',
-          numberOfChildren: employee.numberOfChildren ? parseInt(employee.numberOfChildren) : 0,
-          age: employee.age ? parseInt(employee.age) : 0,
-          ssnitNumber: employee.ssnitNumber ? String(employee.ssnitNumber).trim() : null,
-          ssnitAccountName: employee.ssnitAccountName ? String(employee.ssnitAccountName).trim() : null,
-          tinNumber: employee.tinNumber ? String(employee.tinNumber).trim() : null,
-          startDate: employee.startDate || new Date().toISOString().split('T')[0],
-          endDate: employee.endDate || null,
-          basicSalary: employee.basicSalary ? parseFloat(employee.basicSalary) : null,
-          accountNumber: employee.accountNumber ? String(employee.accountNumber).trim() : null,
-          rentAllowance: employee.rentAllowance ? parseFloat(employee.rentAllowance) : 0,
-          transportAllowance: employee.transportAllowance ? parseFloat(employee.transportAllowance) : 0,
-          clothingAllowance: employee.clothingAllowance ? parseFloat(employee.clothingAllowance) : 0,
-          otherAllowance: employee.otherAllowance ? parseFloat(employee.otherAllowance) : 0,
-          nssAllowance: employee.nssAllowance ? parseFloat(employee.nssAllowance) : 0,
-          tagNumber: employee.tagNumber ? String(employee.tagNumber).trim() : null,
-          dateOfBirth: employee.dateOfBirth || null,
-          emergencyContact: employee.emergencyContact ? String(employee.emergencyContact).trim() : null,
-          department: employee.department ? String(employee.department).trim() : null,
-          location: employee.location ? String(employee.location).trim() : null,
-          ghanaCard: employee.ghanaCard ? String(employee.ghanaCard).trim() : null,
-          bank: employee.bank ? String(employee.bank).trim() : null,
-          accountName: employee.accountName ? String(employee.accountName).trim() : null,
-          bankBranch: employee.bankBranch ? String(employee.bankBranch).trim() : null,
-          contactPerson: employee.contactPerson ? String(employee.contactPerson).trim() : null,
-          relationship: employee.relationship ? String(employee.relationship).trim() : null,
-          townOfResidence: employee.townOfResidence ? String(employee.townOfResidence).trim() : null,
-          houseNumber: employee.houseNumber ? String(employee.houseNumber).trim() : null,
-          spouse: employee.spouse ? String(employee.spouse).trim() : null,
-          jobGrade: employee.grade || "I",
-          allowances: employee.allowances ? parseFloat(employee.allowances) : 0,
-          excludeFromSsnit: employee.excludeFromSsnit || false,
-          tierTwoAccountName: employee.tierTwoAccountName || null,
-          tierTwoAccountNumber: employee.tierTwoAccountNumber || null,
-          baseNumber: employee.baseNumber || null
-        };
-
-        Object.keys(cleanEmployee).forEach(key => {
-          if (cleanEmployee[key] === undefined) {
-            cleanEmployee[key] = null;
-          }
-        });
-
-        return cleanEmployee;
-      });
-
-      const invalidEmployees = employeesToSave.filter(emp =>
-        !emp.firstName || !emp.lastName
-      );
-
-      if (invalidEmployees.length > 0) {
-        throw new Error(`Found ${invalidEmployees.length} employees with missing required fields (first name and last name)`);
+      const freshResponse = await fetch(`${API_BASE_URL}/api/employee`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (!freshResponse.ok) throw new Error('Could not recheck existing employees');
+      const fresh = await freshResponse.json();
+      const pending = uploadedData.filter(r => !r.saved);
+      const rechecked = buildImportReview(pending.map(r => r.source), fresh);
+      if (pending.some((row, i) => JSON.stringify(row.current) !== JSON.stringify(rechecked[i].current))) throw new Error('Employee records changed since preview. Close and display the file again to review current values.');
+      for (const row of pending) {
+        if (row.problem) throw new Error(row.problem);
+        if (row.changes.some(c => c.conflict && !importChoices[`${row.index}:${c.field}`])) throw new Error('Choose existing or Excel for every difference.');
+        const employee = resolveImportRow(row, importChoices);
+        if (!row.current && (!employee.firstName || !employee.lastName || !employee.email)) throw new Error(`Row ${row.index + 2}: enter first name, last name and email for this new employee.`);
       }
-
-      const response = await fetch(`${API_BASE_URL}/api/employee/bulk`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(employeesToSave),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `Failed to save data: ${response.status} - ${errorText}`;
-
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.message) {
-            errorMessage = errorJson.message;
-          }
-        } catch (e) {
-          // If not JSON, use the text as is
-        }
-
-        throw new Error(errorMessage);
+      for (const row of pending) {
+        const employee = resolveImportRow(row, importChoices);
+        const changed = !row.current || row.changes.some(c => !c.conflict || importChoices[`${row.index}:${c.field}`] === 'new');
+        if (changed) {
+          const category = settings.categories?.find(c => c.name === employee.category);
+          if (category) employee.categoryId = category.id;
+          const response = await fetch(`${API_BASE_URL}/api/employee${row.current ? `/${row.current.id}` : ''}`, {
+            method: row.current ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+            body: JSON.stringify(employee)
+          });
+          if (!response.ok) throw new Error(`Row ${row.index + 2} failed (${response.status}): ${await response.text()}`);
+          const result = await response.json();
+          count++;
+          setUploadedData(previous => previous.map(r => r.index === row.index ? { ...r, saved: true } : r));
+          if (!row.current && employee.employeeId && result.employeeId !== employee.employeeId) throw new Error(`Server assigned ${result.employeeId || 'a new ID'} instead of ${employee.employeeId}. Import paused; this row was saved.`);
+        } else setUploadedData(previous => previous.map(r => r.index === row.index ? { ...r, saved: true } : r));
       }
-
-      const data = await response.json();
-      setEmployees((prevEmployees) => [...prevEmployees, ...data]);
-      setUploadedData([]);
-      setIsPopupOpen(false);
-      setSelectedFile(null);
-      setSuccessMessage(`Successfully imported ${employeesToSave.length} employees!`);
-      setTimeout(() => setSuccessMessage(""), 5000);
-
-      fetchEmployees();
+      setImportMessage(`Import complete. Saved ${count} employees; unchanged records skipped.`);
     } catch (err) {
-      setError(err.message);
-      console.error('Import error:', err);
+      setImportMessage(`${err.message} Processed rows will not be sent again.`);
+    } finally {
+      await fetchEmployees();
+      setImportSaving(false);
     }
   };
 
@@ -1256,6 +1242,29 @@ function Employee() {
       return "Invalid Date";
     }
   };
+
+  useEffect(() => {
+  const handleClickOutside = (e) => {
+    if (categoryFilterRef.current && !categoryFilterRef.current.contains(e.target)) {
+      setCategoryFilterOpen(false);
+    }
+  };
+  document.addEventListener('mousedown', handleClickOutside);
+  return () => document.removeEventListener('mousedown', handleClickOutside);
+}, []);
+
+const toggleCategory = (category) => {
+  setSelectedCategories(prev =>
+    prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
+  );
+};
+
+const categoryFilterLabel =
+  selectedCategories.length === 0
+    ? 'All Categories'
+    : selectedCategories.length === 1
+      ? selectedCategories[0]
+      : `${selectedCategories.length} categories selected`;
 
   // =============================================================
   //  RENDER
@@ -1315,10 +1324,12 @@ function Employee() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
               <div>
                 <h1 className="text-2xl font-bold text-gray-800">Employee List</h1>
-                <p className="text-gray-600">Manage and track employee information</p>
+                <p className="text-gray-600">
+                  Manage and track employee information · Showing {filteredEmployees.length} of {employees.length}
+                </p>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4">
                 <div className="relative flex-1">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <svg
@@ -1345,18 +1356,86 @@ function Employee() {
                   />
                 </div>
 
-                {/* ===== CATEGORY FILTER ===== */}
+             {/* ===== CATEGORY FILTER (multi-select) ===== */}
+<div className="relative" ref={categoryFilterRef}>
+  <button
+    type="button"
+    onClick={() => setCategoryFilterOpen(open => !open)}
+    className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg shadow-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+  >
+    <span className="text-sm text-gray-700">{categoryFilterLabel}</span>
+    {selectedCategories.length > 0 && (
+      <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
+        {selectedCategories.length}
+      </span>
+    )}
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={`h-4 w-4 text-gray-400 transition-transform ${categoryFilterOpen ? 'rotate-180' : ''}`}
+      viewBox="0 0 20 20"
+      fill="currentColor"
+    >
+      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  </button>
+
+  {categoryFilterOpen && (
+    <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium text-gray-700">Filter by category</span>
+        {selectedCategories.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedCategories([])}
+            className="text-xs text-blue-600 hover:text-blue-800"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-60 overflow-y-auto space-y-1">
+        {categories.map((category) => (
+          <label
+            key={category}
+            className="flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 px-2 py-1.5 rounded cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              checked={selectedCategories.includes(category)}
+              onChange={() => toggleCategory(category)}
+              className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+            />
+            {category}
+          </label>
+        ))}
+        {categories.length === 0 && (
+          <p className="text-sm text-gray-500 px-2 py-1">No categories available</p>
+        )}
+      </div>
+
+      <div className="border-t border-gray-200 mt-2 pt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setCategoryFilterOpen(false)}
+          className="text-sm text-blue-600 hover:text-blue-800"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )}
+</div>
+
                 <select
-                  value={getSafeValue(selectedCategory)}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  aria-label="Filter employees by start year"
+                  value={selectedStartYear}
+                  onChange={(event) => setSelectedStartYear(event.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="">All Categories</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
+                  <option value="">All start years</option>
+                  {startYears.map(year => <option key={year} value={year}>Started in {year} ({startYearCounts[year]})</option>)}
+                  {startYearCounts.unknown && <option value="unknown">Start date not recorded ({startYearCounts.unknown})</option>}
                 </select>
 
                 {/* ===== NEW: DEPARTMENT FILTER ===== */}
@@ -1372,6 +1451,48 @@ function Employee() {
                     </option>
                   ))}
                 </select>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Min basic salary"
+                  aria-label="Minimum basic salary"
+                  value={minimumBasicSalary}
+                  onChange={(e) => setMinimumBasicSalary(e.target.value)}
+                  className="w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Max basic salary"
+                  aria-label="Maximum basic salary"
+                  value={maximumBasicSalary}
+                  onChange={(e) => setMaximumBasicSalary(e.target.value)}
+                  className="w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="px-3 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                  >
+                    Clear filters
+                  </button>
+                )}
 
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div className="flex items-center gap-2">
@@ -1396,13 +1517,14 @@ function Employee() {
                   </div>
 
                   <button
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-200 flex items-center gap-2"
+                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={exportToExcel}
+                    disabled={filteredEmployees.length === 0}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                     </svg>
-                    Export Excel
+                    Export Filtered Excel ({filteredEmployees.length})
                   </button>
 
                   {/* COLUMNS TOGGLE */}
@@ -1829,8 +1951,75 @@ function Employee() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-                {/* Category */}
-                <div>
+<p className="text-sm text-gray-500">Fields marked * are required.</p>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Employee details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
+                    <input
+                      type="text"
+                      placeholder="First name"
+                      value={getSafeValue(newEmployee.firstName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, firstName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
+                    <input
+                      type="text"
+                      placeholder="Last name"
+                      value={getSafeValue(newEmployee.lastName)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, lastName: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                  <input
+                    type="text"
+                    placeholder="Employee email"
+                    value={getSafeValue(newEmployee.email)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+<div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="E.g. 123456789"
+                    value={getSafeValue(newEmployee.phone)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.dateOfBirth)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, dateOfBirth: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(newEmployee.age)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, age: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.ghanaCard)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, ghanaCard: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Employment details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                   {loadingCategories ? (
                     <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100">
@@ -1851,46 +2040,7 @@ function Employee() {
                     </select>
                   )}
                 </div>
-
-                {/* Name */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
-                    <input
-                      type="text"
-                      placeholder="First name"
-                      value={getSafeValue(newEmployee.firstName)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, firstName: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
-                    <input
-                      type="text"
-                      placeholder="Last name"
-                      value={getSafeValue(newEmployee.lastName)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, lastName: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Email */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                  <input
-                    type="text"
-                    placeholder="Employee email"
-                    value={getSafeValue(newEmployee.email)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                {/* Job Position & Grade */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Position</label>
                     <select
                       value={getSafeValue(newEmployee.jobPosition)}
@@ -1916,8 +2066,7 @@ function Employee() {
                       ))}
                     </select>
                   </div>
-
-                  {newEmployee.jobPosition && (
+{newEmployee.jobPosition && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Job Grade</label>
                       <select
@@ -1942,9 +2091,7 @@ function Employee() {
                       </select>
                     </div>
                   )}
-                </div>
-
-                <div>
+<div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>
                   <input
                     type="text"
@@ -1954,8 +2101,44 @@ function Employee() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.department)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tag Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.tagNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tagNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.startDate)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date (optional)</label>
+                    <input
+                      type="date"
+                      value={getSafeValue(newEmployee.endDate)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, endDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div className="md:col-span-2"><WeeklyOffDays employee value={newEmployee.weeklyOffDays} onChange={weeklyOffDays => setNewEmployee({...newEmployee, weeklyOffDays})} /></div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Salary and allowances</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className="md:col-span-2"><div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Rate Configuration</label>
                     <p className="text-xs text-gray-500">
@@ -1986,9 +2169,8 @@ function Employee() {
                     />
                     <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                   </label>
-                </div>
-
-                {!newEmployee.usePositionRate && (
+                </div></div>
+<div className="md:col-span-2">{!newEmployee.usePositionRate && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Custom Hourly Rate (GHS)</label>
                     <input
@@ -1999,108 +2181,8 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input
-                    type="text"
-                    placeholder="E.g. 123456789"
-                    value={getSafeValue(newEmployee.phone)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
-                  <input
-                    type="text"
-                    placeholder="Ssnit account name"
-                    value={getSafeValue(newEmployee.ssnitAccountName)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, ssnitAccountName: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
-                    <input
-                      type="text"
-                      placeholder="Enter SSNIT Number"
-                      value={getSafeValue(newEmployee.ssnitNumber)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, ssnitNumber: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
-                    <input
-                      type="text"
-                      placeholder="Enter TIN Number"
-                      value={getSafeValue(newEmployee.tinNumber)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, tinNumber: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Exclude from SSNIT</label>
-                    <p className="text-xs text-gray-500">When checked, no SSNIT will be deducted from this employee's pay</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newEmployee.excludeFromSsnit}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, excludeFromSsnit: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Apply Withholding Tax</label>
-                    <p className="text-xs text-gray-500">When checked, Withholding Tax applies instead of PAYE</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newEmployee.applyWithholdingTax}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, applyWithholdingTax: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                    <input
-                      type="date"
-                      value={getSafeValue(newEmployee.startDate)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, startDate: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">End Date (optional)</label>
-                    <input
-                      type="date"
-                      value={getSafeValue(newEmployee.endDate)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, endDate: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
+                )}</div>
+<div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-sm font-medium text-gray-700">Basic Salary</label>
                       <div className="flex items-center">
@@ -2126,170 +2208,7 @@ function Employee() {
                       }`}
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.accountNumber)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
-                  <input
-                    type="text"
-                    value={getSafeValue(newEmployee.accountName)}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, accountName: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
-                    <input
-                      type="date"
-                      value={getSafeValue(newEmployee.dateOfBirth)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, dateOfBirth: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
-                    <input
-                      type="number"
-                      value={getSafeValue(newEmployee.age)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, age: parseInt(e.target.value) || 0 })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.location)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, location: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Ghana Card</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.ghanaCard)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, ghanaCard: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.emergencyContact)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, emergencyContact: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Tag Number</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.tagNumber)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, tagNumber: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.bank)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, bank: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.bankBranch)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, bankBranch: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.contactPerson)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, contactPerson: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.relationship)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, relationship: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.townOfResidence)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, townOfResidence: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.houseNumber)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, houseNumber: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.spouse)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, spouse: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
-                    <input
-                      type="number"
-                      value={getSafeValue(newEmployee.numberOfChildren)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                    <input
-                      type="text"
-                      value={getSafeValue(newEmployee.department)}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Rent Allowance</label>
                     <input
                       type="number"
@@ -2299,7 +2218,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Transport Allowance</label>
                     <input
                       type="number"
@@ -2309,7 +2228,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Clothing Allowance</label>
                     <input
                       type="number"
@@ -2319,7 +2238,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowance</label>
                     <input
                       type="number"
@@ -2329,7 +2248,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">NSS Allowance</label>
                     <input
                       type="number"
@@ -2338,11 +2257,104 @@ function Employee() {
                       onChange={(e) => setNewEmployee({ ...newEmployee, nssAllowance: parseFloat(e.target.value) || 0 })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Bank details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.bank)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, bank: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank Branch</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.bankBranch)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, bankBranch: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                  <input
+                    type="text"
+                    value={getSafeValue(newEmployee.accountName)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, accountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.accountNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, accountNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Tax and pension details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Account Name</label>
+                  <input
+                    type="text"
+                    placeholder="Ssnit account name"
+                    value={getSafeValue(newEmployee.ssnitAccountName)}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, ssnitAccountName: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">SSNIT Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter SSNIT Number"
+                      value={getSafeValue(newEmployee.ssnitNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, ssnitNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">TIN Number</label>
+                    <input
+                      type="text"
+                      placeholder="Enter TIN Number"
+                      value={getSafeValue(newEmployee.tinNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, tinNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
+                    <label className="block text-sm font-medium text-gray-700">Exclude from SSNIT</label>
+                    <p className="text-xs text-gray-500">When checked, no SSNIT will be deducted from this employee's pay</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmployee.excludeFromSsnit}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, excludeFromSsnit: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+<div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Apply Withholding Tax</label>
+                    <p className="text-xs text-gray-500">When checked, Withholding Tax applies instead of PAYE</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmployee.applyWithholdingTax}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, applyWithholdingTax: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                  </label>
+                </div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Name</label>
                     <input
                       type="text"
@@ -2351,7 +2363,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tier Two Account Number</label>
                     <input
                       type="text"
@@ -2360,7 +2372,7 @@ function Employee() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
-                  <div>
+<div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Base Number</label>
                     <input
                       type="text"
@@ -2368,9 +2380,80 @@ function Employee() {
                       onChange={(e) => setNewEmployee({ ...newEmployee, baseNumber: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Family details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Spouse</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.spouse)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, spouse: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
-                </div>
-              </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
+                    <input
+                      type="number"
+                      value={getSafeValue(newEmployee.numberOfChildren)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, numberOfChildren: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Residence details</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.location)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, location: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Town of Residence</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.townOfResidence)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, townOfResidence: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.houseNumber)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, houseNumber: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div></div></fieldset>
+<fieldset className="rounded-xl border border-gray-200 p-4 md:p-5"><legend className="px-2 text-base font-semibold text-gray-800">Emergency contact</legend><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.contactPerson)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, contactPerson: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.relationship)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, relationship: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+<div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Contact</label>
+                    <input
+                      type="text"
+                      value={getSafeValue(newEmployee.emergencyContact)}
+                      onChange={(e) => setNewEmployee({ ...newEmployee, emergencyContact: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div></div></fieldset>
+</div>
 
               <div className="flex justify-end gap-4 px-6 py-4 border-t border-gray-200 bg-white">
                 <button
@@ -2433,6 +2516,7 @@ function Employee() {
                     </select>
                   )}
                 </div>
+                <WeeklyOffDays employee value={editingEmployee.weeklyOffDays} onChange={weeklyOffDays => setEditingEmployee({...editingEmployee, weeklyOffDays})} />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -2940,137 +3024,41 @@ function Employee() {
         {/* ============================================================ */}
         {isPopupOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
-            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-7xl max-h-[80vh] overflow-y-auto">
-              <h2 className="text-xl font-semibold mb-4">Excel Import Preview</h2>
-              <p className="text-sm text-gray-600 mb-4">
-                Found {uploadedData.length} employee(s). Employee IDs will be automatically generated.
-              </p>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Generated ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">First Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Account Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tier Two Account Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Base Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SSNIT Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">TIN Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tag Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date of Birth</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Emergency Contact</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Original Employee ID</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Position</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Grade</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Type</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">End Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Basic Salary</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Minimum Rate</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rent Allowance</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transport Allowance</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Clothing Allowance</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Other Allowance</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSS Allowance</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ghana Card</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank Branch</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact Person</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relationship</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Town of Residence</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">House Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Spouse</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Number of Children</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exclude SSNIT</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {uploadedData.map((employee, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm font-medium text-blue-600 whitespace-nowrap">
-                          Auto-generated
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.firstName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">{employee.lastName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.email || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.phone || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitAccountName || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountName || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tierTwoAccountNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.baseNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ssnitNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tinNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.tagNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.dateOfBirth || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.emergencyContact || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.originalEmployeeId || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
-                          <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
-                            {employee.category || 'Not set'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.jobPosition || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">Level {employee.grade || employee.jobGrade || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.workType || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.department || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.startDate || 'Not set'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.endDate || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.basicSalary || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.minimumRate || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.rentAllowance || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.transportAllowance || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.clothingAllowance || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.otherAllowance || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.nssAllowance || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.location || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.ghanaCard || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bank || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.accountName || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.bankBranch || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.contactPerson || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.relationship || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.townOfResidence || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.houseNumber || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.spouse || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.numberOfChildren || '0'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.age || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{employee.excludeFromSsnit ? 'Yes' : 'No'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-6xl max-h-[85vh] overflow-y-auto">
+              <h2 className="text-xl font-semibold mb-3">Compare employee import</h2>
+              <p className="text-sm text-gray-600 mb-3">{uploadedData.length} rows. Empty Excel cells keep existing values. Empty system fields are filled automatically. IDs match existing employees; new IDs depend on server support.</p>
+              <p className="text-sm text-amber-800 mb-3">Supervisor and job assignments are managed separately and are not imported here. Totals, start year and years of service are calculated. New employees require first name, last name and email; complete missing fields below without changing your file.</p>
+              {importMessage && <p role="status" className="p-3 bg-blue-50 mb-3">{importMessage}</p>}
+              <div className="sticky top-0 z-10 mb-4 rounded-lg border border-blue-200 bg-white p-4 shadow-sm">
+                <p className="mb-3 text-sm text-gray-600">Bulk choices apply to conflicting fields. Blank Excel cells keep existing values; empty system fields fill automatically. You can change individual choices afterwards.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={importSaving || !selectableImportRows.length} className="rounded border px-3 py-2 disabled:opacity-40" onClick={() => chooseImportValues('old')}>Keep existing for all</button>
+                  <button type="button" disabled={importSaving || !selectableImportRows.length} className="rounded border border-blue-300 px-3 py-2 text-blue-800 disabled:opacity-40" onClick={() => chooseImportValues('new')}>Use Excel for all</button>
+                  <label className="flex items-center gap-2 px-2 text-sm"><input type="checkbox" disabled={importSaving || !selectableImportRows.length} checked={selectableImportRows.length > 0 && selectableImportRows.every(row => selectedImportRows.includes(row.index))} onChange={event => setSelectedImportRows(event.target.checked ? selectableImportRows.map(row => row.index) : [])} />Select all employees with differences</label>
+                  <span className="text-sm">{selectableImportRows.filter(row => selectedImportRows.includes(row.index)).length} selected</span>
+                  <button type="button" disabled={importSaving || !selectableImportRows.some(row => selectedImportRows.includes(row.index))} className="rounded border px-3 py-2 disabled:opacity-40" onClick={() => chooseImportValues('old', selectedImportRows)}>Keep existing for selected</button>
+                  <button type="button" disabled={importSaving || !selectableImportRows.some(row => selectedImportRows.includes(row.index))} className="rounded border border-blue-300 px-3 py-2 text-blue-800 disabled:opacity-40" onClick={() => chooseImportValues('new', selectedImportRows)}>Use Excel for selected</button>
+                </div>
+                <p role="status" className="mt-3 text-sm text-gray-700">{unresolvedImportConflicts} field difference(s) still need a choice. {uploadedData.filter(row => !row.saved && row.problem).length} row(s) have blocking identity errors.</p>
               </div>
-
-              <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
-                <div className="text-sm text-gray-600 max-w-md">
-                  <strong>Note:</strong> Employee IDs will be automatically generated by the system.
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
-                    onClick={() => setIsPopupOpen(false)}
-                  >-
-                    Cancel
-                  </button>
-                  <button
-                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-                    onClick={saveUploadedData}
-                  >
-                    Import {uploadedData.length} Employee{uploadedData.length !== 1 ? 's' : ''}
-                  </button>
-                </div>
+              {uploadedData.map(row => (
+                <section key={row.index} className="border rounded-lg p-4 mb-3">
+                  <h3 className="font-semibold">Row {row.index + 2}: {row.source.employeeId || 'No employee ID'} · {row.source.firstName} {row.source.lastName} — {row.saved ? 'Processed' : row.current ? 'Existing employee' : 'New employee'}</h3>
+                  {!row.saved && !row.problem && row.changes.some(change => change.conflict) && <div className="my-2 flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label={`Select Excel row ${row.index + 2}`} disabled={importSaving} checked={selectedImportRows.includes(row.index)} onChange={event => setSelectedImportRows(previous => event.target.checked ? [...previous, row.index] : previous.filter(index => index !== row.index))} />Select employee</label>
+                    <button type="button" disabled={importSaving} className="rounded border px-3 py-1 text-sm" onClick={() => chooseImportValues('old', [row.index])}>Keep existing for this employee</button>
+                    <button type="button" disabled={importSaving} className="rounded border px-3 py-1 text-sm text-blue-800" onClick={() => chooseImportValues('new', [row.index])}>Use Excel for this employee</button>
+                  </div>}
+                  {row.problem && <p className="text-red-700">{row.problem}</p>}
+                  {getImportDuplicateWarnings(row.source, row.index, uploadedData.map(r => r.source), employees).map(warning => <p key={warning} className="mt-1 rounded bg-amber-50 p-2 text-sm text-amber-900">Possible duplicate: {warning} Review before saving; Employee ID remains the matching key.</p>)}
+                  {!row.current && !row.saved && <div className="flex gap-3 flex-wrap my-3">{['firstName', 'lastName', 'email'].map(field => <label key={field} className="text-sm">{fieldLabel(field)}<input className="block border rounded p-2" value={row.source[field] || ''} disabled={importSaving} onChange={event => setUploadedData(previous => previous.map(r => r.index === row.index ? { ...r, source: { ...r.source, [field]: event.target.value }, changes: r.changes.filter(c => c.field !== field) } : r))} /></label>)}</div>}
+                  {row.current && row.changes.length === 0 && <p className="text-sm text-gray-500">No differences. This employee will be skipped.</p>}
+                  {row.changes.length > 0 && <table className="w-full text-sm mt-3"><thead><tr className="text-left"><th>Field</th><th>Existing</th><th>Excel</th><th>Use</th></tr></thead><tbody>{row.changes.map(change => <tr key={change.field} className="border-t"><td className="py-2">{fieldLabel(change.field)}</td><td>{isEmpty(change.oldValue) ? 'Empty' : String(change.oldValue)}</td><td>{String(change.value)}</td><td>{change.conflict ? <select aria-label={`${row.source.employeeId || row.index} ${fieldLabel(change.field)}`} disabled={row.saved || importSaving} className="border rounded p-2" value={importChoices[`${row.index}:${change.field}`] || ''} onChange={event => setImportChoices(previous => ({ ...previous, [`${row.index}:${change.field}`]: event.target.value }))}><option value="">Choose…</option><option value="old">Keep existing</option><option value="new">Use Excel</option></select> : 'Fill automatically'}</td></tr>)}</tbody></table>}
+                </section>
+              ))}
+              <div className="flex justify-end gap-3 mt-4">
+                <button disabled={importSaving} className="border rounded px-5 py-2" onClick={() => setIsPopupOpen(false)}>Close</button>
+                <button disabled={importSaving || uploadedData.every(r => r.saved) || uploadedData.some(r => !r.saved && (r.problem || r.changes.some(c => c.conflict && !importChoices[`${r.index}:${c.field}`])))} className="bg-green-600 disabled:opacity-50 text-white rounded px-5 py-2" onClick={saveUploadedData}>{importSaving ? 'Saving…' : 'Save reviewed import'}</button>
               </div>
             </div>
           </div>

@@ -16,6 +16,15 @@ function Profile() {
   const [categories, setCategories] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [jobPositions, setJobPositions] = useState([]);
+
+  // Employee profile navigation
+  const [employeeList, setEmployeeList] = useState([]);
+  const [loadingNavigation, setLoadingNavigation] = useState(false);
+
+  // Employee search inside the profile page
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [showEmployeeSearchResults, setShowEmployeeSearchResults] = useState(false);
+
   // Document related state
   const [documents, setDocuments] = useState([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -65,6 +74,39 @@ function Profile() {
   };
 
   const API_BASE_URL = getApiBaseUrl();
+
+  // Load all employees once so the profile can move to the previous/next employee.
+  // We use the actual records returned by the backend instead of assuming IDs are consecutive.
+  const fetchEmployeeList = async () => {
+    try {
+      setLoadingNavigation(true);
+      const token = getToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/employee`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load employee navigation: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const sortedEmployees = Array.isArray(data)
+        ? [...data].sort((a, b) => Number(a.id) - Number(b.id))
+        : [];
+
+      setEmployeeList(sortedEmployees);
+    } catch (err) {
+      console.error("Error loading employee navigation:", err);
+      setEmployeeList([]);
+    } finally {
+      setLoadingNavigation(false);
+    }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -151,6 +193,7 @@ function Profile() {
   useEffect(() => {
     fetchSettings();
     fetchCategories();
+    fetchEmployeeList();
   }, []);
 
   useEffect(() => {
@@ -536,6 +579,91 @@ function Profile() {
     return colors[Math.abs(hash) % colors.length];
   };
 
+  // =============================================================
+  // EMPLOYEE PROFILE NAVIGATION
+  // =============================================================
+  const currentEmployeeIndex = employeeList.findIndex(
+    (emp) => String(emp.id) === String(id)
+  );
+
+  const previousEmployee =
+    currentEmployeeIndex > 0
+      ? employeeList[currentEmployeeIndex - 1]
+      : null;
+
+  const nextEmployee =
+    currentEmployeeIndex >= 0 &&
+    currentEmployeeIndex < employeeList.length - 1
+      ? employeeList[currentEmployeeIndex + 1]
+      : null;
+
+  const goToEmployee = (targetEmployee) => {
+    if (!targetEmployee) return;
+
+    // Close any open modal before changing profiles.
+    setIsEditModalOpen(false);
+    setIsMessageModalOpen(false);
+    setIsUploadModalOpen(false);
+    setUploadError("");
+    setUploadSuccess("");
+
+    // Employee.jsx already links to /profile/:id, so keep the same route here.
+    navigate(`/profile/${targetEmployee.id}`);
+  };
+
+  const goToPreviousEmployee = () => goToEmployee(previousEmployee);
+  const goToNextEmployee = () => goToEmployee(nextEmployee);
+
+  // Search by name, employee number, database ID, department, job position, phone, or email.
+  const normalizedEmployeeSearch = employeeSearch.trim().toLowerCase();
+  const employeeSearchResults = normalizedEmployeeSearch
+    ? employeeList
+        .filter((emp) => {
+          const values = [
+            emp.id,
+            emp.employeeId,
+            emp.firstName,
+            emp.lastName,
+            `${emp.firstName || ""} ${emp.lastName || ""}`,
+            emp.department,
+            emp.jobPosition,
+            emp.phone,
+            emp.email,
+          ];
+
+          return values.some((value) =>
+            String(value ?? "")
+              .toLowerCase()
+              .includes(normalizedEmployeeSearch)
+          );
+        })
+        .slice(0, 10)
+    : [];
+
+  const selectSearchedEmployee = (targetEmployee) => {
+    if (!targetEmployee) return;
+    setEmployeeSearch("");
+    setShowEmployeeSearchResults(false);
+    goToEmployee(targetEmployee);
+  };
+
+  const handleEmployeeSearchKeyDown = (event) => {
+    if (event.key === "Enter" && employeeSearchResults.length > 0) {
+      event.preventDefault();
+      selectSearchedEmployee(employeeSearchResults[0]);
+    }
+
+    if (event.key === "Escape") {
+      setShowEmployeeSearchResults(false);
+    }
+  };
+
+  useEffect(() => {
+    // Clear the search whenever another profile is opened.
+    setEmployeeSearch("");
+    setShowEmployeeSearchResults(false);
+  }, [id]);
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-screen bg-gray-50">
@@ -585,34 +713,231 @@ function Profile() {
       <MainSidebar />
 
       <div className="flex-1 ml-64 p-6 lg:p-8">
-        <header className="bg-white rounded-xl shadow-sm p-4 md:p-6 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Employee Profile</h1>
-            <p className="text-sm text-gray-500 mt-1">View and manage employee information</p>
-          </div>
+        <header className="bg-white rounded-xl shadow-sm p-4 md:p-6 mb-6">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">Employee Profile</h1>
+              <p className="text-sm text-gray-500 mt-1">
+                View, edit and move between employee records
+              </p>
+            </div>
 
-          <div className="flex items-center space-x-4">
-            <button className="p-2 rounded-full hover:bg-gray-100 transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <button className="p-2 rounded-full hover:bg-gray-100 transition-colors relative">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-              </svg>
-              <span className="absolute top-0 right-0 h-3 w-3 bg-red-500 rounded-full"></span>
-            </button>
-            <div className="flex items-center space-x-2">
-              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clipRule="evenodd" />
-                </svg>
+            <div className="flex flex-col gap-3 xl:items-end">
+              {/* Search employees directly from the profile page */}
+              <div className="relative w-full sm:w-[420px]">
+                <div className="relative">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M9 3a6 6 0 104.472 10.001l3.263 3.264a1 1 0 001.414-1.414l-3.264-3.263A6 6 0 009 3zm-4 6a4 4 0 118 0 4 4 0 01-8 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+
+                  <input
+                    type="text"
+                    value={employeeSearch}
+                    onChange={(e) => {
+                      setEmployeeSearch(e.target.value);
+                      setShowEmployeeSearchResults(true);
+                    }}
+                    onFocus={() => setShowEmployeeSearchResults(true)}
+                    onKeyDown={handleEmployeeSearchKeyDown}
+                    placeholder="Search employee by name, ID, department..."
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-10 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    aria-label="Search employees"
+                    autoComplete="off"
+                  />
+
+                  {employeeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmployeeSearch("");
+                        setShowEmployeeSearchResults(false);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                      aria-label="Clear employee search"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {showEmployeeSearchResults && normalizedEmployeeSearch && (
+                  <div className="absolute right-0 z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl">
+                    {employeeSearchResults.length > 0 ? (
+                      <>
+                        <div className="border-b border-gray-100 px-4 py-2 text-xs font-medium text-gray-500">
+                          {employeeSearchResults.length} result{employeeSearchResults.length === 1 ? "" : "s"} shown
+                        </div>
+
+                        {employeeSearchResults.map((result) => {
+                          const isCurrent = String(result.id) === String(id);
+
+                          return (
+                            <button
+                              key={result.id}
+                              type="button"
+                              onClick={() => selectSearchedEmployee(result)}
+                              className={`flex w-full items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50 ${
+                                isCurrent ? "bg-blue-50/60" : "bg-white"
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-gray-900">
+                                  {result.firstName} {result.lastName}
+                                </p>
+                                <p className="truncate text-xs text-gray-500">
+                                  {result.employeeId || `EAC#${result.id}`}
+                                  {result.department ? ` • ${result.department}` : ""}
+                                  {result.jobPosition ? ` • ${result.jobPosition}` : ""}
+                                </p>
+                              </div>
+
+                              {isCurrent ? (
+                                <span className="flex-shrink-0 rounded-full bg-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-700">
+                                  Current
+                                </span>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <div className="px-4 py-6 text-center">
+                        <p className="text-sm font-medium text-gray-700">No employee found</p>
+                        <p className="mt-1 text-xs text-gray-500">Try another name, employee ID, department, email, or phone number.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="hidden sm:block">
-                <span className="text-sm font-medium text-gray-700">Admin</span>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              {/* Previous / Current / Next employee navigation */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goToPreviousEmployee}
+                  disabled={!previousEmployee || loadingNavigation}
+                  title={
+                    previousEmployee
+                      ? `Previous employee: ${previousEmployee.firstName || ""} ${previousEmployee.lastName || ""}`.trim()
+                      : "No previous employee"
+                  }
+                  className={`h-10 w-10 flex items-center justify-center rounded-lg border transition-colors ${
+                    previousEmployee && !loadingNavigation
+                      ? "border-gray-300 text-gray-700 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300"
+                      : "border-gray-200 text-gray-300 bg-gray-50 cursor-not-allowed"
+                  }`}
+                  aria-label="Previous employee"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+
+                <div className="min-w-[210px] px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-center">
+                  <p className="text-xs text-gray-500">
+                    {loadingNavigation
+                      ? "Loading employees..."
+                      : currentEmployeeIndex >= 0
+                        ? `Employee ${currentEmployeeIndex + 1} of ${employeeList.length}`
+                        : `Employee ID: ${id}`}
+                  </p>
+                  <p className="text-sm font-semibold text-gray-800 truncate">
+                    {employee.firstName} {employee.lastName}
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    EAC#{employee.id}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={goToNextEmployee}
+                  disabled={!nextEmployee || loadingNavigation}
+                  title={
+                    nextEmployee
+                      ? `Next employee: ${nextEmployee.firstName || ""} ${nextEmployee.lastName || ""}`.trim()
+                      : "No next employee"
+                  }
+                  className={`h-10 w-10 flex items-center justify-center rounded-lg border transition-colors ${
+                    nextEmployee && !loadingNavigation
+                      ? "border-gray-300 text-gray-700 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300"
+                      : "border-gray-200 text-gray-300 bg-gray-50 cursor-not-allowed"
+                  }`}
+                  aria-label="Next employee"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigate("/employees")}
+                className="h-10 px-4 flex items-center justify-center gap-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path d="M13 7H7v6h6V7z" />
+                  <path
+                    fillRule="evenodd"
+                    d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm10 2H5v10h10V5z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                All Employees
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="hidden sm:block">
+                  <span className="text-sm font-medium text-gray-700">Admin</span>
+                </div>
               </div>
             </div>
+          </div>
           </div>
         </header>
 

@@ -162,7 +162,7 @@ const LeaveBalanceTracker = ({ employeeId }) => {
       // Calculate USED DAYS from APPROVED leaves (only deductible types)
       let usedDays = 0;
       approvedLeaves.forEach(leave => {
-        if (!nonDeductible.includes(leave.leaveType)) {
+        if (!/^unpaid(?:\s+leave)?$/i.test(leave.leaveType?.trim() || '') && !nonDeductible.includes(leave.leaveType)) {
           const businessDays = calculateBusinessDays(leave.startDate, leave.endDate);
           usedDays += businessDays;
         }
@@ -171,7 +171,7 @@ const LeaveBalanceTracker = ({ employeeId }) => {
       // Calculate PENDING DAYS from PENDING leaves (only deductible types)
       let pendingDays = 0;
       pendingLeaves.forEach(leave => {
-        if (!nonDeductible.includes(leave.leaveType)) {
+        if (!/^unpaid(?:\s+leave)?$/i.test(leave.leaveType?.trim() || '') && !nonDeductible.includes(leave.leaveType)) {
           const businessDays = calculateBusinessDays(leave.startDate, leave.endDate);
           pendingDays += businessDays;
         }
@@ -395,7 +395,7 @@ const LeaveBalanceTracker = ({ employeeId }) => {
               ) : (
                 currentLeaves.map((leave) => {
                   const businessDays = calculateBusinessDays(leave.startDate, leave.endDate);
-                  const isDeductible = !nonDeductibleTypes.includes(leave.leaveType);
+                  const isDeductible = !/^unpaid(?:\s+leave)?$/i.test(leave.leaveType?.trim() || '') && !nonDeductibleTypes.includes(leave.leaveType);
                   const overallStatus = getOverallStatus(leave);
                   
                   return (

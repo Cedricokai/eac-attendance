@@ -47,6 +47,7 @@ import EmployeeLoanRequest from "./pages/Eac-attendance/attendance/employeeLoanR
 import LoanManagementDashboard from "./pages/Eac-attendance/attendance/loanManagementDashboard";
 import ExcelComparator from "./pages/Eac-attendance/attendance/excel-comparator";
 import AdminLeaveBalanceView from "./pages/Eac-attendance/attendance/AdminLeaveBalanceView";
+import WeeklyAttendanceEmail from "./pages/Eac-attendance/attendance/weeklyAttendanceEmail";
 
 // Inventory Pages
 import InventoryDashboard from './pages/Eac-inventory/InventoryDashboard';
@@ -57,6 +58,7 @@ import InventoryRequest from "./pages/Eac-inventory/InventoryRequest";
 import StorekeeperRequests from "./pages/Eac-inventory/storekeeperRequests";
 import History from "./pages/Eac-inventory/history";
 import PPES from "./pages/Eac-inventory/ppe";
+import EmployeeIssuedItems from "./pages/Eac-attendance/employee/EmployeeIssuedItems";
 import ProcurementManagerReview from "./pages/Eac-inventory/procurementManagerReview";
 import ProductRequestForm from "./pages/Eac-inventory/ProductRequestForm";
 import StoreOfficerApproval from "./pages/Eac-inventory/StoreOfficerApproval";
@@ -64,6 +66,7 @@ import CostCenterManagement from "./pages/Eac-inventory/CostCenterManagement";
 import ReportsDashboard from "./pages/Eac-inventory/ReportsDashboard";
 import PlannerProductsReview from "./pages/Eac-inventory/plannerProductsReview";
 import ProcurementPurchases from "./pages/Eac-inventory/procurementPurchases";
+import WaybillDocuments from "./pages/Eac-inventory/WaybillDocuments";
 
 // Transport Pages
 import AdminDashboard from "./pages/Transport/admindashboard";
@@ -79,6 +82,8 @@ import CentralizedDashboard from './pages/Central-Dashboard/centralizedDashboard
 import Home from './pages/Eac-attendance/home';
 import Userpage from './pages/Userpage';
 import PagePermissionManagement from "./pages/pagePermissionManagement";
+import PortalRequestsPage from "./pages/PortalRequestsPage";
+import PettyCashPage from "./pages/PettyCashPage";
 import Search from "./components/search";
 import MainSidebar from './pages/Eac-attendance/mainSidebar';
 import Sidebar from "./pages/Transport/Sidebar";
@@ -93,12 +98,14 @@ import MedicalVisitReview from "./pages/Eac-attendance/hospital/MedicalVisitRevi
 import MedicalVisitDetails from "./pages/Eac-attendance/hospital/MedicalVisitDetails.jsx";
 import EmployeeMedicalHistory from "./pages/Eac-attendance/hospital/EmployeeMedicalHistory.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
+import AccountsFundingReview from "./pages/AccountsFundingReview";
 import DirectPurchase from "./pages/Eac-inventory/DirectPurchase.jsx";
 import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx";
 import ThemeToggle from "./components/ThemeToggle";
 import { useTheme } from "./context/ThemeContext";
 
 import LunchLayout from './layouts/LunchLayout';
+import MainLayout from './layouts/MainLayout';
 
 import LunchDashboard from "./pages/Lunch/Dashboard";
 import WeeklyLunchAssignment from "./pages/Lunch/WeeklyLunchAssignment";
@@ -108,6 +115,7 @@ import AttendanceVerification from "./pages/Lunch/AttendanceVerification";
 import KitchenReport from "./pages/Lunch/KitchenReport";
 import LunchReports from "./pages/Lunch/LunchReports";
 import LunchSettings from "./pages/Lunch/LunchSettings";
+import MealPlanning from "./pages/Lunch/MealPlanning";
 import MealManagement from "./pages/Lunch/MealManagement";
 import EmployeeMealSelection from "./pages/Lunch/EmployeeMealSelection";
 
@@ -185,6 +193,11 @@ function App() {
         <AttendanceVerification />
       </ProtectedRoute>
     }
+  />
+
+  <Route
+    path="/lunch/meal-planning"
+    element={<ProtectedRoute><MealPlanning /></ProtectedRoute>}
   />
 
   <Route
@@ -286,6 +299,7 @@ function App() {
             </ProtectedRoute>
           } />
 
+      <Route path="/accountsFundingReview" element={<ProtectedRoute><AccountsFundingReview /></ProtectedRoute>} />
       <Route path="/DirectPurchase" element={<DirectPurchase />} />
 <Route path="/DirectPurchase/:id" element={<DirectPurchaseDetail />} />
 
@@ -390,6 +404,12 @@ function App() {
           <Route path="/reports" element={
             <ProtectedRoute>
               <Reports />
+            </ProtectedRoute>
+          } />
+          <Route path="/employee-issued-items" element={<ProtectedRoute><EmployeeIssuedItems /></ProtectedRoute>} />
+          <Route path="/weekly-attendance-email" element={
+            <ProtectedRoute>
+              <WeeklyAttendanceEmail />
             </ProtectedRoute>
           } />
           
@@ -641,6 +661,25 @@ function App() {
               <PagePermissionManagement />
             </ProtectedRoute>
           } />
+          <Route path="/inventory-documents" element={
+            <ProtectedRoute>
+              <WaybillDocuments />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/portalRequests" element={
+            <ProtectedRoute>
+              <PortalRequestsPage />
+            </ProtectedRoute>
+          } />
+
+          <Route element={<MainLayout />}>
+            <Route path="/pettyCash" element={
+              <ProtectedRoute>
+                <PettyCashPage />
+              </ProtectedRoute>
+            } />
+          </Route>
           
           <Route path="/search" element={
             <ProtectedRoute>

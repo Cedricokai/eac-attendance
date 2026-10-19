@@ -231,6 +231,7 @@ function Leave() {
   };
 
   const isLeaveDeductible = (leaveType) => {
+    if (/^unpaid(?:\s+leave)?$/i.test(leaveType?.trim() || '')) return false;
     return !leaveSettings.nonDeductibleLeaveTypes?.includes(leaveType);
   };
 
@@ -313,9 +314,13 @@ function Leave() {
       });
       if (res.ok) {
         const data = await res.json();
+        const roles = Array.isArray(data.roles)
+          ? data.roles
+          : [data.role].filter(Boolean);
         setUser({
           name: data.username,
-          role: data.role.replace("ROLE_", "").toLowerCase(),
+          role: (roles[0] || '').replace("ROLE_", "").toLowerCase(),
+          roles,
           email: data.email
         });
       }
@@ -751,30 +756,12 @@ function Leave() {
 
   const fetchLeaves = async () => {
     setLoading(true);
+    setError('');
     try {
       const token = getToken();
       
-      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (!userResponse.ok) throw new Error('Failed to fetch user info');
-      const userData = await userResponse.json();
-      
-      let url = `${API_BASE_URL}/api/leave`;
-      const isAdmin = userData.roles?.includes('ROLE_ADMIN') || userData.role === 'ROLE_ADMIN';
-      
-      if (!isAdmin) {
-        const empResponse = await fetch(`${API_BASE_URL}/api/employee/email/${userData.email}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        if (empResponse.ok) {
-          const empData = await empResponse.json();
-          url = `${API_BASE_URL}/api/leave/employee/${empData.id}`;
-        }
-      }
-      
+      const url = `${API_BASE_URL}/api/leave/list`;
+
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,

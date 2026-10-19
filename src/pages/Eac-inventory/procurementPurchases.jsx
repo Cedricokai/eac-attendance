@@ -15,7 +15,6 @@ import {
   UserCircleIcon,
   ShoppingCartIcon,
   BuildingOfficeIcon,
-  CurrencyDollarIcon,
   XMarkIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -133,13 +132,13 @@ const ProcurementPurchases = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch purchase orders: ${response.status}`);
+        throw new Error(`Failed to fetch procurement purchases: ${response.status}`);
       }
 
       const data = await response.json();
       setPurchaseOrders(data);
     } catch (err) {
-      console.error('Error fetching purchase orders:', err);
+      console.error('Error fetching procurement purchases:', err);
       setError(err.message);
       loadMockData();
     } finally {
@@ -334,7 +333,7 @@ const ProcurementPurchases = () => {
       items: itemsWithTotals
     };
 
-    console.log('Creating purchase order with data:', orderData);
+    console.log('Creating procurement purchase with data:', orderData);
 
     const response = await fetch(`${API_BASE_URL}/api/purchase-orders`, {
       method: 'POST',
@@ -347,19 +346,19 @@ const ProcurementPurchases = () => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Failed to create purchase order: ${errorText}`);
+      throw new Error(`Failed to create procurement purchase: ${errorText}`);
     }
 
     const createdOrder = await response.json();
     setPurchaseOrders(prev => [createdOrder, ...prev]);
     
-    toast.success('Purchase order created successfully! Products will be created only when store receives them.');
+    toast.success('Procurement purchase created successfully! Products will be created only when store receives them.');
     setIsCreateModalOpen(false);
     resetNewOrderForm();
     fetchPurchaseOrders();
   } catch (err) {
-    console.error('Error creating purchase order:', err);
-    toast.error(`Failed to create purchase order: ${err.message}`);
+    console.error('Error creating procurement purchase:', err);
+    toast.error(`Failed to create procurement purchase: ${err.message}`);
   }
 };
 
@@ -561,7 +560,7 @@ const ProcurementPurchases = () => {
   };
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-GH', {
       style: 'currency',
       currency: 'GHS'
     }).format(amount || 0);
@@ -638,7 +637,7 @@ const ProcurementPurchases = () => {
             <UserCircleIcon className="h-10 w-10 text-blue-600" />
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Procurement Purchases</h1>
-              <p className="text-gray-600 mt-1">Manage purchase orders and notify stores about incoming stock</p>
+              <p className="text-gray-600 mt-1">Manage procurement purchases and notify stores about incoming stock</p>
             </div>
           </div>
           <button
@@ -646,7 +645,7 @@ const ProcurementPurchases = () => {
             onClick={() => setIsCreateModalOpen(true)}
           >
             <PlusIcon className="h-5 w-5" />
-            Create Purchase Order
+            Create Procurement Purchase
           </button>
         </div>
 
@@ -781,7 +780,7 @@ const ProcurementPurchases = () => {
               </div>
               <input
                 type="text"
-                placeholder="Search purchase orders by PO number, supplier, product..."
+                placeholder="Search procurement purchases by purchase number, supplier, product..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -838,8 +837,8 @@ const ProcurementPurchases = () => {
                     <td colSpan="9" className="p-8 text-center">
                       <div className="flex flex-col items-center justify-center text-gray-500">
                         <DocumentTextIcon className="h-12 w-12 mb-4 text-gray-300" />
-                        <p className="text-sm font-medium">No purchase orders found</p>
-                        <p className="text-xs mt-1">Try adjusting your search or create a new purchase order</p>
+                        <p className="text-sm font-medium">No procurement purchases found</p>
+                        <p className="text-xs mt-1">Try adjusting your search or create a new procurement purchase</p>
                       </div>
                     </td>
                   </tr>
@@ -1005,7 +1004,7 @@ const ProcurementPurchases = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <ShoppingCartIcon className="h-6 w-6 text-blue-500" />
-                    <h2 className="text-xl font-semibold text-gray-900">Create New Purchase Order</h2>
+                    <h2 className="text-xl font-semibold text-gray-900">Create New Procurement Purchase</h2>
                   </div>
                   <button
                     onClick={() => {
@@ -1081,7 +1080,7 @@ const ProcurementPurchases = () => {
                   <textarea
                     value={newOrder.notes}
                     onChange={(e) => setNewOrder(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="Add any notes about this purchase order"
+                    placeholder="Add any notes about this procurement purchase"
                     rows="3"
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
@@ -1354,7 +1353,7 @@ const ProcurementPurchases = () => {
                   disabled={!newOrder.supplierName || !newOrder.supplierContact || !newOrder.expectedDeliveryDate || !newOrder.deliveryAddress}
                 >
                   <ShoppingCartIcon className="h-5 w-5" />
-                  Create Purchase Order
+                  Create Procurement Purchase
                 </button>
               </div>
             </div>
@@ -1381,7 +1380,7 @@ const ProcurementPurchases = () => {
 
               <div className="p-6 overflow-y-auto max-h-[60vh]">
                 <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-6">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Purchase Order Details</h4>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Procurement Purchase Details</h4>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-gray-600">PO Number</p>
@@ -1605,7 +1604,7 @@ const ProcurementPurchases = () => {
                   <div className="flex items-center gap-3">
                     <EyeIcon className="h-6 w-6 text-blue-500" />
                     <div>
-                      <h2 className="text-xl font-semibold text-gray-900">Purchase Order Details</h2>
+                      <h2 className="text-xl font-semibold text-gray-900">Procurement Purchase Details</h2>
                       <p className="text-sm text-gray-600">{selectedOrder.purchaseOrderNumber}</p>
                     </div>
                   </div>

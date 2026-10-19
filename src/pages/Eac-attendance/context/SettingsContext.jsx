@@ -23,6 +23,8 @@ export const SettingsProvider = ({ children }) => {
     timeAndHalfAfter8Hours: false,
     weekendRate: 0,
     holidayRate: 0,
+    // No frontend fallback. Display exactly what the backend returns.
+    defaultOvertimeMultiplier: null,
     
     // Employee Categories
     employeeCategories: [],
@@ -119,8 +121,10 @@ export const SettingsProvider = ({ children }) => {
         weekendDays: data.weekendDays || [],
         doubleTimeOnSunday: systemSettings.doubleTimeOnSunday || false,
         timeAndHalfAfter8Hours: systemSettings.timeAndHalfAfter8Hours || false,
-        weekendRate: systemSettings.weekendRate || 1.0,
-        holidayRate: systemSettings.holidayRate || 1.0,
+        weekendRate: systemSettings.weekendRate,
+        holidayRate: systemSettings.holidayRate,
+        // Backend is the source of truth; do not substitute a frontend value.
+        defaultOvertimeMultiplier: systemSettings.defaultOvertimeMultiplier,
         employeeCategories: data.employeeCategories || [],
         companyName: systemSettings.companyName || 'EAC ELECTRICAL SOLUTION LIMITED',
         companyEmail: systemSettings.companyEmail || '',
@@ -151,8 +155,10 @@ export const SettingsProvider = ({ children }) => {
         weekendDays: Array.isArray(newSettings.weekendDays) ? newSettings.weekendDays : [],
         doubleTimeOnSunday: Boolean(newSettings.doubleTimeOnSunday),
         timeAndHalfAfter8Hours: Boolean(newSettings.timeAndHalfAfter8Hours),
-        weekendRate: parseFloat(newSettings.weekendRate) || 1.0,
-        holidayRate: parseFloat(newSettings.holidayRate) || 1.0,
+        weekendRate: newSettings.weekendRate,
+        holidayRate: newSettings.holidayRate,
+        // Send exactly the value currently held by the settings form/context.
+        defaultOvertimeMultiplier: newSettings.defaultOvertimeMultiplier,
         employeeCategories: Array.isArray(newSettings.employeeCategories) ? newSettings.employeeCategories : [],
         companyName: newSettings.companyName || '',
         companyEmail: newSettings.companyEmail || '',
@@ -481,6 +487,7 @@ export const SettingsProvider = ({ children }) => {
       timeAndHalfAfter8Hours: false,
       weekendRate: 0,
       holidayRate: 0,
+      defaultOvertimeMultiplier: null,
       employeeCategories: [],
     };
     

@@ -389,7 +389,7 @@ function AttendanceRequests({ reviewMode = false }) {
                 <select value={form.shift} onChange={(e) => setForm({ ...form, shift: e.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"><option>Day</option><option>Night</option></select>
               </label>
               <label className="text-sm font-medium text-gray-700">Evidence reference (optional)
-                <input value={form.evidenceReference} onChange={(e) => setForm({ ...form, evidenceReference: e.target.value })} placeholder="Job card, site log, or document ID" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2" />
+                <input value={form.evidenceReference} onChange={(e) => setForm({ ...form, evidenceReference: e.target.value })} placeholder="Project card, site log, or document ID" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2" />
               </label>
               <label className="text-sm font-medium text-gray-700 md:col-span-2">Reason for manual attendance
                 <textarea value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} rows={4} maxLength={1000} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2" required />

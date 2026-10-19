@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline';
-import { lunchApi } from '../services/lunchApi';
+import { changedMealDays } from '../utils/mealSelection';
+import { weekMonday } from '../utils/assignmentDisplay';
+import { lunchApi } from '../Services/lunchApi';
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
 const DAY_LABELS = {
@@ -11,25 +14,19 @@ const DAY_LABELS = {
   FRIDAY: 'Friday'
 };
 
-const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
+const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved, initialWeekStart }) => {
   const [meals, setMeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [assignment, setAssignment] = useState(null);
-  const [selectedWeekStart, setSelectedWeekStart] = useState(getMondayOfCurrentWeek());
+  const [selectedWeekStart, setSelectedWeekStart] = useState(initialWeekStart || weekMonday());
   const [dayMeals, setDayMeals] = useState({});
   const [error, setError] = useState(null);
 
-  function getMondayOfCurrentWeek() {
-    const today = new Date();
-    const day = today.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    const monday = new Date(today);
-    monday.setDate(today.getDate() - diff);
-    return monday.toISOString().split('T')[0];
-  }
+
 
   useEffect(() => {
+    let cancelled = false;
     const fetchData = async () => {
       try {
         setLoading(true);
@@ -40,8 +37,7 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
           lunchApi.getEmployeeWeeklyAssignment(employee.id, selectedWeekStart)
         ]);
 
-        console.log('Meals response:', mealsRes);
-        console.log('Assignment response:', assignmentRes);
+        if (cancelled) return;
 
         const mealsData = mealsRes.data || mealsRes;
         const mealsArray = Array.isArray(mealsData) ? mealsData : [];
@@ -58,15 +54,17 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
           setDayMeals(empty);
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Error loading data:', err);
         const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to load data';
         setError(errorMessage);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
+    return () => { cancelled = true; };
   }, [employee.id, selectedWeekStart]);
 
   const handleDayMealChange = (day, mealId) => {
@@ -81,11 +79,7 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
     setSaving(true);
     setError(null);
     try {
-      const daysToSend = {};
-      DAYS.forEach(day => {
-        const mealId = dayMeals[day];
-        daysToSend[day] = (mealId !== null && mealId !== undefined && mealId !== '') ? mealId : null;
-      });
+      const daysToSend = changedMealDays(assignment?.days || {}, dayMeals);
 
       const payload = {
         employeeId: employee.id,
@@ -108,7 +102,7 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
   };
 
   const handleWeekChange = (e) => {
-    setSelectedWeekStart(e.target.value);
+    if (e.target.value) setSelectedWeekStart(weekMonday(e.target.value));
   };
 
   const fullName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim();
@@ -135,10 +129,10 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
               <p className="font-semibold">Error loading data</p>
               <p className="text-sm">{error}</p>
               <button
-                onClick={() => setError(null)}
+                onClick={onClose}
                 className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
               >
-                Dismiss
+                Close
               </button>
             </div>
           ) : (
@@ -215,6 +209,14 @@ const EmployeeWeeklyAssignmentModal = ({ employee, onClose, onSaved }) => {
       </div>
     </div>
   );
+};
+
+EmployeeWeeklyAssignmentModal.propTypes = {
+  employee: PropTypes.shape({ id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
+    firstName: PropTypes.string, lastName: PropTypes.string }).isRequired,
+  onClose: PropTypes.func.isRequired,
+  onSaved: PropTypes.func,
+  initialWeekStart: PropTypes.string,
 };
 
 export default EmployeeWeeklyAssignmentModal;

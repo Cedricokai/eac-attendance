@@ -9,13 +9,18 @@ function EmailSettings() {
     lateArrivalRecipients: [],
     overtimeRequestRecipients: [],
     attendanceValidationRecipients: [],
-    leaveApprovalRecipients: []
+    leaveApprovalRecipients: [],
+    accountRequestRecipients: [],
+    supportRequestRecipients: []
+    ,pettyCashRequestRecipients: []
   });
   
   const [newEmail, setNewEmail] = useState('');
   const [activeSection, setActiveSection] = useState('leave');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pettyCashThreshold, setPettyCashThreshold] = useState('0');
+  const [savingThreshold, setSavingThreshold] = useState(false);
 
   // Copy this function exactly from your SettingsPage
   const getApiBaseUrl = () => {
@@ -53,7 +58,24 @@ function EmailSettings() {
 
   useEffect(() => {
     fetchEmailConfig();
+    fetchPettyCashThreshold();
   }, []);
+
+  const fetchPettyCashThreshold = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/petty-cash/summary`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (response.ok) { const data = await response.json(); setPettyCashThreshold(String(data.threshold ?? 0)); }
+    } catch (error) { console.error('Failed to load petty cash threshold:', error); }
+  };
+
+  const savePettyCashThreshold = async () => {
+    setSavingThreshold(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/petty-cash/settings/threshold`, { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ threshold: Number(pettyCashThreshold) }) });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Unable to save threshold');
+      alert('Petty cash threshold saved successfully!');
+    } catch (error) { alert(error.message); } finally { setSavingThreshold(false); }
+  };
 
   const fetchEmailConfig = async () => {
     setLoading(true);
@@ -82,7 +104,11 @@ function EmailSettings() {
       if (response.ok) {
         const data = await response.json();
         console.log('Received data:', data);
-        setEmailConfig(data);
+        setEmailConfig({
+          leaveRequestRecipients: [], attendanceAlertRecipients: [], lateArrivalRecipients: [],
+          overtimeRequestRecipients: [], attendanceValidationRecipients: [], leaveApprovalRecipients: [],
+          accountRequestRecipients: [], supportRequestRecipients: [], pettyCashRequestRecipients: [], ...data
+        });
       } else if (response.status === 401) {
         console.error('Unauthorized - token may be expired');
         // Optionally redirect to login
@@ -145,10 +171,17 @@ function EmailSettings() {
   };
 
   const addEmail = (section) => {
-    if (newEmail && newEmail.includes('@')) {
+    const email = newEmail.trim().toLowerCase();
+
+    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (emailConfig[section].some(recipient => recipient.toLowerCase() === email)) {
+        alert('This email address has already been added');
+        return;
+      }
+
       setEmailConfig(prev => ({
         ...prev,
-        [section]: [...prev[section], newEmail]
+        [section]: [...prev[section], email]
       }));
       setNewEmail('');
     } else {
@@ -200,11 +233,32 @@ function EmailSettings() {
       key: 'attendanceValidationRecipients'
     },
     approval: {
-      title: 'Leave Approvals',
+      title: 'Leave Decision Notifications',
       icon: <Users className="h-5 w-5" />,
-      description: 'Who is copied on leave approval decisions?',
+      description: 'These recipients receive a separate email whenever leave is approved or rejected, showing the employee, the person who made the decision, the approval stage, and the leave dates. The employee also receives an email at the address in their employee record.',
       recipients: emailConfig.leaveApprovalRecipients,
       key: 'leaveApprovalRecipients'
+    },
+    accounts: {
+      title: 'Account Access Requests',
+      icon: <Users className="h-5 w-5" />,
+      description: 'Who receives an email when a new portal account is requested?',
+      recipients: emailConfig.accountRequestRecipients,
+      key: 'accountRequestRecipients'
+    },
+    support: {
+      title: 'IT Support Requests',
+      icon: <AlertTriangle className="h-5 w-5" />,
+      description: 'Who receives an email when a login-page IT ticket is submitted?',
+      recipients: emailConfig.supportRequestRecipients,
+      key: 'supportRequestRecipients'
+    },
+    petty: {
+      title: 'Petty Cash Requests',
+      icon: <Mail className="h-5 w-5" />,
+      description: 'Accounts and additional recipients notified when petty cash is requested.',
+      recipients: emailConfig.pettyCashRequestRecipients,
+      key: 'pettyCashRequestRecipients'
     }
   };
 
@@ -267,6 +321,13 @@ function EmailSettings() {
             </div>
 
             <div className="p-6">
+              {activeSection === 'petty' && (
+                <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
+                  <label className="block text-sm font-semibold text-amber-900 mb-2">Petty cash float threshold (GHS)</label>
+                  <p className="text-xs text-amber-700 mb-3">Approved vouchers deduct from this amount. Approvals cannot exceed the remaining balance.</p>
+                  <div className="flex gap-2"><input type="number" min="0" step="0.01" value={pettyCashThreshold} onChange={(e) => setPettyCashThreshold(e.target.value)} className="flex-1 rounded-lg border border-amber-300 px-4 py-2" /><button onClick={savePettyCashThreshold} disabled={savingThreshold} className="rounded-lg bg-amber-600 px-4 py-2 text-white font-semibold hover:bg-amber-700 disabled:opacity-50">{savingThreshold ? 'Saving...' : 'Save threshold'}</button></div>
+                </div>
+              )}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Email Recipients
@@ -351,7 +412,10 @@ function EmailSettings() {
               <p><strong>Late Arrivals:</strong> {emailConfig.lateArrivalRecipients.length} recipient(s)</p>
               <p><strong>Overtime Requests:</strong> {emailConfig.overtimeRequestRecipients.length} recipient(s)</p>
               <p><strong>Attendance Validation:</strong> {emailConfig.attendanceValidationRecipients.length} recipient(s)</p>
-              <p><strong>Leave Approvals:</strong> {emailConfig.leaveApprovalRecipients.length} recipient(s)</p>
+              <p><strong>Leave Decision Notifications:</strong> {emailConfig.leaveApprovalRecipients.length} additional recipient(s)</p>
+              <p><strong>Account Requests:</strong> {emailConfig.accountRequestRecipients.length} recipient(s)</p>
+              <p><strong>IT Support Requests:</strong> {emailConfig.supportRequestRecipients.length} recipient(s)</p>
+              <p><strong>Petty Cash Requests:</strong> {emailConfig.pettyCashRequestRecipients.length} recipient(s)</p>
             </div>
           </div>
         </div>

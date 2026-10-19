@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { DocumentArrowDownIcon, MagnifyingGlassIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { attendanceService } from './services/lunchApi';
 
@@ -15,7 +15,7 @@ const LunchReports = () => {
   const [showDailyDetails, setShowDailyDetails] = useState(false);
 
   // ----- Date range helpers -----
-  const getDateRange = () => {
+  const getDateRange = useCallback(() => {
     const today = new Date(filter.date);
     let start, end;
     if (filter.period === 'daily') {
@@ -36,26 +36,22 @@ const LunchReports = () => {
       end = new Date(year, month + 1, 0).toISOString().split('T')[0];
     }
     return { start, end };
-  };
+  }, [filter.date, filter.period]);
 
   // ----- Fetch data -----
-  const fetchAttendance = async () => {
+  const fetchAttendance = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const { start, end } = getDateRange();
-      const res = await attendanceService.getAllAttendances();
-      // If the response is an array directly, use it; otherwise use res.data
-      let data = Array.isArray(res) ? res : (res.data || []);
-      // Filter by date range
-      if (start && end) {
-        data = data.filter(rec => {
-          const recDate = new Date(rec.date);
-          const startDate = new Date(start);
-          const endDate = new Date(end);
-          return recDate >= startDate && recDate <= endDate;
-        });
-      }
+      // Request only the selected period instead of downloading all attendance
+      // records and filtering them in the browser. This keeps leave summaries fast.
+      const responses = start === end
+        ? [{ date: start, attendances: await attendanceService.getAttendancesByDate(start) }]
+        : await attendanceService.getAttendancesForDateRange(start, end);
+      const data = responses.flatMap(({ attendances }) =>
+        Array.isArray(attendances) ? attendances : attendances?.data || []
+      );
       setAttendanceData(data);
     } catch (err) {
       setError('Failed to load attendance data. Please try again.');
@@ -63,11 +59,11 @@ const LunchReports = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getDateRange]);
 
   useEffect(() => {
     fetchAttendance();
-  }, [filter.period, filter.date]);
+  }, [fetchAttendance]);
 
   // ----- Filtering (department + search) -----
   const filteredData = useMemo(() => {

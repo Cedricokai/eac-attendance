@@ -1,3 +1,9 @@
+import { getAttendanceCategory, attendanceShift, workedHours, biometricAttendanceDate, timesheetPunches } from '../../../utils/nightShiftAttendance';
+import NightDutyRoster from './NightDutyRoster';
+import { calculateJobScheduleHours } from '../../../utils/jobScheduleHours';
+import { createAttendanceLoader } from '../../../utils/attendanceLoader';
+import { calculateAttendanceTotals } from '../../../utils/attendanceTotals';
+import { recalculateAttendance } from '../../../utils/recalculateAttendance';
 /**
 
  * Attendance.jsx – Complete Attendance Management Component
@@ -37,6 +43,9 @@
 // 1. IMPORTS
 
 // ============================================================
+
+import { offDayDisplayStatus } from '../../../utils/offDayAttendance';
+import { hasAttendancePunch, isConfiguredHoliday, holidayDisplayStatus, holidayCredit } from '../../../utils/holidayAttendance';
 
 import { useState, useEffect, useRef, useMemo } from "react";
 
@@ -177,12 +186,20 @@ function Attendance() {
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
   const [employees, setEmployees] = useState([]);
+  const employeeRequestRef = useRef(0);
+
+  const [allEmployees, setAllEmployees] = useState([]);
+
+  const [jobs, setJobs] = useState([]);
+
+  const [selectedJobFilter, setSelectedJobFilter] = useState('');
 
   const [selectedAttendanceIds, setSelectedAttendanceIds] = useState(new Set());
 
   const [attendanceFilter, setAttendanceFilter] = useState('all');
 
   const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
+  const [showOvertimeDetails, setShowOvertimeDetails] = useState(false);
 
   const [showAdvancedTimeFilters, setShowAdvancedTimeFilters] = useState(false);
 
@@ -199,6 +216,8 @@ function Attendance() {
   });
 
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
+
+  const [employeeCategoryFilter, setEmployeeCategoryFilter] = useState('');
 
   const [editingAttendanceId, setEditingAttendanceId] = useState(null);
 
@@ -219,6 +238,11 @@ function Attendance() {
   const [user, setUser] = useState(null);
 
   const [loading, setLoading] = useState(false);
+  const [supportingLoading, setSupportingLoading] = useState({ leaves: false, report: false });
+  const [supportingError, setSupportingError] = useState('');
+  const [totalsData, setTotalsData] = useState({ records: null, leaves: null, preview: null, error: false });
+  const attendanceLoader = useRef(null);
+  if (!attendanceLoader.current) attendanceLoader.current = createAttendanceLoader();
 
   const [pendingAttendanceRequestCount, setPendingAttendanceRequestCount] = useState(0);
 
@@ -361,6 +385,8 @@ function Attendance() {
   const [batchUpdateData, setBatchUpdateData] = useState({ checkIn: '', checkOut: '' });
 
   const [batchUpdating, setBatchUpdating] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalculateProgress, setRecalculateProgress] = useState({ done: 0, total: 0 });
 
 
 
@@ -670,45 +696,11 @@ function Attendance() {
 
 
 
-  const calculateHours = (checkIn, checkOut) => {
-
-    if (!checkIn || !checkOut) return 0;
-
-    try {
-
-      const [inHour, inMinute] = checkIn.split(':').map(Number);
-
-      const [outHour, outMinute] = checkOut.split(':').map(Number);
-
-      const totalInMinutes = inHour * 60 + inMinute;
-
-      const totalOutMinutes = outHour * 60 + outMinute;
-
-      const diffMinutes = totalOutMinutes - totalInMinutes;
-
-      return (diffMinutes / 60).toFixed(2);
-
-    } catch (e) {
-
-      console.error('Error calculating hours:', e);
-
-      return 0;
-
-    }
-
-  };
+  const calculateHours = (checkIn, checkOut) => workedHours(checkIn, checkOut).toFixed(2);
 
 
 
-  const determineShift = (checkInTime) => {
-
-    if (!checkInTime) return 'Day';
-
-    const [hours] = checkInTime.split(':').map(Number);
-
-    return hours >= 18 || hours < 6 ? 'Night' : 'Day';
-
-  };
+  const determineShift = (checkInTime, employee) => attendanceShift(checkInTime, getAttendanceCategory(employee, settings.categories));
 
 
 
@@ -726,7 +718,7 @@ function Attendance() {
 
   const isHoliday = (dateString) => {
 
-    return settings.holidays.some(holiday => holiday.date === dateString);
+    return isConfiguredHoliday(dateString, settings.holidays);
 
   };
 
@@ -744,7 +736,17 @@ function Attendance() {
 
 
 
+  const getEmployeeJobSchedule = (employee) => {
+    const job = jobs.find(job => String(job.id) === String(employee?.job?.id ?? employee?.jobId)) || employee?.job;
+    return job?.workStartTime ? job : null;
+  };
+
   const getEmployeeStandardHours = (employee) => {
+    const job = getEmployeeJobSchedule(employee);
+    if (job?.standardWorkHours != null) return Number(job.standardWorkHours);
+    const categoryHours = getAttendanceCategory(employee, settings.categories)?.standardRateHours;
+    if (categoryHours != null) return Number(categoryHours);
+
 
     if (!employee) return settings.standardWorkHours || 0;
 
@@ -773,6 +775,11 @@ function Attendance() {
 
 
   const getEmployeeWorkStartTime = (employee) => {
+    const job = getEmployeeJobSchedule(employee);
+    if (job) return job.workStartTime;
+    const categoryStart = getAttendanceCategory(employee, settings.categories)?.workStartTime;
+    if (categoryStart) return categoryStart;
+
 
     if (!employee) return settings.lateArrivalTime || '09:00';
 
@@ -806,7 +813,9 @@ function Attendance() {
 
       return [
 
-        { value: "Holiday Present", label: "Holiday Present" },
+        { value: "Holiday", label: "Holiday (8 hours, no attendance)" },
+
+        { value: "Holiday Present", label: "Holiday Present (worked)" },
 
         { value: "Absent", label: "Absent" }
 
@@ -820,6 +829,7 @@ function Attendance() {
 
       return [
 
+        { value: "Off Day", label: "Off Day (no attendance)" },
         { value: "Special Weekend Present", label },
 
         { value: "Absent", label: "Absent" }
@@ -830,6 +840,7 @@ function Attendance() {
 
       return [
 
+        { value: "Off Day", label: "Off Day (no attendance)" },
         { value: "Weekend Present", label: "Weekend Present" },
 
         { value: "Absent", label: "Absent" }
@@ -856,8 +867,19 @@ function Attendance() {
 
   const getStatusDisplay = (attendance) => {
 
-    const date = attendance.date;
+    if (attendance.status === 'On Leave') {
+      return { text: 'On Leave', class: 'bg-blue-100 text-blue-800' };
+    }
 
+    const date = attendance.date;
+    const holidayStatus = holidayDisplayStatus(attendance, isHoliday(date));
+    if (holidayStatus) return {
+      text: holidayStatus,
+      class: holidayStatus === 'Holiday' ? 'bg-yellow-100 text-yellow-800' : 'bg-purple-100 text-purple-800'
+    };
+
+    const offDayStatus = offDayDisplayStatus(attendance, isWeekend(date) || isSpecialWeekend(date));
+    if (offDayStatus) return { text: offDayStatus, class: offDayStatus === 'Off Day' ? 'bg-gray-100 text-gray-700' : offDayStatus === 'Absent' ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800' };
     const hasCheckIn = attendance.checkIn && attendance.checkIn !== '--:--';
 
     const hasCheckOut = attendance.checkOut && attendance.checkOut !== '--:--';
@@ -1107,6 +1129,8 @@ function Attendance() {
     setSearchQuery('');
 
     setSelectedCategoryFilter('');
+
+    setSelectedJobFilter('');
 
     setAttendanceFilter('all');
 
@@ -1442,15 +1466,7 @@ function Attendance() {
 
   const refreshSettings = async () => {
 
-    await loadSettings();
-
-    await loadHolidays();
-
-    await loadJobPositions();
-
-    await loadCategories();
-
-    await loadSpecialWeekends();
+    await Promise.all([loadSettings(), loadHolidays(), loadJobPositions(), loadCategories(), loadSpecialWeekends()]);
 
   };
 
@@ -1459,20 +1475,41 @@ function Attendance() {
   // 5b. Fetch employees
 
   const fetchEmployees = async () => {
+    const requestId = ++employeeRequestRef.current;
+    setEmployees([]);
+    setSelectedEmployees([]);
+    setSelectAllEmployees(false);
     try {
       const token = getToken();
-      const selectedDate = dateFilterMode === 'single' ? singleDate : rangeStart;
-      if (!selectedDate) { setEmployees([]); return; }
+      const selectedDate = createDateMode === 'range' ? createRangeStart : (newAttendance.date || singleDate);
+      if (!selectedDate) return;
       const response = await fetch(
-        `${API_BASE_URL}/api/attendance/available-employees?date=${selectedDate}`,
+        `${API_BASE_URL}/api/attendance/available-employees?date=${encodeURIComponent(selectedDate)}`,
         { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
       );
       if (!response.ok) throw new Error(await response.text() || 'Failed to fetch available employees');
-      setEmployees(await response.json());
+      const available = await response.json();
+      if (requestId === employeeRequestRef.current) setEmployees(available);
     } catch (err) {
+      if (requestId !== employeeRequestRef.current) return;
       console.error('Error fetching available employees:', err);
       setError(err.message);
       setEmployees([]);
+    }
+  };
+  const fetchJobFilterData = async () => {
+    try {
+      const token = getToken();
+      const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+      const [jobsResponse, employeesResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/jobs`, { headers }),
+        fetch(`${API_BASE_URL}/api/employee`, { headers })
+      ]);
+
+      if (jobsResponse.ok) setJobs(await jobsResponse.json());
+      if (employeesResponse.ok) setAllEmployees(await employeesResponse.json());
+    } catch (err) {
+      console.error('Error loading project filter data:', err);
     }
   };
 
@@ -1507,6 +1544,8 @@ function Attendance() {
     lastName: record.lastName,
     categoryId: record.categoryId,
     categoryName: record.categoryName,
+    jobId: record.jobId,
+    jobName: record.jobName,
 
     employee: {
       id: record.employeeId,
@@ -1523,6 +1562,9 @@ function Attendance() {
             id: record.categoryId,
             name: record.categoryName
           }
+        : null,
+      job: record.jobId
+        ? { id: record.jobId, name: record.jobName }
         : null
     }
   };
@@ -1531,9 +1573,14 @@ function Attendance() {
   // 5c. Fetch attendance with date filtering
 
 const fetchAttendance = async (
-  requestedPage = attendancePage
+  requestedPage = attendancePage,
+  { refresh = true } = {}
 ) => {
   setLoading(true);
+  setSupportingLoading({ leaves: true, report: true });
+  setSupportingError('');
+  setTotalsData({ records: null, leaves: null, preview: null, error: false });
+  attendanceLoader.current.cancel();
   setError('');
 
   try {
@@ -1581,76 +1628,76 @@ const fetchAttendance = async (
       'Content-Type': 'application/json'
     };
 
-    const [attendanceRes, leavesRes] = await Promise.all([
-      fetch(
-        `${API_BASE_URL}/api/attendance/page?${params.toString()}`,
-        { headers }
-      ),
-      fetch(
-        `${API_BASE_URL}/api/leave`,
-        { headers }
-      )
-    ]);
+    let pageRecords = [];
+    let leaveRecords = [];
+    const publish = () => {
+      const combined = [...pageRecords, ...leaveRecords];
+      setAttendances(showHidden ? combined : combined.filter(record => !clearedDates.includes(record.date)));
+    };
 
-    if (!attendanceRes.ok) {
-      const message = await attendanceRes.text();
-
-      throw new Error(
-        message ||
-        `Failed to fetch attendance: ${attendanceRes.status}`
-      );
-    }
-
-    const pageData = await attendanceRes.json();
-
-    const rawPageRecords = Array.isArray(pageData.content)
-      ? pageData.content
-      : [];
-
-    const pageRecords = rawPageRecords
-      .map(normalizeAttendanceDTO)
-      .filter(Boolean);
-
-    const approvedLeaves = leavesRes.ok
-      ? await leavesRes.json()
-      : [];
-
-    const leaveAttendanceRecords =
-      generateLeaveAttendanceRecords(
-        approvedLeaves,
-        pageRecords
-      );
-
-    const combinedData = [
-      ...pageRecords,
-      ...leaveAttendanceRecords
-    ];
-
-    const visibleRecords = showHidden
-      ? combinedData
-      : combinedData.filter(
-          (attendance) =>
-            !clearedDates.includes(attendance.date)
-        );
-
-    setAttendances(visibleRecords);
-
-    setAttendancePage(
-      Number(pageData.number ?? requestedPage)
-    );
-
-    setAttendanceTotalPages(
-      Number(pageData.totalPages ?? 0)
-    );
-
-    setAttendanceTotalRecords(
-      Number(pageData.totalElements ?? 0)
-    );
-
-    setSelectedAttendanceIds(new Set());
-    setIsAllSelected(false);
+    await attendanceLoader.current.load({
+      pageUrl: API_BASE_URL + '/api/attendance/page?' + params.toString(),
+      allRecordsUrl: API_BASE_URL + '/api/attendance?' + new URLSearchParams({ startDate: start, endDate: end }),
+      leavesUrl: API_BASE_URL + '/api/leave',
+      previewUrl: API_BASE_URL + '/api/reports/attendance/preview?startDate=' + encodeURIComponent(start) + '&endDate=' + encodeURIComponent(end),
+      headers,
+      refresh,
+      onAllRecords: (data) => {
+        if (!Array.isArray(data)) throw new Error('Invalid attendance totals response');
+        setTotalsData(previous => ({ ...previous, records: data.map(normalizeAttendanceDTO).filter(Boolean) }));
+      },
+      onPage: (pageData) => {
+        pageRecords = (Array.isArray(pageData.content) ? pageData.content : [])
+          .map(normalizeAttendanceDTO).filter(Boolean)
+          .map(record => ({ ...record, reportDetail: null, reportStatus: 'loading' }));
+        publish();
+        setAttendancePage(Number(pageData.number ?? requestedPage));
+        setAttendanceTotalPages(Number(pageData.totalPages ?? 0));
+        setAttendanceTotalRecords(Number(pageData.totalElements ?? 0));
+        setSelectedAttendanceIds(new Set());
+        setIsAllSelected(false);
+      },
+      onLeaves: (data) => {
+        setTotalsData(previous => ({ ...previous, leaves: data }));
+        setLeaves(data);
+        leaveRecords = generateLeaveAttendanceRecords(data, pageRecords);
+        publish();
+        setSupportingLoading(previous => ({ ...previous, leaves: false }));
+      },
+      onPreview: (data) => {
+        if (!Array.isArray(data.rows)) throw new Error('Invalid attendance report response');
+        setTotalsData(previous => ({ ...previous, preview: data.rows }));
+        const byId = new Map((data.rows || []).map(row => [String(row.attendanceId), row]));
+        pageRecords = pageRecords.map(record => ({
+          ...record, reportDetail: byId.get(String(record.id)) || null, reportStatus: 'ready'
+        }));
+        publish();
+        setSupportingLoading(previous => ({ ...previous, report: false }));
+      },
+      onSupportingError: (name) => {
+        setTotalsData(previous => ({ ...previous, error: true }));
+        setSupportingError(previous => [previous, name + ' could not be loaded. Refresh to retry.'].filter(Boolean).join(' '));
+        if (name === 'Attendance totals') return;
+        const key = name === 'Report details' ? 'report' : 'leaves';
+        setSupportingLoading(previous => ({ ...previous, [key]: false }));
+        if (key === 'report') {
+          pageRecords = pageRecords.map(record => ({ ...record, reportStatus: 'unavailable' }));
+          publish();
+        }
+      },
+      onError: (err) => {
+        setTotalsData(previous => ({ ...previous, error: true }));
+        setError(err.message || 'Failed to load attendance');
+        setAttendances([]);
+        setAttendanceTotalPages(0);
+        setAttendanceTotalRecords(0);
+        setSupportingLoading({ leaves: false, report: false });
+      },
+      onPageSettled: () => setLoading(false)
+    });
   } catch (err) {
     console.error('Error loading attendance:', err);
+    setTotalsData(previous => ({ ...previous, error: true }));
 
     setError(
       err instanceof Error
@@ -1661,11 +1708,32 @@ const fetchAttendance = async (
     setAttendances([]);
     setAttendanceTotalPages(0);
     setAttendanceTotalRecords(0);
-  } finally {
+    setSupportingLoading({ leaves: false, report: false });
     setLoading(false);
   }
 };
 
+
+
+  const getAttendanceRawOvertime = (attendance) =>
+    Number(attendance?.reportDetail?.rawOvertimeHours ?? attendance?.overtime ?? 0);
+
+  const getAttendanceFinalOvertime = (attendance) =>
+    Number(attendance?.reportDetail?.overtimeHours ?? attendance?.overtime ?? 0);
+
+  const getAttendanceMultiplier = (attendance) => {
+    const value = attendance?.reportDetail?.overtimeMultiplier;
+    return value === null || value === undefined ? null : Number(value);
+  };
+
+  const getAttendanceHoursWorked = (attendance) =>
+    Number(attendance?.minimumHour ?? 0) + getAttendanceRawOvertime(attendance);
+
+  const getAttendanceTreatment = (attendance) =>
+    attendance?.reportDetail?.overtimeExplanation ||
+    (getAttendanceRawOvertime(attendance) > 0
+      ? 'Overtime generated from worked hours.'
+      : 'No overtime generated.');
 
 
   // 5d. Generate leave attendance records
@@ -1768,36 +1836,6 @@ const fetchAttendance = async (
 
 
 
-  // 5e. Fetch leaves (for exclusion logic)
-
-  const fetchLeaves = async () => {
-
-    try {
-
-      const token = getToken();
-
-      const response = await fetch(`${API_BASE_URL}/api/leave`, {
-
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch leaves');
-
-      const data = await response.json();
-
-      setLeaves(data);
-
-    } catch (err) {
-
-      setError(err.message);
-
-    }
-
-  };
-
-
-
   // 5f. Create or update attendance (single or batch)
 
   const createAttendance = async () => {
@@ -1805,14 +1843,21 @@ const fetchAttendance = async (
     try {
 
       const token = getToken();
-
-      
-
+      if (
+  newAttendance.status === 'Holiday Present' &&
+  !hasAttendancePunch(newAttendance)
+) {
+  alert(
+    'Holiday Present requires attendance punches. ' +
+    'Use Holiday for a non-worked configured holiday.'
+  );
+  return;
+}
       // ---- EDIT MODE ----
 
       if (isEditing && editingAttendanceId) {
 
-        const updateData = {
+        let updateData = {
 
           shift: newAttendance.shift || 'Day',
 
@@ -1828,6 +1873,10 @@ const fetchAttendance = async (
 
         };
 
+        if (updateData.status === 'Holiday') {
+          if (!isHoliday(updateData.date)) { alert('Holiday requires a configured holiday date.'); return; }
+          updateData = holidayCredit(updateData);
+        }
         const response = await fetch(`${API_BASE_URL}/api/attendance/${editingAttendanceId}`, {
 
           method: 'PUT',
@@ -1922,6 +1971,12 @@ const fetchAttendance = async (
 
 
 
+          if (newAttendance.status === 'Holiday' || (isHoliday(dateStr) && !hasAttendancePunch(newAttendance) && !['Absent', 'On Leave', 'Sick'].includes(newAttendance.status))) {
+            if (!isHoliday(dateStr)) { alert('Holiday requires a configured holiday date for every selected day.'); return; }
+            attendancePayload.push(holidayCredit({ employee: { id: employeeId }, date: dateStr,
+              shift: newAttendance.shift || 'Day', workType: newAttendance.workType || 'Regular' }));
+            continue;
+          }
           const workStartTime = getEmployeeWorkStartTime(employee);
 
           // Calculate worked minutes considering work start time
@@ -1982,7 +2037,18 @@ const fetchAttendance = async (
 
           const standardMinutes = standardHours * 60;
 
-          const overtimeMinutes = Math.max(0, totalWorkedMinutes - standardMinutes);
+          const scheduledHours = (getEmployeeJobSchedule(employee) || getAttendanceCategory(employee, settings.categories)?.overnightShift) && newAttendance.checkIn && newAttendance.checkOut
+            ? calculateJobScheduleHours(workStartTime, standardHours, newAttendance.checkIn, newAttendance.checkOut)
+            : null;
+          const overtimeMinutes = scheduledHours
+            ? scheduledHours.overtimeHours * 60
+            : Math.max(0, totalWorkedMinutes - standardMinutes);
+
+          // Keep normal hours separate from overtime.
+          // Total hours for display can be derived as normal hours + overtime hours.
+          const normalWorkedHours = scheduledHours
+            ? scheduledHours.normalHours
+            : Math.min(totalWorkedMinutes / 60, standardHours);
 
 
 
@@ -2016,8 +2082,10 @@ const fetchAttendance = async (
 
           // Determine status
 
-          let determinedStatus = newAttendance.status;
+          let determinedStatus = isHoliday(dateStr) && hasAttendancePunch(newAttendance) ? 'Holiday Present' : newAttendance.status;
 
+          const offDayStatus = offDayDisplayStatus({ ...newAttendance, status: determinedStatus }, isWeekend(dateStr) || isSpecialWeekend(dateStr));
+          if (offDayStatus) determinedStatus = offDayStatus;
           if (!determinedStatus) {
 
             if (isHoliday(dateStr)) {
@@ -2062,7 +2130,7 @@ const fetchAttendance = async (
 
             employee: { id: employeeId },
 
-            shift: newAttendance.shift || determineShift(newAttendance.checkIn),
+            shift: newAttendance.shift || determineShift(newAttendance.checkIn, employee),
 
             workType: newAttendance.workType || 'Regular',
 
@@ -2074,7 +2142,7 @@ const fetchAttendance = async (
 
             checkOut: newAttendance.checkOut ? formatTimeToHHMMSS(newAttendance.checkOut) : null,
 
-            minimumHour: totalWorkedMinutes / 60,
+            minimumHour: normalWorkedHours,
 
             overtime: overtimeMinutes / 60,
 
@@ -2185,6 +2253,8 @@ const fetchAttendance = async (
     setCreateRangeEnd(singleDate);
 
     setEmployeeSearchQuery('');
+
+    setEmployeeCategoryFilter('');
 
   };
 
@@ -2532,7 +2602,7 @@ const fetchAttendance = async (
 
         date: attendance.date,
 
-        status: attendance.status || '',
+        status: holidayDisplayStatus(attendance, isHoliday(attendance.date)) || offDayDisplayStatus(attendance, isWeekend(attendance.date) || isSpecialWeekend(attendance.date)) || attendance.status || '',
 
         minimumHour: attendance.minimumHour || '',
 
@@ -2559,6 +2629,35 @@ const fetchAttendance = async (
   };
 
 
+
+  const recalculateSelectedAttendance = async () => {
+    if (recalculating || batchUpdating || loading || selectedAttendanceIds.size === 0) return;
+    setRecalculating(true);
+    setRecalculateProgress({ done: 0, total: selectedAttendanceIds.size });
+    try {
+      const token = getToken();
+      const result = await recalculateAttendance(
+        attendances, selectedAttendanceIds,
+        async (id, payload) => {
+          const response = await fetch(`${API_BASE_URL}/api/attendance/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) throw new Error(`Failed to update record ${id}`);
+        },
+        (done, total) => setRecalculateProgress({ done, total })
+      );
+      await fetchAttendance();
+      setSelectedAttendanceIds(new Set([...result.failed, ...result.skipped]));
+      setIsAllSelected(false);
+      alert(`${result.succeeded.length} record(s) recalculated.\n${result.skipped.length} skipped (missing check-in/checkout or no longer loaded).\n${result.failed.length} failed. Failed and skipped records remain selected.`);
+    } catch (err) {
+      setError(`Unable to recalculate attendance: ${err.message}`);
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   // 5j. Batch Update (NEW)
 
@@ -2738,23 +2837,18 @@ const fetchAttendance = async (
 
       const rawRecords = await response.json();
       const normalizedSearch = searchQuery.trim().toLowerCase();
-      const exportRecords = (Array.isArray(rawRecords) ? rawRecords : [])
+      const records = (Array.isArray(rawRecords) ? rawRecords : [])
         .map((record) => record.employee ? record : normalizeAttendanceDTO(record))
-        .filter(Boolean)
-        .filter((record) => {
-          if (!normalizedSearch) return true;
-          const employee = record.employee || {};
-          return [
-            employee.firstName,
-            employee.lastName,
-            `${employee.firstName || ''} ${employee.lastName || ''}`,
-            employee.employeeId,
-            record.employeeNumber
-          ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
-        });
+        .filter(Boolean);
+      const exportRecords = filterAttendanceRecords(records).filter((record) =>
+        record.date >= start && record.date <= end &&
+        (showHidden || !clearedDates.includes(record.date))
+      );
+      const now = new Date();
+      const exportDate = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
 
       if (exportRecords.length === 0) {
-        alert("No attendance records match the selected employee and duration.");
+        alert("No attendance records match the current filters.");
         return;
       }
 
@@ -2762,7 +2856,7 @@ const fetchAttendance = async (
 
       "Date", "Employee ID", "Employee Name", "Check In", "Check Out",
 
-      "Hours Worked", "Shift", "Status"
+      "Hours Worked", "Shift", "Status", "Export Date"
 
     ];
 
@@ -2782,7 +2876,9 @@ const fetchAttendance = async (
 
       att.shift || "",
 
-      att.status || ""
+      att.status || "",
+
+      exportDate
 
     ]);
 
@@ -2803,7 +2899,7 @@ const fetchAttendance = async (
     const employeeLabel = normalizedSearch
       ? normalizedSearch.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
       : 'all-employees';
-    a.download = `attendance-${employeeLabel}-${start}-to-${end}.csv`;
+    a.download = `attendance-${employeeLabel}-${start}-to-${end}-exported-${exportDate}.csv`;
 
     document.body.appendChild(a);
 
@@ -3116,7 +3212,9 @@ const fetchAttendance = async (
 
         const [hours] = time.split(':').map(Number);
 
-        finalAction = hours < 12 ? "SIGN ON" : "SIGN OFF";
+        const employee = employees.find(emp => String(emp.id) === String(employeeData.id));
+        const overnight = getAttendanceCategory(employee, settings.categories)?.overnightShift;
+        finalAction = (overnight ? hours >= 12 : hours < 12) ? "SIGN ON" : "SIGN OFF";
 
       } else {
 
@@ -3156,7 +3254,9 @@ const fetchAttendance = async (
 
       records.forEach(record => {
 
-        const key = `${record.employeeId}-${record.date}`;
+        const employee = employees.find(emp => String(emp.id) === String(record.employeeId));
+        const shiftDate = biometricAttendanceDate(record, getAttendanceCategory(employee, settings.categories));
+        const key = `${record.employeeId}-${shiftDate}`;
 
         if (!grouped[key]) {
 
@@ -3168,7 +3268,7 @@ const fetchAttendance = async (
 
             employeeCode: record.employeeCode,
 
-            date: record.date,
+            date: shiftDate,
 
             checkIns: [],
 
@@ -3180,9 +3280,9 @@ const fetchAttendance = async (
 
         }
 
-        if (record.action === 'SIGN ON') grouped[key].checkIns.push(record.time);
+        if (record.action === 'SIGN ON') grouped[key].checkIns.push(record.timestamp);
 
-        else if (record.action === 'SIGN OFF') grouped[key].checkOuts.push(record.time);
+        else if (record.action === 'SIGN OFF') grouped[key].checkOuts.push(record.timestamp);
 
         grouped[key].records.push({
 
@@ -3214,9 +3314,9 @@ const fetchAttendance = async (
 
         group.checkOuts.sort();
 
-        const checkIn = group.checkIns.length > 0 ? group.checkIns[0] : null;
+        const checkIn = group.checkIns.length > 0 ? group.checkIns[0].slice(11, 16) : null;
 
-        const checkOut = group.checkOuts.length > 0 ? group.checkOuts[group.checkOuts.length - 1] : null;
+        const checkOut = group.checkOuts.length > 0 ? group.checkOuts[group.checkOuts.length - 1].slice(11, 16) : null;
 
         const hoursWorked = calculateHours(checkIn, checkOut);
 
@@ -3228,7 +3328,8 @@ const fetchAttendance = async (
 
         else if (!checkIn && checkOut) status = 'Half Day';
 
-        const shift = determineShift(checkIn);
+        if (isHoliday(group.date) && (checkIn || checkOut)) status = 'Holiday Present';
+        const shift = determineShift(checkIn, employees.find(emp => String(emp.id) === String(group.employeeId)));
 
         attendanceRecords.push({
 
@@ -4164,15 +4265,15 @@ const fetchAttendance = async (
 
           const totalHours = calculateHoursForSync(checkIn, checkOut);
 
-          const regularHours = Math.min(totalHours, minimumHour || 8);
+          const regularHours = status === 'Holiday' ? 8 : Math.min(totalHours, minimumHour ?? 8);
 
-          const overtimeHours = overtime || Math.max(totalHours - (minimumHour || 8), 0);
+          const overtimeHours = status === 'Holiday' ? 0 : overtime ?? Math.max(totalHours - (minimumHour ?? 8), 0);
 
           timesheet.regularHours = regularHours;
 
           timesheet.overtimeHours = overtimeHours;
 
-          timesheet.totalHours = totalHours;
+          timesheet.totalHours = status === 'Holiday' ? 8 : totalHours;
 
           // Calculate earnings
 
@@ -4254,7 +4355,9 @@ const fetchAttendance = async (
 
           if (isHoliday(date)) {
 
-            if (attendanceCode === 'HP' || attendanceCode === 'P') status = 'Holiday Present';
+            if (attendanceCode === 'H') status = 'Holiday';
+
+            else if (attendanceCode === 'HP' || attendanceCode === 'P') status = 'Holiday Present';
 
             else if (attendanceCode === 'A') status = 'Absent';
 
@@ -4302,23 +4405,15 @@ const fetchAttendance = async (
 
             else if (attendanceCode === 'HP') status = 'Holiday Present';
 
+            else if (attendanceCode === 'H') status = 'Holiday';
+
             else status = 'Present';
 
           }
 
-          const totalHours = regularHours + overtimeHours;
+          const totalHours = Number(regularHours || 0) + Number(overtimeHours || 0);
 
-          const checkIn = '09:00';
-
-          let checkOut = '';
-
-          if (totalHours > 0) {
-
-            const endHour = 9 + totalHours;
-
-            checkOut = `${Math.floor(endHour).toString().padStart(2, '0')}:${((endHour % 1) * 60).toString().padStart(2, '0')}`;
-
-          }
+          const { checkIn, checkOut } = timesheetPunches(totalHours, getEmployeeWorkStartTime(employee));
 
           attendanceRecords.push({
 
@@ -4328,17 +4423,17 @@ const fetchAttendance = async (
 
             status,
 
-            minimumHour: regularHours,
+            minimumHour: status === 'Holiday' ? 8 : regularHours,
 
-            overtime: overtimeHours,
+            overtime: status === 'Holiday' ? 0 : overtimeHours,
 
-            checkIn: totalHours > 0 ? checkIn : null,
+            checkIn: status !== 'Holiday' && totalHours > 0 ? checkIn : null,
 
-            checkOut: totalHours > 0 ? checkOut : null,
+            checkOut: status !== 'Holiday' && totalHours > 0 ? checkOut : null,
 
             totalHoursWorked: totalHours,
 
-            shift: determineShift(checkIn),
+            shift: determineShift(checkIn, employee),
 
             workType: 'Regular',
 
@@ -4354,7 +4449,7 @@ const fetchAttendance = async (
 
         // Save attendance
 
-        const saveRes = await fetch(`${API_BASE_URL}/api/attendance/batch`, {
+        const saveRes = await fetch(`${API_BASE_URL}/api/attendance/batch?overwriteExisting=true`, {
 
           method: 'POST',
 
@@ -4651,20 +4746,24 @@ const fetchAttendance = async (
   // 9c. Initial settings and supporting-data load
   useEffect(() => {
     refreshSettings();
-    fetchLeaves();
+    fetchJobFilterData();
     const interval = setInterval(refreshSettings, 300000);
     return () => clearInterval(interval);
   }, []);
 
   // 9d. Server-side attendance loading
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setAttendancePage(0);
-      fetchAttendance(0);
-      fetchEmployees();
-    }, 350);
-    return () => clearTimeout(timer);
+    setAttendancePage(0);
+    fetchAttendance(0, { refresh: false });
+    return () => attendanceLoader.current.cancel();
   }, [dateFilterMode, singleDate, rangeStart, rangeEnd, showHidden, clearedDates, attendancePageSize]);
+
+  useEffect(() => {
+    if (!isCreateMenuOpen || isEditing) return;
+    fetchEmployees();
+    return () => { employeeRequestRef.current += 1; };
+  }, [isCreateMenuOpen, isEditing, createDateMode, newAttendance.date, singleDate, createRangeStart]);
+
 
   // 9e. Auto-set status when date changes in create form
 
@@ -4674,19 +4773,19 @@ const fetchAttendance = async (
 
     if (!date) return;
 
-    if (!newAttendance.status || newAttendance.status === '') {
+    if (!newAttendance.status || (!isEditing && !getStatusOptions(date).some(option => option.value === newAttendance.status))) {
 
       if (isHoliday(date)) {
 
-        setNewAttendance(prev => ({ ...prev, status: 'Holiday Present' }));
+        setNewAttendance(prev => ({ ...prev, status: hasAttendancePunch(prev) ? 'Holiday Present' : 'Holiday' }));
 
       } else if (isSpecialWeekend(date)) {
 
-        setNewAttendance(prev => ({ ...prev, status: 'Special Weekend Present' }));
+        setNewAttendance(prev => ({ ...prev, status: hasAttendancePunch(prev) ? 'Special Weekend Present' : 'Off Day' }));
 
       } else if (isWeekend(date)) {
 
-        setNewAttendance(prev => ({ ...prev, status: 'Weekend Present' }));
+        setNewAttendance(prev => ({ ...prev, status: hasAttendancePunch(prev) ? 'Weekend Present' : 'Off Day' }));
 
       } else {
 
@@ -4696,7 +4795,7 @@ const fetchAttendance = async (
 
     }
 
-  }, [newAttendance.date, newAttendance.status, singleDate]);
+  }, [newAttendance.date, newAttendance.status, singleDate, settings.holidays, settings.specialWeekends, settings.weekendDays, isEditing]);
 
 
 
@@ -4838,6 +4937,8 @@ const fetchAttendance = async (
 
     Boolean(selectedCategoryFilter),
 
+    Boolean(selectedJobFilter),
+
     attendanceFilter !== 'all',
 
     hasActiveCheckInTimeFilter,
@@ -4852,9 +4953,9 @@ const fetchAttendance = async (
 
 
 
-  const filteredAttendancesBySearch = useMemo(() => {
+  const filterAttendanceRecords = (records) => {
 
-    let filtered = [...attendances];
+    let filtered = [...records];
 
 
 
@@ -4904,6 +5005,32 @@ const fetchAttendance = async (
 
     }
 
+    if (selectedJobFilter) {
+
+      filtered = filtered.filter((attendance) => {
+
+        const employeeId = attendance.employee?.id ?? attendance.employeeId;
+
+        const matchingEmployee = allEmployees.find(
+
+          (employee) => String(employee.id) === String(employeeId)
+
+        );
+
+        const jobId = attendance.employee?.job?.id ?? attendance.jobId ??
+
+          matchingEmployee?.job?.id ?? matchingEmployee?.jobId;
+
+        return selectedJobFilter === 'no-job'
+
+          ? !jobId
+
+          : String(jobId) === selectedJobFilter;
+
+      });
+
+    }
+
 
 
     if (attendanceFilter !== 'all') {
@@ -4924,8 +5051,21 @@ const fetchAttendance = async (
 
 
 
+        const normalizedStatus = String(attendance.status || '').trim().toLowerCase();
+
         switch (attendanceFilter) {
 
+          // Attendance status filters
+          case 'present': return normalizedStatus === 'present';
+
+          case 'absent': return normalizedStatus === 'absent';
+
+          case 'late': return normalizedStatus === 'late';
+
+          case 'half_day':
+            return normalizedStatus === 'half day' || (hasCheckIn !== hasCheckOut);
+
+          // Existing record-completeness filters
           case 'complete_records': return hasCheckIn && hasCheckOut;
 
           case 'incomplete_records': return !hasCheckIn || !hasCheckOut;
@@ -4992,13 +5132,19 @@ const fetchAttendance = async (
 
     return filtered;
 
-  }, [
+  };
+
+  const filteredAttendancesBySearch = useMemo(() => filterAttendanceRecords(attendances), [
 
     attendances,
 
     searchQuery,
 
     selectedCategoryFilter,
+
+    selectedJobFilter,
+
+    allEmployees,
 
     attendanceFilter,
 
@@ -5018,12 +5164,25 @@ const fetchAttendance = async (
 
 
 
+  const filteredAttendanceTotals = (() => {
+    if (totalsData.error) return { status: 'unavailable' };
+    if (!totalsData.records || !totalsData.leaves || !totalsData.preview) return { status: 'loading' };
+    try {
+      const { start, end } = getActiveDateRange();
+      const byId = new Map(totalsData.preview.map(row => [String(row.attendanceId), row]));
+      const records = totalsData.records.filter(record => record.date >= start && record.date <= end);
+      const leaveRecords = generateLeaveAttendanceRecords(totalsData.leaves, records);
+      const combined = [...records, ...leaveRecords].filter(record => showHidden || !clearedDates.includes(record.date));
+      const matching = filterAttendanceRecords(combined).map(record => ({
+        ...record, reportDetail: byId.get(String(record.id)) || null
+      }));
+      return { status: 'ready', count: matching.length, ...calculateAttendanceTotals(matching) };
+    } catch {
+      return { status: 'unavailable' };
+    }
+  })();
+
   const filteredEmployeesBySearch = useMemo(() => {
-
-    if (!employeeSearchQuery.trim()) return employees;
-
-
-
     const query = employeeSearchQuery.toLowerCase().trim();
 
 
@@ -5040,7 +5199,7 @@ const fetchAttendance = async (
 
 
 
-      return (
+      const matchesSearch = !query || (
 
         fullName.includes(query) ||
 
@@ -5052,9 +5211,42 @@ const fetchAttendance = async (
 
       );
 
+      const matchesCategory = !employeeCategoryFilter || category === employeeCategoryFilter.toLowerCase();
+
+      return matchesSearch && matchesCategory;
+
     });
 
-  }, [employees, employeeSearchQuery]);
+  }, [employees, employeeSearchQuery, employeeCategoryFilter]);
+
+  const employeeCategories = useMemo(() => (
+    [...new Set(employees
+      .map(employee => employee.category?.name || employee.category)
+      .filter(Boolean))]
+      .sort((a, b) => String(a).localeCompare(String(b)))
+  ), [employees]);
+
+  const allVisibleEmployeesSelected = filteredEmployeesBySearch.length > 0 &&
+    filteredEmployeesBySearch.every(employee => selectedEmployees.includes(String(employee.id)));
+
+  const toggleAllVisibleEmployees = () => {
+    const visibleIds = filteredEmployeesBySearch.map(employee => String(employee.id));
+
+    setSelectAllEmployees(false);
+    setSelectedEmployees(current => allVisibleEmployeesSelected
+      ? current.filter(id => !visibleIds.includes(String(id)))
+      : [...new Set([...current.map(String), ...visibleIds])]
+    );
+  };
+
+  const toggleSelectedEmployee = (employeeId) => {
+    const id = String(employeeId);
+    setSelectAllEmployees(false);
+    setSelectedEmployees(current => current.includes(id)
+      ? current.filter(selectedId => selectedId !== id)
+      : [...current, id]
+    );
+  };
 
 
 
@@ -5144,7 +5336,7 @@ const fetchAttendance = async (
 
         value={newAttendance.status}
 
-        onChange={(e) => setNewAttendance({ ...newAttendance, status: e.target.value })}
+        onChange={(e) => setNewAttendance(e.target.value === 'Holiday' ? { ...holidayCredit(newAttendance), checkIn: '', checkOut: '' } : { ...newAttendance, status: e.target.value })}
 
         className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 
@@ -5837,6 +6029,7 @@ const fetchAttendance = async (
 
 
           <div className="p-6">
+            <NightDutyRoster apiBaseUrl={API_BASE_URL} employees={employees} categories={settings.categories} />
 
             {/* Top section: title and primary action */}
 
@@ -5938,6 +6131,11 @@ const fetchAttendance = async (
 
                   onClick={() => {
 
+                    resetCreateForm();
+                    const date = dateFilterMode === 'range' ? rangeStart : singleDate;
+                    setNewAttendance(previous => ({ ...previous, date }));
+                    setCreateRangeStart(date);
+                    setCreateRangeEnd(date);
                     setIsCreateMenuOpen(true);
 
                     setEmployeeSearchQuery('');
@@ -6154,6 +6352,40 @@ const fetchAttendance = async (
 
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
 
+                          Project
+
+                        </label>
+
+                        <select
+
+                          value={selectedJobFilter}
+
+                          onChange={(event) => setSelectedJobFilter(event.target.value)}
+
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+
+                        >
+
+                          <option value="">All projects</option>
+
+                          <option value="no-job">No project</option>
+
+                          {jobs.map((job) => (
+
+                            <option key={job.id} value={String(job.id)}>{job.name}</option>
+
+                          ))}
+
+                        </select>
+
+                      </div>
+
+
+
+                      <div>
+
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+
                           Record status
 
                         </label>
@@ -6170,19 +6402,35 @@ const fetchAttendance = async (
 
                           <option value="all">All records</option>
 
-                          <option value="complete_records">Complete records</option>
+                          <optgroup label="Attendance status">
 
-                          <option value="incomplete_records">Incomplete records</option>
+                            <option value="present">Present</option>
 
-                          <option value="checked_in_only">Has check-in</option>
+                            <option value="absent">Absent</option>
 
-                          <option value="checked_out_only">Has check-out</option>
+                            <option value="late">Late</option>
 
-                          <option value="checked_in_no_checkout">Check-in, no check-out</option>
+                            <option value="half_day">Half Day</option>
 
-                          <option value="checked_out_no_checkin">Check-out, no check-in</option>
+                          </optgroup>
 
-                          <option value="missing_both">Missing both times</option>
+                          <optgroup label="Record completeness">
+
+                            <option value="complete_records">Complete records</option>
+
+                            <option value="incomplete_records">Incomplete records</option>
+
+                            <option value="checked_in_only">Has check-in</option>
+
+                            <option value="checked_out_only">Has check-out</option>
+
+                            <option value="checked_in_no_checkout">Check-in, no check-out</option>
+
+                            <option value="checked_out_no_checkin">Check-out, no check-in</option>
+
+                            <option value="missing_both">Missing both times</option>
+
+                          </optgroup>
 
                         </select>
 
@@ -6477,6 +6725,20 @@ const fetchAttendance = async (
                             <button type="button" onClick={() => setSelectedCategoryFilter('')} className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-200">
 
                               {selectedCategoryFilter} <X className="h-3.5 w-3.5" />
+
+                            </button>
+
+                          )}
+
+                          {selectedJobFilter && (
+
+                            <button type="button" onClick={() => setSelectedJobFilter('')} className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-200">
+
+                              Project: {selectedJobFilter === 'no-job'
+
+                                ? 'No project'
+
+                                : jobs.find((job) => String(job.id) === selectedJobFilter)?.name || 'Unknown'} <X className="h-3.5 w-3.5" />
 
                             </button>
 
@@ -7176,6 +7438,18 @@ const fetchAttendance = async (
 
 
 
+                    <button
+                      type="button"
+                      onClick={recalculateSelectedAttendance}
+                      disabled={selectedAttendanceIds.size === 0 || recalculating || batchUpdating || loading}
+                      title="Re-save selected records to recalculate hours using their existing check-in and checkout times."
+                      className="w-full px-4 py-3 rounded-lg text-sm font-medium bg-teal-600 hover:bg-teal-700 text-white disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                    >
+                      {recalculating
+                        ? `Recalculating ${recalculateProgress.done}/${recalculateProgress.total}…`
+                        : `Recalculate hours (${selectedAttendanceIds.size})`}
+                    </button>
+
                     {/* NEW: Batch Update button */}
 
                     <div className="grid grid-cols-2 gap-3 pt-2">
@@ -7196,7 +7470,7 @@ const fetchAttendance = async (
 
                       }}
 
-                      disabled={selectedAttendanceIds.size === 0}
+                      disabled={selectedAttendanceIds.size === 0 || recalculating}
 
                       className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
 
@@ -7230,7 +7504,7 @@ const fetchAttendance = async (
 
   disabled={
 
-    selectedAttendanceIds.size === 0 ||
+    selectedAttendanceIds.size === 0 || recalculating ||
 
     loading
 
@@ -7270,7 +7544,50 @@ const fetchAttendance = async (
 
 
 
+          {(loading || supportingLoading.leaves || supportingLoading.report) && (
+            <p role="status" className="mb-3 text-sm text-blue-700">
+              {loading ? 'Loading attendance records…' : 'Attendance loaded. Loading ' +
+                [supportingLoading.leaves && 'leave records', supportingLoading.report && 'report details'].filter(Boolean).join(' and ') + '…'}
+            </p>
+          )}
+          {supportingError && <p role="alert" className="mb-3 text-sm text-amber-700">{supportingError}</p>}
+
           {/* Attendance Table */}
+
+          <section aria-label="Filtered attendance totals" aria-busy={filteredAttendanceTotals.status === 'loading'} className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-gray-900">Filtered attendance totals</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              All matching records across every page for the selected dates, including leave records.
+              {filteredAttendanceTotals.status === 'ready' && ` ${filteredAttendanceTotals.count} records.`}
+            </p>
+          <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-live="polite">
+  {[
+    ['Total NH', 'normalHours', 'text-blue-700'],
+    ['Total Raw OT', 'rawOvertime', 'text-amber-700'],
+    ['Total Approved OT', 'approvedOvertime', 'text-emerald-700']
+  ].map(([label, key, color]) => (
+    <div key={key} className="rounded-lg bg-gray-50 px-4 py-3">
+      <dt className="text-xs font-medium text-gray-600">{label}</dt>
+      <dd className={`mt-1 text-xl font-semibold ${color}`}>
+        {filteredAttendanceTotals.status === 'ready'
+          ? `${(filteredAttendanceTotals[key] ?? 0).toFixed(2)} hrs`
+          : filteredAttendanceTotals.status === 'loading' ? 'Loading…' : 'Unavailable'}
+      </dd>
+    </div>
+  ))}
+</dl>
+            {filteredAttendanceTotals.status === 'unavailable' && <p role="alert" className="mt-2 text-xs text-amber-700">Complete totals could not be calculated. Refresh attendance to retry.</p>}
+          </section>
+
+          <label className="mb-3 flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={showOvertimeDetails}
+              onChange={(event) => setShowOvertimeDetails(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Show multiplier and final OT columns
+          </label>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
 
@@ -7318,7 +7635,21 @@ const fetchAttendance = async (
 
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check Out</th>
 
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hours</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Normal Hours</th>
+
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Raw OT</th>
+
+                    {showOvertimeDetails && <>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Multiplier</th>
+
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Multiplier Applied To</th>
+
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Final OT</th>
+                    </>}
+
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hours Worked</th>
+
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Treatment</th>
 
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Standard Hours</th>
 
@@ -7412,7 +7743,40 @@ const fetchAttendance = async (
 
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.checkOut || '--:--'}</td>
 
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.minimumHour?.toFixed(2)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {Number(attendance.minimumHour ?? 0).toFixed(2)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-amber-700">
+                        {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : getAttendanceRawOvertime(attendance).toFixed(2)}
+                      </td>
+
+                      {showOvertimeDetails && <>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                        {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : getAttendanceMultiplier(attendance) !== null
+                          ? `${getAttendanceMultiplier(attendance).toFixed(2)}×`
+                          : '—'}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : (attendance.reportDetail?.multiplierApplication || '—')}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-purple-700">
+                        {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : getAttendanceFinalOvertime(attendance).toFixed(2)}
+                      </td>
+                      </>}
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
+                        {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : getAttendanceHoursWorked(attendance).toFixed(2)}
+                      </td>
+
+                      <td className="px-6 py-4 text-xs text-gray-600 min-w-[280px] max-w-[380px] whitespace-normal">
+                        <div className="font-semibold text-gray-700">
+                          {attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : (attendance.reportDetail?.dayType || 'Regular Work Day')}
+                        </div>
+                        <div>{attendance.reportStatus === 'loading' ? 'Loading…' : attendance.reportStatus === 'unavailable' ? 'Unavailable' : getAttendanceTreatment(attendance)}</div>
+                      </td>
 
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{attendance.standardHours}</td>
 
@@ -7494,7 +7858,7 @@ const fetchAttendance = async (
 
 
 
-            {filteredAttendancesBySearch.length === 0 && (
+            {!loading && !supportingLoading.leaves && filteredAttendancesBySearch.length === 0 && (
 
               <div className="px-6 py-14 text-center">
 
@@ -7584,6 +7948,8 @@ const fetchAttendance = async (
 
                     setEmployeeSearchQuery('');
 
+                    setEmployeeCategoryFilter('');
+
                   }}
 
                   className="text-gray-500 hover:text-gray-700"
@@ -7650,7 +8016,7 @@ const fetchAttendance = async (
 
                             const v = e.target.value;
 
-                            setNewAttendance(prev => ({ ...prev, date: v }));
+                            setNewAttendance(prev => ({ ...prev, date: v, status: '' }));
 
                             setCreateRangeStart(v);
 
@@ -7718,25 +8084,33 @@ const fetchAttendance = async (
 
                   <div>
 
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Employee Category</label>
 
                     <select
 
                       value={newAttendance.category}
 
-                      onChange={(e) => setNewAttendance({ ...newAttendance, category: e.target.value })}
+                      onChange={(e) => {
+
+                        const category = e.target.value;
+
+                        setNewAttendance({ ...newAttendance, category });
+
+                        setEmployeeCategoryFilter(category);
+
+                      }}
 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 
                     >
 
-                      <option value="">All Categories</option>
+                      <option value="">All Employee Categories</option>
 
-                      <option value="Projects">Projects</option>
+                      {employeeCategories.map(category => (
 
-                      <option value="Site Services">Site Services</option>
+                        <option key={category} value={category}>{category}</option>
 
-                      <option value="Ahafo North">Ahafo North</option>
+                      ))}
 
                     </select>
 
@@ -7762,15 +8136,17 @@ const fetchAttendance = async (
 
                           type="checkbox"
 
-                          checked={selectAllEmployees}
+                          checked={allVisibleEmployeesSelected}
 
-                          onChange={(e) => setSelectAllEmployees(e.target.checked)}
+                          onChange={toggleAllVisibleEmployees}
+
+                          disabled={filteredEmployeesBySearch.length === 0}
 
                           className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
 
                         />
 
-                        <span>Select All</span>
+                        <span>Select all visible</span>
 
                       </label>
 
@@ -7793,6 +8169,8 @@ const fetchAttendance = async (
 
 
                   {!showExcludedEmployees && !isEditing && (
+
+                    <div>
 
                     <div className="relative">
 
@@ -7850,6 +8228,8 @@ const fetchAttendance = async (
 
                     </div>
 
+                    </div>
+
                   )}
 
 
@@ -7858,59 +8238,75 @@ const fetchAttendance = async (
 
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
 
-                      <select
-
-                        name="employeeId"
-
-                        value={selectedEmployees}
-
-                        onChange={handleInputChange}
-
-                        disabled={selectAllEmployees || isEditing}
-
-                        multiple={!isEditing}
-
-                        className={`w-full ${isEditing ? 'h-16' : 'h-64'} px-3 py-2 border-none focus:ring-2 focus:ring-blue-500`}
-
-                      >
-
                         {isEditing ? (
 
-                          <option value={newAttendance.employee?.id} className="px-3 py-2">
+                          <div className="px-4 py-3 bg-gray-50">
 
                             {employees.find(e => e.id === newAttendance.employee?.id)?.firstName} {employees.find(e => e.id === newAttendance.employee?.id)?.lastName} ({newAttendance.employee?.id})
 
-                          </option>
+                          </div>
 
                         ) : filteredEmployeesBySearch.length > 0 ? (
 
-                          filteredEmployeesBySearch.map((employee) => (
+                          <div className="h-64 overflow-y-auto divide-y divide-gray-100">
 
-                            <option key={employee.id} value={employee.id} className="px-3 py-2">
+                            {filteredEmployeesBySearch.map((employee) => {
 
-                              {employee.firstName} {employee.lastName} ({employee.employeeId || 'N/A'}) - {employee.category?.name || 'No Category'}
+                              const employeeId = String(employee.id);
 
-                            </option>
+                              const isSelected = selectedEmployees.includes(employeeId);
 
-                          ))
+                              return (
+
+                                <label key={employee.id} className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition ${isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}>
+
+                                  <input
+
+                                    type="checkbox"
+
+                                    checked={isSelected}
+
+                                    onChange={() => toggleSelectedEmployee(employee.id)}
+
+                                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+
+                                  />
+
+                                  <span className="min-w-0 flex-1">
+
+                                    <span className="block text-sm font-medium text-gray-900 truncate">{employee.firstName} {employee.lastName}</span>
+
+                                    <span className="block text-xs text-gray-500 truncate">{employee.employeeId || 'No employee ID'} · {employee.category?.name || employee.category || 'No Category'}</span>
+
+                                  </span>
+
+                                  {isSelected && <span className="text-xs font-medium text-blue-700">Included</span>}
+
+                                </label>
+
+                              );
+
+                            })}
+
+                          </div>
 
                         ) : (
 
-                          <option disabled className="px-3 py-2 text-gray-500">
+                          <div className="px-4 py-8 text-center text-sm text-gray-500">
 
-                            {employeeSearchQuery ? `No employees match "${employeeSearchQuery}"` : 'No employees available for the selected date'}
+                            {employeeSearchQuery || employeeCategoryFilter ? 'No employees match the current filters' : 'No employees available for the selected date'}
 
-                          </option>
+                          </div>
 
                         )}
 
-                      </select>
+                      {!isEditing && filteredEmployeesBySearch.length > 0 && (
 
-                      {!isEditing && filteredEmployeesBySearch.length > 0 && employeeSearchQuery && (
+                        <div className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 text-xs text-gray-600 border-t">
 
-                        <div className="px-3 py-2 bg-gray-50 text-xs text-gray-500 border-t">
+                          <span>{filteredEmployeesBySearch.length} visible · {selectedEmployees.length} selected</span>
 
-                          Found {filteredEmployeesBySearch.length} employee(s)
+                          <span>Select all, then untick anyone you want to exclude</span>
 
                         </div>
 
@@ -8062,6 +8458,7 @@ const fetchAttendance = async (
 
                       type="time"
 
+                      disabled={newAttendance.status === 'Holiday'}
                       value={newAttendance.checkIn}
 
                       onChange={(e) => setNewAttendance({ ...newAttendance, checkIn: e.target.value })}
@@ -8075,11 +8472,13 @@ const fetchAttendance = async (
                   <div>
 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Check‑out</label>
+                    <p className="mb-2 text-xs text-gray-600">For someone currently on duty, leave checkout blank until they leave. For a completed overnight shift, use the evening's date and the actual morning checkout.</p>
 
                     <input
 
                       type="time"
 
+                      disabled={newAttendance.status === 'Holiday'}
                       value={newAttendance.checkOut}
 
                       onChange={(e) => setNewAttendance({ ...newAttendance, checkOut: e.target.value })}
@@ -8158,7 +8557,7 @@ const fetchAttendance = async (
 
                         {isHoliday(newAttendance.date || singleDate) 
 
-                          ? "This date is configured as a holiday"
+                          ? "Holiday: 8 credited hours without attendance. Holiday Present: worked, with check-in/out records."
 
                           : isSpecialWeekend(newAttendance.date || singleDate)
 
@@ -8211,6 +8610,8 @@ const fetchAttendance = async (
                       setSelectAllEmployees(false);
 
                       setEmployeeSearchQuery('');
+
+                      setEmployeeCategoryFilter('');
 
                       if (isEditing) {
 
@@ -8473,7 +8874,7 @@ const fetchAttendance = async (
               onClick={() => {
                 const previousPage = Math.max(attendancePage - 1, 0);
                 setAttendancePage(previousPage);
-                fetchAttendance(previousPage);
+                fetchAttendance(previousPage, { refresh: false });
               }}
               className="rounded-md border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -8488,7 +8889,7 @@ const fetchAttendance = async (
               onClick={() => {
                 const nextPage = attendancePage + 1;
                 setAttendancePage(nextPage);
-                fetchAttendance(nextPage);
+                fetchAttendance(nextPage, { refresh: false });
               }}
               className="rounded-md border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >

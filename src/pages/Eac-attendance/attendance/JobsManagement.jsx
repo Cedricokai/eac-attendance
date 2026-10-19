@@ -3,8 +3,13 @@ import { Plus, Edit, Trash2, Building, Calendar, DollarSign, FileText, Users, Up
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
+import { currentEmployeeRate } from '../../../utils/payrollRates';
+import MainSidebar from '../mainSidebar';
+import Header from '../../../components/Header';
 
 function JobsManagement({ initialJobId = null, initialJobData = null }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [headerUser, setHeaderUser] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [products, setProducts] = useState([]);
@@ -28,6 +33,9 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
     budget: '',
     hourlyRate: '',
     standardWorkHours: 8,
+    workStartTime: '',
+    billingHours: 8,
+    expectedOvertimeHours: 0,
     status: 'ACTIVE',
     supervisorId: '',
     enableAdvanceReminders: true,
@@ -38,14 +46,30 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
     enableOverdueReminders: true,
     overdueReminderDays: 1,
     overtimeMultiplier: '',
+    applyOvertimeMultiplierToHours: false,
+    enforceMinimumOvertime: false,
+    useConfiguredAttendanceHours: false,
+    dailyHoursTopUpEnabled: false,
+    dailyHoursTopUpThreshold: 9.3,
+    dailyHoursTopUpTarget: 10,
+    minimumOvertimeHours: '',
+    autoApproveOvertime: false,
   });
+  const [bulkPayroll, setBulkPayroll] = useState({ effectivePayrollRate: '', effectivePayrollRateFrom: '', effectivePayrollRateTo: '' });
   const [bulkNormalRate, setBulkNormalRate] = useState('');
   const [bulkOvertimeRate, setBulkOvertimeRate] = useState('');
   const [jobDetailsRates, setJobDetailsRates] = useState({});
   const [showEmployeeAssignment, setShowEmployeeAssignment] = useState(false);
   const [selectedJobForAssignment, setSelectedJobForAssignment] = useState(null);
   const [availableEmployees, setAvailableEmployees] = useState([]);
+  const [employeeAssignmentSearch, setEmployeeAssignmentSearch] = useState('');
+  const normalizedEmployeeSearch = employeeAssignmentSearch.trim().toLowerCase();
+  const filteredAvailableEmployees = availableEmployees.filter(employee =>
+    [`${employee.firstName || ''} ${employee.lastName || ''}`, employee.employeeId, employee.jobPosition]
+      .some(value => String(value ?? '').toLowerCase().includes(normalizedEmployeeSearch))
+  );
   const [assignedEmployees, setAssignedEmployees] = useState([]);
+  const [employeeAssignmentTab, setEmployeeAssignmentTab] = useState('unassigned');
   const [showAttachments, setShowAttachments] = useState(false);
   const [selectedJobForAttachments, setSelectedJobForAttachments] = useState(null);
   const [attachments, setAttachments] = useState([]);
@@ -135,6 +159,26 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
     }
   };
 
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${getAuthToken()}` }, credentials: 'include', signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (data) setHeaderUser({ name: data.username, email: data.email, role: String(data.role || '').replace('ROLE_', '').toLowerCase() }); })
+      .catch(error => { if (error.name !== 'AbortError') console.error('Failed to load current user', error); });
+    return () => controller.abort();
+  }, [API_BASE_URL]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${getAuthToken()}` }, credentials: 'include' });
+    } finally {
+      localStorage.removeItem('jwtToken');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('userRole');
+      window.location.href = '/';
+    }
+  };
+
   const applyBulkRates = () => {
     const nh = parseFloat(bulkNormalRate);
     const ot = parseFloat(bulkOvertimeRate);
@@ -149,9 +193,9 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       return;
     }
 
-    const updatedRates = {};
+    const updatedRates = { ...jobEmployeeRates };
     assignedEmployees.forEach(emp => {
-      updatedRates[emp.id] = { normalRate: nh, overtimeRate: ot };
+      updatedRates[emp.id] = { ...updatedRates[emp.id], normalRate: nh, overtimeRate: ot };
     });
     
     setJobEmployeeRates(updatedRates);
@@ -167,6 +211,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         try {
           const employeesData = await fetchJobEmployees(initialJobId);
           setJobEmployees(employeesData);
+          setJobDetailsRates(await fetchJobRates(initialJobId));
           
           const productsData = await fetchJobProducts(initialJobId);
           setJobProducts(productsData);
@@ -177,7 +222,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
           const transactionsData = await fetchJobTransactions(initialJobId);
           setJobTransactions(transactionsData);
         } catch (err) {
-          console.error("Error loading job details data:", err);
+          console.error("Error loading project details data:", err);
         }
       }
     };
@@ -216,16 +261,16 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
     try {
       setLoading(true);
       const jobsData = await apiRequest('/api/jobs');
-      console.log('Fetched jobs:', jobsData);
+      console.log('Fetched projects:', jobsData);
       jobsData.forEach(job => {
-        console.log(`Job ${job.id} - ${job.name}: billingReminderEmails =`, job.billingReminderEmails);
+        console.log(`Project ${job.id} - ${job.name}: billingReminderEmails =`, job.billingReminderEmails);
       });
       setJobs(jobsData || []);
       setError(null);
     } catch (err) {
-      console.error("Error fetching jobs:", err);
-      setError('Error loading jobs. Please check your connection.');
-      toast.error('Error loading jobs');
+      console.error("Error fetching projects:", err);
+      setError('Error loading projects. Please check your connection.');
+      toast.error('Error loading projects');
     } finally {
       setLoading(false);
     }
@@ -257,7 +302,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         userName: jp.product?.userName
       }));
     } catch (err) {
-      console.error("Error fetching job products:", err);
+      console.error("Error fetching project products:", err);
       return [];
     }
   };
@@ -267,7 +312,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       const jobEmployeesData = await apiRequest(`/api/jobs/${jobId}/employees`);
       return jobEmployeesData || [];
     } catch (err) {
-      console.error("Error fetching job employees:", err);
+      console.error("Error fetching project employees:", err);
       return [];
     }
   };
@@ -279,13 +324,16 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       rates.forEach(r => {
         map[r.employee.id] = {
           normalRate: r.normalHourRate,
-          overtimeRate: r.overtimeRate
+          overtimeRate: r.overtimeRate,
+          effectivePayrollRate: r.effectivePayrollRate ?? '',
+          effectivePayrollRateFrom: r.effectivePayrollRateFrom ?? '',
+          effectivePayrollRateTo: r.effectivePayrollRateTo ?? ''
         };
       });
       return map;
     } catch (err) {
-      console.error("Error fetching job rates:", err);
-      return {};
+      console.error("Error fetching project rates:", err);
+      throw err;
     }
   };
 
@@ -313,7 +361,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       const costCenterData = await apiRequest(`/api/cost-centers/job/${jobId}`);
       return costCenterData;
     } catch (err) {
-      console.error("Error fetching job cost center:", err);
+      console.error("Error fetching project cost center:", err);
       return null;
     }
   };
@@ -323,7 +371,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       const transactionsData = await apiRequest(`/api/cost-centers/job/${jobId}/transactions`);
       return transactionsData || [];
     } catch (err) {
-      console.error("Error fetching job transactions:", err);
+      console.error("Error fetching project transactions:", err);
       return [];
     }
   };
@@ -398,27 +446,27 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       
       setShowJobDetails(true);
     } catch (err) {
-      console.error("Error loading job details:", err);
-      toast.error('Error loading job details');
+      console.error("Error loading project details:", err);
+      toast.error('Error loading project details');
     } finally {
       setLoading(false);
     }
   };
 
   const handleEditJob = async (job) => {
-    console.log('=== EDITING JOB ===', job);
+    console.log('=== EDITING PROJECT ===', job);
     
     if (!job.id) {
-      toast.error('Cannot edit job: No ID found');
+      toast.error('Cannot edit project: No ID found');
       return;
     }
     
     let freshJob = job;
     try {
       freshJob = await apiRequest(`/api/jobs/${job.id}`);
-      console.log('Fresh job data - billingReminderEmails:', freshJob.billingReminderEmails);
+      console.log('Fresh project data - billingReminderEmails:', freshJob.billingReminderEmails);
     } catch (err) {
-      console.warn('Could not fetch fresh job data, using existing:', err);
+      console.warn('Could not fetch fresh project data, using existing:', err);
     }
     
     const rawHour = freshJob.reminderTimeHour !== null && freshJob.reminderTimeHour !== undefined ? freshJob.reminderTimeHour : 8;
@@ -441,6 +489,9 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       budget: freshJob.budget || '',
       hourlyRate: freshJob.hourlyRate || '',
       standardWorkHours: freshJob.standardWorkHours || 8,
+      workStartTime: freshJob.workStartTime?.slice(0, 5) || '',
+      billingHours: freshJob.billingHours ?? freshJob.standardWorkHours ?? 8,
+      expectedOvertimeHours: freshJob.expectedOvertimeHours ?? 0,
       status: freshJob.status || 'ACTIVE',
       supervisorId: freshJob.supervisor?.id || '',
       enableAdvanceReminders: freshJob.enableAdvanceReminders !== undefined ? freshJob.enableAdvanceReminders : true,
@@ -450,14 +501,22 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       reminderTimePeriod: reminderPeriod,
       enableOverdueReminders: freshJob.enableOverdueReminders !== undefined ? freshJob.enableOverdueReminders : true,
       overdueReminderDays: freshJob.overdueReminderDays || 1,
-      overtimeMultiplier: freshJob.overtimeMultiplier ?? ''
+      overtimeMultiplier: freshJob.overtimeMultiplier ?? '',
+      applyOvertimeMultiplierToHours: Boolean(freshJob.applyOvertimeMultiplierToHours),
+      enforceMinimumOvertime: Boolean(freshJob.enforceMinimumOvertime),
+      useConfiguredAttendanceHours: Boolean(freshJob.useConfiguredAttendanceHours),
+      dailyHoursTopUpEnabled: Boolean(freshJob.dailyHoursTopUpEnabled),
+      dailyHoursTopUpThreshold: freshJob.dailyHoursTopUpThreshold ?? 9.3,
+      dailyHoursTopUpTarget: freshJob.dailyHoursTopUpTarget ?? 10,
+      minimumOvertimeHours: freshJob.minimumOvertimeHours ?? '',
+      autoApproveOvertime: Boolean(freshJob.autoApproveOvertime)
     });
     
     try {
       const jobProducts = await fetchJobProducts(freshJob.id);
       setSelectedProducts(jobProducts);
     } catch (err) {
-      console.error("Error loading job products:", err);
+      console.error("Error loading project products:", err);
       setSelectedProducts([]);
     }
     
@@ -470,11 +529,11 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
       modal.innerHTML = `
         <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-          <h3 class="text-lg font-bold text-gray-800 mb-4">Delete Job</h3>
+          <h3 class="text-lg font-bold text-gray-800 mb-4">Delete Project</h3>
           <p class="text-gray-600 mb-4">Are you sure you want to delete "${jobName}"?</p>
           <div class="flex items-center gap-3 mb-6">
             <input type="checkbox" id="deleteTimesheetsCheckbox" class="h-4 w-4 text-blue-600" />
-            <label for="deleteTimesheetsCheckbox" class="text-sm text-gray-700">Also delete all timesheets linked to this job</label>
+            <label for="deleteTimesheetsCheckbox" class="text-sm text-gray-700">Also delete all timesheets linked to this project</label>
           </div>
           <div class="flex justify-end gap-3">
             <button id="cancelDeleteBtn" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -511,17 +570,17 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       setLoading(true);
       await apiRequest(`/api/jobs/${jobId}?deleteTimesheets=${userConfirmed}`, { method: 'DELETE' });
       fetchJobs();
-      toast.success(`Job "${jobName}" deleted!`);
+      toast.success(`Project "${jobName}" deleted!`);
     } catch (err) {
       const assigned = await fetchJobEmployees(jobId);
       if (assigned.length > 0 && await window.appConfirm(`${assigned.length} employee(s) assigned. Unassign and delete?`)) {
         if (await unassignAllEmployeesFromJob(jobId)) {
           await apiRequest(`/api/jobs/${jobId}?deleteTimesheets=${userConfirmed}`, { method: 'DELETE' });
           fetchJobs();
-          toast.success(`Job deleted, ${assigned.length} employee(s) unassigned.`);
+          toast.success(`Project deleted, ${assigned.length} employee(s) unassigned.`);
         }
       } else {
-        toast.error(`Failed to delete job: ${err.message}`);
+        toast.error(`Failed to delete project: ${err.message}`);
       }
     } finally {
       setLoading(false);
@@ -568,6 +627,9 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         budget: jobForm.budget ? parseFloat(jobForm.budget) : null,
         hourlyRate: jobForm.hourlyRate ? parseFloat(jobForm.hourlyRate) : null,
         standardWorkHours: jobForm.standardWorkHours ? parseInt(jobForm.standardWorkHours) : 8,
+        workStartTime: jobForm.workStartTime || null,
+        billingHours: jobForm.billingHours !== '' ? parseFloat(jobForm.billingHours) : (jobForm.standardWorkHours ? parseFloat(jobForm.standardWorkHours) : 8),
+        expectedOvertimeHours: jobForm.expectedOvertimeHours !== '' ? parseFloat(jobForm.expectedOvertimeHours) : 0,
         status: jobForm.status,
         supervisorId: jobForm.supervisorId || null,
         enableAdvanceReminders: jobForm.enableAdvanceReminders,
@@ -577,8 +639,25 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         enableOverdueReminders: jobForm.enableOverdueReminders,
         overdueReminderDays: parseInt(jobForm.overdueReminderDays),
         overtimeMultiplier: jobForm.overtimeMultiplier ? parseFloat(jobForm.overtimeMultiplier) : null,
+        applyOvertimeMultiplierToHours: Boolean(jobForm.applyOvertimeMultiplierToHours),
+        enforceMinimumOvertime: Boolean(jobForm.enforceMinimumOvertime),
+        useConfiguredAttendanceHours: Boolean(jobForm.useConfiguredAttendanceHours),
+        dailyHoursTopUpEnabled: Boolean(jobForm.dailyHoursTopUpEnabled),
+        dailyHoursTopUpThreshold: Number(jobForm.dailyHoursTopUpThreshold),
+        dailyHoursTopUpTarget: Number(jobForm.dailyHoursTopUpTarget),
+        minimumOvertimeHours: (jobForm.enforceMinimumOvertime || jobForm.useConfiguredAttendanceHours) && jobForm.minimumOvertimeHours
+          ? parseFloat(jobForm.minimumOvertimeHours)
+          : null,
+        autoApproveOvertime: Boolean(jobForm.autoApproveOvertime),
       };
          
+      if (jobForm.dailyHoursTopUpEnabled) {
+        if (jobForm.dailyHoursTopUpThreshold === '' || jobForm.dailyHoursTopUpTarget === '' || !Number.isFinite(submitData.dailyHoursTopUpThreshold) || !Number.isFinite(submitData.dailyHoursTopUpTarget)
+            || submitData.dailyHoursTopUpThreshold < 0 || submitData.dailyHoursTopUpThreshold >= submitData.dailyHoursTopUpTarget || submitData.dailyHoursTopUpTarget > 24) {
+          throw new Error('Daily hours rule requires 0 <= threshold < target <= 24.');
+        }
+        if (jobForm.useConfiguredAttendanceHours) throw new Error('Disable fixed configured attendance hours before enabling the daily hours rule.');
+      }
       let savedJob;
       
       if (editingJob && editingJob.id) {
@@ -586,7 +665,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
           method: 'PUT',
           body: JSON.stringify(submitData)
         });
-        toast.success('Job updated successfully!');
+        toast.success('Project updated successfully!');
         
         if (selectedProducts.length > 0) {
           await saveProductsToJob(savedJob.id);
@@ -612,16 +691,16 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
               jobId: savedJob.id,
               name: `${savedJob.name} - Cost Center`,
               code: `CC-${savedJob.id}-${Date.now().toString().slice(-4)}`,
-              description: `Cost center for job: ${savedJob.name}`,
+              description: `Cost center for project: ${savedJob.name}`,
               type: 'PROJECT',
               status: 'ACTIVE',
               budget: savedJob.budget || 100000
             })
           });
-          toast.success('Job created successfully with cost center!');
+          toast.success('Project created successfully with cost center!');
         } catch (costCenterErr) {
-          console.log('Cost center creation failed, but job was created');
-          toast.success('Job created successfully!');
+          console.log('Cost center creation failed, but project was created');
+          toast.success('Project created successfully!');
         }
       }
       
@@ -629,8 +708,8 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       await fetchJobs();
       
     } catch (err) {
-      console.error("Error saving job:", err);
-      toast.error(`Error saving job: ${err.message}`);
+      console.error("Error saving project:", err);
+      toast.error(`Error saving project: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -652,6 +731,9 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       budget: '',
       hourlyRate: '',
       standardWorkHours: 8,
+      workStartTime: '',
+      billingHours: 8,
+      expectedOvertimeHours: 0,
       status: 'ACTIVE',
       supervisorId: '',
       enableAdvanceReminders: true,
@@ -661,6 +743,15 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       reminderTimePeriod: 'AM',
       enableOverdueReminders: true,
       overdueReminderDays: 1,
+      overtimeMultiplier: '',
+      applyOvertimeMultiplierToHours: false,
+      enforceMinimumOvertime: false,
+    useConfiguredAttendanceHours: false,
+    dailyHoursTopUpEnabled: false,
+    dailyHoursTopUpThreshold: 9.3,
+    dailyHoursTopUpTarget: 10,
+      minimumOvertimeHours: '',
+      autoApproveOvertime: false,
 
     });
     setEditingJob(null);
@@ -707,7 +798,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
 
   const saveProductsToJob = async (jobId) => {
     try {
-      if (!jobId) throw new Error('Job ID is required');
+      if (!jobId) throw new Error('Project ID is required');
       if (selectedProducts.length === 0) return;
 
       const existingProducts = await fetchJobProducts(jobId);
@@ -732,7 +823,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       });
 
       await Promise.all(addPromises);
-      toast.success('Products added to job successfully!');
+      toast.success('Products added to project successfully!');
     } catch (err) {
       console.error("Error saving products:", err);
       toast.error(`Error saving products: ${err.message}`);
@@ -748,7 +839,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
         const jobProducts = await fetchJobProducts(job.id);
         setSelectedProducts(jobProducts);
       } catch (err) {
-        console.error("Error loading job products:", err);
+        console.error("Error loading project products:", err);
         setSelectedProducts([]);
       }
     } else {
@@ -773,12 +864,16 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       
       return response;
     } catch (err) {
-      console.error("Error assigning employees to job:", err);
+      console.error("Error assigning employees to project:", err);
       throw err;
     }
   };
 
   const openEmployeeAssignment = async (job) => {
+    setEmployeeAssignmentTab('unassigned');
+    if (!showEmployeeAssignment || selectedJobForAssignment?.id !== job.id) {
+      setEmployeeAssignmentSearch('');
+    }
     setSelectedJobForAssignment(job);
     
     try {
@@ -794,12 +889,12 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       const assignedIds = new Set(assigned.map(emp => emp.id));
       const available = freshEmployees.filter(emp => !assignedIds.has(emp.id));
       setAvailableEmployees(available);
+      setShowEmployeeAssignment(true);
     } catch (err) {
       console.error("Error fetching employee data:", err);
       toast.error('Error loading employees');
     }
     
-    setShowEmployeeAssignment(true);
   };
 
   const assignEmployee = async (employee) => {
@@ -810,6 +905,8 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       });
 
       setAssignedEmployees(prev => [...prev, response]);
+      const refreshedRates = await fetchJobRates(selectedJobForAssignment.id);
+      setJobEmployeeRates(prev => ({ ...prev, [employee.id]: refreshedRates[employee.id] || {} }));
       setAvailableEmployees(prev => prev.filter(emp => emp.id !== employee.id));
       await fetchJobs();
       await fetchEmployees();
@@ -904,13 +1001,44 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
     fetchJobs();
   };
 
+  const validatePayrollRate = (rates) => {
+    const value = rates.effectivePayrollRate;
+    if (value !== '' && value != null && (!Number.isFinite(Number(value)) || Number(value) < 0 || !rates.effectivePayrollRateFrom)) {
+      throw new Error('Effective payroll rate requires a non-negative amount and an Effective From date.');
+    }
+    if (rates.effectivePayrollRateTo && (!rates.effectivePayrollRateFrom || rates.effectivePayrollRateTo < rates.effectivePayrollRateFrom)) {
+      throw new Error('Effective To must be on or after Effective From.');
+    }
+  };
+
+  const applyBulkPayroll = () => {
+    try {
+      if (bulkPayroll.effectivePayrollRate === '') throw new Error('Enter an effective payroll rate.');
+      validatePayrollRate(bulkPayroll);
+      if (!assignedEmployees.length) throw new Error('No employees assigned.');
+      setJobEmployeeRates(previous => {
+        const next = { ...previous };
+        assignedEmployees.forEach(employee => { next[employee.id] = { ...next[employee.id], ...bulkPayroll }; });
+        return next;
+      });
+      toast.success('Effective payroll rate applied. Save Rates to keep your changes.');
+    } catch (err) { toast.error(err.message); }
+  };
+
   const saveEmployeeRates = async () => {
     if (!selectedJobForAssignment) return;
     try {
-      const payload = Object.entries(jobEmployeeRates).map(([employeeId, rates]) => ({
+      Object.values(jobEmployeeRates).forEach(rates => {
+        validatePayrollRate(rates);
+        if (![rates.normalRate ?? 0, rates.overtimeRate ?? 0].every(value => Number.isFinite(Number(value)) && Number(value) >= 0)) throw new Error('Timesheet billing rates must be non-negative numbers.');
+      });
+      const payload = Object.entries(jobEmployeeRates).filter(([employeeId]) => assignedEmployees.some(employee => employee.id === Number(employeeId))).map(([employeeId, rates]) => ({
         employeeId: parseInt(employeeId),
-        normalHourRate: rates.normalRate || 0,
-        overtimeRate: rates.overtimeRate || 0
+        normalHourRate: Number(rates.normalRate || 0),
+        overtimeRate: Number(rates.overtimeRate || 0),
+        effectivePayrollRate: rates.effectivePayrollRate === '' || rates.effectivePayrollRate == null ? null : Number(rates.effectivePayrollRate),
+        effectivePayrollRateFrom: rates.effectivePayrollRateFrom || null,
+        effectivePayrollRateTo: rates.effectivePayrollRateTo || null
       }));
       await apiRequest(`/api/job-employee-rates/job/${selectedJobForAssignment.id}`, {
         method: 'POST',
@@ -1420,14 +1548,14 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
             {loading ? (
               <div className="flex justify-center items-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                <span className="ml-3 text-lg">Loading job details...</span>
+                <span className="ml-3 text-lg">Loading project details...</span>
               </div>
             ) : (
               <div className="space-y-8">
                 <div className="bg-blue-50 rounded-lg p-6">
                   <h3 className="text-xl font-semibold text-blue-800 mb-4 flex items-center gap-2">
                     <Building className="text-blue-600" />
-                    Job Information
+                    Project Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
@@ -1462,10 +1590,42 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                       </p>
                     </div>
                     <div>
+                      <label className="block text-sm font-medium text-blue-700">Work Start Time</label>
+                      <p className="mt-1 text-lg font-semibold">
+                        {selectedJobDetails?.workStartTime?.slice(0, 5) || 'Not set'}
+                      </p>
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-blue-700">Standard Hours</label>
                       <p className="mt-1 text-lg font-semibold flex items-center gap-1">
                         <Clock size={16} />
                         {selectedJobDetails?.standardWorkHours || 8}h/day
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-emerald-700">Billing Hours</label>
+                      <p className="mt-1 text-lg font-semibold text-emerald-700 flex items-center gap-1">
+                        <Clock size={16} />
+                        {selectedJobDetails?.billingHours ?? selectedJobDetails?.standardWorkHours ?? 8}h/day
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">Fixed billing quantity; overtime does not alter it.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-orange-700">Expected Overtime</label>
+                      <p className="mt-1 text-lg font-semibold text-orange-700">
+                        {selectedJobDetails?.expectedOvertimeHours ?? 0}h raw
+                      </p>
+                    </div>
+
+                    <div className="md:col-span-2 lg:col-span-3 rounded-lg border border-orange-200 bg-white p-4">
+                      <h4 className="font-semibold text-gray-900">Expected overtime calculation</h4>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-lg bg-slate-50 p-3"><span className="block text-xs text-slate-500">Raw expected OT</span><strong>{Number(selectedJobDetails?.expectedOvertimeHours ?? 0).toFixed(2)}h</strong></div>
+                        <div className="rounded-lg bg-indigo-50 p-3"><span className="block text-xs text-indigo-600">OT multiplier</span><strong>{Number(selectedJobDetails?.overtimeMultiplier ?? 1.5).toFixed(2)}×</strong></div>
+                        <div className="rounded-lg bg-orange-50 p-3"><span className="block text-xs text-orange-600">Adjusted expected OT</span><strong>{(Number(selectedJobDetails?.expectedOvertimeHours ?? 0) * Number(selectedJobDetails?.overtimeMultiplier ?? 1.5)).toFixed(2)}h</strong></div>
+                      </div>
+                      <p className="mt-3 text-sm text-gray-600">
+                        Formula: {Number(selectedJobDetails?.expectedOvertimeHours ?? 0).toFixed(2)}h × {Number(selectedJobDetails?.overtimeMultiplier ?? 1.5).toFixed(2)} = {(Number(selectedJobDetails?.expectedOvertimeHours ?? 0) * Number(selectedJobDetails?.overtimeMultiplier ?? 1.5)).toFixed(2)}h. Billing remains {Number(selectedJobDetails?.billingHours ?? selectedJobDetails?.standardWorkHours ?? 8).toFixed(2)}h.
                       </p>
                     </div>
 
@@ -1760,41 +1920,19 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                     Assigned Employees ({jobEmployees.length})
                   </h3>
                   {jobEmployees.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {jobEmployees.map(employee => {
-                        const rates = jobDetailsRates[employee.id] || { normalRate: 0, overtimeRate: 0 };
-                        return (
-                          <div
-                            key={employee.id}
-                            className="bg-white border border-green-200 rounded-lg p-4"
-                          >
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <h4 className="font-semibold text-gray-800">
-                                  {employee.firstName} {employee.lastName}
-                                </h4>
-                                <p className="text-sm text-gray-600">
-                                  {employee.jobPosition}
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                  ID: {employee.employeeId}
-                                </p>
-                                <div className="mt-2 text-sm text-gray-700 border-t border-gray-100 pt-2">
-                                  <div className="flex gap-4">
-                                    <span><strong>NH Rate:</strong> ₵{rates.normalRate?.toFixed(2) || '0.00'}</span>
-                                    <span><strong>OT Rate:</strong> ₵{rates.overtimeRate?.toFixed(2) || '0.00'}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              {selectedJobDetails?.supervisor?.id === employee.id && (
-                                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
-                                  Supervisor
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm text-left bg-white">
+                        <thead><tr>{['Employee', 'Employee ID', 'Position', 'Timesheet Billing NH', 'Timesheet Billing OT', 'Normal Payroll Rate', 'Effective Payroll Rate', 'Effective From', 'Effective To', 'Role'].map(label => <th key={label} className="p-2 whitespace-nowrap">{label}</th>)}</tr></thead>
+                        <tbody>{jobEmployees.map(employee => {
+                          const rates = jobDetailsRates[employee.id] || {};
+                          return <tr key={employee.id} className="border-t">
+                            <td className="p-2 whitespace-nowrap">{employee.firstName} {employee.lastName}</td><td className="p-2">{employee.employeeId}</td><td className="p-2">{employee.jobPosition}</td>
+                            <td className="p-2">{Number(rates.normalRate ?? 0).toFixed(2)}</td><td className="p-2">{Number(rates.overtimeRate ?? 0).toFixed(2)}</td>
+                            <td className="p-2">{currentEmployeeRate(employee).toFixed(2)}</td><td className="p-2">{rates.effectivePayrollRate === '' || rates.effectivePayrollRate == null ? '—' : Number(rates.effectivePayrollRate).toFixed(2)}</td>
+                            <td className="p-2 whitespace-nowrap">{rates.effectivePayrollRateFrom || '—'}</td><td className="p-2 whitespace-nowrap">{rates.effectivePayrollRateTo || 'Open-ended'}</td><td className="p-2">{selectedJobDetails?.supervisor?.id === employee.id ? 'Supervisor' : 'Employee'}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
                     </div>
                   ) : (
                     <div className="text-gray-500 text-center py-4">
@@ -1852,7 +1990,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                   ) : (
                     <div className="text-center py-8 bg-white rounded border border-gray-200">
                       <Package className="mx-auto text-gray-300" size={48} />
-                      <p className="text-gray-500 mt-2">No products assigned to this job</p>
+                      <p className="text-gray-500 mt-2">No products assigned to this project</p>
                       <button
                         onClick={() => openInventoryModal(selectedJobDetails)}
                         className="mt-3 px-4 py-2 border border-teal-600 text-teal-600 rounded-lg hover:bg-teal-50 text-sm font-medium"
@@ -1886,7 +2024,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                   onClick={() => handleEditJob(selectedJobDetails)}
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  Edit Job
+                  Edit Project
                 </button>
               </>
             )}
@@ -1901,7 +2039,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[80vh] flex flex-col">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           <h2 className="text-lg font-semibold">
-            Select Products for Job
+            Select Products for Project
           </h2>
           <button
             onClick={() => setShowInventoryModal(false)}
@@ -2050,7 +2188,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                   } else if (selectedJobDetails && selectedJobDetails.id) {
                     targetJobId = selectedJobDetails.id;
                   } else {
-                    setError('Please save the job first before adding products');
+                    setError('Please save the project first before adding products');
                     return;
                   }
                   
@@ -2067,7 +2205,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
               disabled={selectedProducts.length === 0}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              Save Products to Job
+              Save Products to Project
             </button>
           </div>
         </div>
@@ -2080,7 +2218,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           <h2 className="text-lg font-semibold">
-            Select Employees for New Job
+            Select Employees for New Project
           </h2>
           <button
             onClick={() => setShowEmployeeSelection(false)}
@@ -2450,18 +2588,23 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
 
   return (
     <div className="relative min-h-screen bg-gray-50 flex">
-      <main className="flex-1 overflow-y-auto">
-        <header className="flex justify-between items-center bg-white h-16 w-full px-6 shadow-md sticky top-0 z-10">
-          <h1 className="text-lg font-semibold">Job & Contract Management</h1>
+      <aside id="project-sidebar" aria-label="Main navigation" className={`fixed inset-y-0 left-0 z-30 bg-white shadow-md transition-all ${sidebarOpen ? 'w-64' : 'hidden w-16 md:block'}`}>
+        <MainSidebar isCollapsed={!sidebarOpen} />
+      </aside>
+      {sidebarOpen && <button type="button" aria-label="Close sidebar" className="fixed inset-0 z-20 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
+      <main className={`min-w-0 flex-1 overflow-y-auto transition-all ${sidebarOpen ? 'md:ml-64' : 'md:ml-16'}`}>
+        <Header toggleSidebar={() => setSidebarOpen(open => !open)} user={headerUser} onLogout={handleLogout} />
+        <div className="flex gap-3 justify-between items-center bg-white min-h-16 w-full px-4 py-3 sm:px-6 border-b">
+          <h1 className="min-w-0 flex-1 text-base sm:text-lg font-semibold">Project & Contract Management</h1>
           <button 
             onClick={() => setShowJobForm(true)}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
             <Plus size={16} />
-            {loading ? 'Loading...' : 'New Job'}
+            {loading ? 'Loading...' : 'New Project'}
           </button>
-        </header>
+        </div>
 
         <div className="p-6">
           <div className="mb-6 bg-white p-4 rounded-lg shadow border border-gray-200">
@@ -2471,7 +2614,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
                   <input
                     type="text"
-                    placeholder="Search jobs by name, client, or description..."
+                    placeholder="Search projects by name, client, or description..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2496,7 +2639,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
               </div>
             </div>
             <div className="mt-2 text-sm text-gray-500">
-              Showing {filteredJobs.length} of {jobs.length} jobs
+              Showing {filteredJobs.length} of {jobs.length} projects
             </div>
           </div>
 
@@ -2505,7 +2648,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
               <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                 <div className="p-4 border-b border-gray-200 flex justify-between items-center">
                   <h2 className="text-lg font-semibold">
-                    {editingJob ? 'Edit Job' : 'Create New Job'}
+                    {editingJob ? 'Edit Project' : 'Create New Project'}
                   </h2>
                   <button
                     onClick={resetJobForm}
@@ -2520,7 +2663,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                   <form onSubmit={handleJobSubmit} className="space-y-6">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Job Name *</label>
+                        <label className="block text-sm font-medium text-gray-700">Project Name *</label>
                         <input
                           type="text"
                           value={jobForm.name}
@@ -2686,6 +2829,19 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                     </div>
 
                     <div>
+                      <label htmlFor="jobWorkStartTime" className="block text-sm font-medium text-gray-700">Work Start Time</label>
+                      <input
+                        id="jobWorkStartTime"
+                        type="time"
+                        value={jobForm.workStartTime}
+                        onChange={(e) => setJobForm({...jobForm, workStartTime: e.target.value})}
+                        className="w-full p-2 border border-gray-300 rounded-lg"
+                        disabled={loading}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Daily scheduled start time for this project.</p>
+                    </div>
+
+                    <div>
                       <label className="block text-sm font-medium text-gray-700">Standard Work Hours *</label>
                       <div className="flex items-center gap-2">
                         <Clock size={16} className="text-gray-400" />
@@ -2702,7 +2858,56 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                         />
                       </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        Hours beyond this will be considered overtime in timesheets
+                        With a work start time, normal hours end this many hours after the scheduled start. Late arrivals reduce normal hours.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Daily Billing Hours *</label>
+                      <div className="flex items-center gap-2">
+                        <Clock size={16} className="text-emerald-500" />
+                        <input
+                          type="number"
+                          value={jobForm.billingHours}
+                          onChange={(e) => setJobForm({...jobForm, billingHours: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg"
+                          min="0"
+                          max="24"
+                          step="0.5"
+                          placeholder={jobForm.standardWorkHours || "8"}
+                          required
+                          disabled={loading}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Fixed daily billing quantity. Overtime does not change this value.
+                      </p>
+                    </div>
+
+                    <div className="md:col-span-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                      <label className="flex gap-2 font-medium"><input type="checkbox" checked={jobForm.dailyHoursTopUpEnabled} disabled={loading || jobForm.useConfiguredAttendanceHours} onChange={e => setJobForm({...jobForm, dailyHoursTopUpEnabled: e.target.checked})} />Set daily project hours above threshold</label>
+                      <p className="mt-2 text-sm text-gray-600">Apply to total normal + raw overtime hours. Every total strictly above the threshold becomes exactly the target, including totals above the target. Totals at or below the threshold stay unchanged. Timesheet entries and client billing remain unchanged.</p>
+                      {jobForm.dailyHoursTopUpEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="text-sm">Threshold (decimal hours)<input type="number" min="0" max="24" step="0.01" required disabled={loading} value={jobForm.dailyHoursTopUpThreshold} onChange={e => setJobForm({...jobForm, dailyHoursTopUpThreshold: e.target.value})} className="mt-1 block w-full rounded border p-2" /></label>
+                        <label className="text-sm">Target daily hours<input type="number" min="0.01" max="24" step="0.01" required disabled={loading} value={jobForm.dailyHoursTopUpTarget} onChange={e => setJobForm({...jobForm, dailyHoursTopUpTarget: e.target.value})} className="mt-1 block w-full rounded border p-2" /></label>
+                      </div>}
+                      <p className="mt-2 text-xs text-gray-600">Example: 8 NH + 1.5 OT = 9.5 becomes 8 NH + 2 OT = 10. 8 NH + 4 OT = 12 becomes 8 NH + 2 OT = 10. Exactly 9.3 stays 9.3. Reductions remove OT first, then normal hours if needed. Extra hours fill normal hours up to this project's standard, then overtime. OT approval and pay multipliers still apply. Changing this rule requires fresh project timesheet approval and sync; existing daily logs need recalculation.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Expected Overtime Hours</label>
+                      <input
+                        type="number"
+                        value={jobForm.expectedOvertimeHours}
+                        onChange={(e) => setJobForm({...jobForm, expectedOvertimeHours: e.target.value})}
+                        className="w-full p-2 border border-orange-300 rounded-lg bg-orange-50"
+                        min="0"
+                        step="0.5"
+                        placeholder="0"
+                        disabled={loading}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Expected project OT, kept separate from billing hours and multiplied by the project OT multiplier.
                       </p>
                     </div>
 
@@ -2721,6 +2926,85 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                       <p className="text-xs text-gray-500 mt-1">
                         Leave empty to use the global system default.
                       </p>
+                    </div>
+
+                    <label className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                      <input type="checkbox" className="mt-1" checked={jobForm.useConfiguredAttendanceHours}
+                        onChange={(e) => setJobForm({...jobForm, useConfiguredAttendanceHours: e.target.checked})}
+                        disabled={loading || jobForm.dailyHoursTopUpEnabled} />
+                      <span>
+                        <span className="block text-sm font-medium text-gray-800">Use configured hours for attendance</span>
+                        <span className="block text-xs text-gray-600 mt-1">
+                          With both check-in and check-out, replace calculated hours with Standard Work Hours and Minimum Overtime Hours, even when actual hours are higher or lower. Apply the project overtime multiplier once (or Settings default). The minimum becomes the exact raw overtime value, rather than only a lower limit. Weekends, configured off-days, Holiday, and Holiday Present keep their existing rules. Absent and leave records are excluded.
+                        </span>
+                        <span className="block text-xs font-medium text-indigo-700 mt-1">
+                          Example: 8 standard hours + 2 minimum overtime hours × 1.5 = 8 normal + 3 final overtime hours. Original clock times are kept.
+                        </span>
+                      </span>
+                    </label>
+
+                    <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={jobForm.applyOvertimeMultiplierToHours}
+                          onChange={(e) => setJobForm({...jobForm, applyOvertimeMultiplierToHours: e.target.checked})}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600"
+                          disabled={loading}
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-gray-800">Apply multiplier to overtime hours</span>
+                          <span className="block text-xs text-gray-600">Uses this project's multiplier, or the Settings default when this project has none.</span>
+                        </span>
+                      </label>
+
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={jobForm.enforceMinimumOvertime}
+                          onChange={(e) => setJobForm({...jobForm, enforceMinimumOvertime: e.target.checked})}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600"
+                          disabled={loading}
+                        />
+                        <span className="flex-1">
+                          <span className="block text-sm font-medium text-gray-800">Enforce minimum overtime hours</span>
+                          <span className="block text-xs text-gray-600">Raise smaller overtime entries to the minimum before applying the multiplier.</span>
+                        </span>
+                      </label>
+
+                      {(jobForm.enforceMinimumOvertime || jobForm.useConfiguredAttendanceHours) && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Minimum overtime hours</label>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min="0.25"
+                            value={jobForm.minimumOvertimeHours}
+                            onChange={(e) => setJobForm({...jobForm, minimumOvertimeHours: e.target.value})}
+                            className="mt-1 w-full rounded-lg border border-gray-300 p-2"
+                            placeholder="e.g., 2"
+                            required
+                            disabled={loading}
+                          />
+                          <p className="mt-1 text-xs text-gray-600">
+                            {jobForm.useConfiguredAttendanceHours ? 'Every completed attendance uses exactly' : 'Example: 1 actual hour becomes'} {jobForm.minimumOvertimeHours || 2} raw overtime hours, then ×{jobForm.overtimeMultiplier || 'Settings default'}.
+                          </p>
+                        </div>
+                      )}
+
+                      <label className="flex items-start gap-3 rounded-lg bg-emerald-50 p-3">
+                        <input
+                          type="checkbox"
+                          checked={jobForm.autoApproveOvertime}
+                          onChange={(e) => setJobForm({...jobForm, autoApproveOvertime: e.target.checked})}
+                          className="mt-1 h-4 w-4 rounded border-emerald-300 text-emerald-600"
+                          disabled={loading}
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-emerald-900">Auto-approve overtime</span>
+                          <span className="block text-xs text-emerald-700">New overtime for employees on this project will be saved as Approved.</span>
+                        </span>
+                      </label>
                     </div>
 
                     <ReminderConfigPanel />
@@ -2790,7 +3074,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                         ))}
                       </select>
                       <p className="text-xs text-gray-500 mt-2">
-                        You can assign employees and supervisors after creating the job
+                        You can assign employees and supervisors after creating the project
                       </p>
                     </div>
 
@@ -2849,7 +3133,7 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                         disabled={loading}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
                       >
-                        {loading ? 'Saving...' : (editingJob ? 'Update Job' : 'Create Job')}
+                        {loading ? 'Saving...' : (editingJob ? 'Update Project' : 'Create Project')}
                       </button>
                     </div>
                   </form>
@@ -2864,198 +3148,589 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
           {showPreviewModal && <PreviewModal />}
 
           {showEmployeeAssignment && selectedJobForAssignment && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
-                <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-                  <h2 className="text-lg font-semibold">
-                    Assign Employees to {selectedJobForAssignment.name}
-                  </h2>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="flex max-h-[92vh] w-full max-w-[96vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+                {/* HEADER */}
+                <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">
+                      Employee Assignment
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Project: <span className="font-semibold text-gray-800">{selectedJobForAssignment.name}</span>
+                    </p>
+                  </div>
+
                   <button
+                    type="button"
                     onClick={handleEmployeeAssignmentClose}
-                    className="text-gray-500 hover:text-gray-700"
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+                    aria-label="Close employee assignment"
                   >
-                    ✕
+                    <X size={20} />
                   </button>
                 </div>
-                
-                <div className="flex-1 overflow-y-auto p-6">
-                  <div className="grid grid-cols-2 gap-6">
+
+                {/* TABS */}
+                <div className="border-b border-gray-200 bg-gray-50 px-6">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeAssignmentTab('unassigned')}
+                      className={`relative flex items-center gap-2 px-5 py-4 text-sm font-semibold transition ${
+                        employeeAssignmentTab === 'unassigned'
+                          ? 'text-blue-700'
+                          : 'text-gray-500 hover:text-gray-800'
+                      }`}
+                    >
+                      <Users size={17} />
+                      Unassigned Employees
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                          employeeAssignmentTab === 'unassigned'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-gray-200 text-gray-600'
+                        }`}
+                      >
+                        {availableEmployees.length}
+                      </span>
+
+                      {employeeAssignmentTab === 'unassigned' && (
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeAssignmentTab('assigned')}
+                      className={`relative flex items-center gap-2 px-5 py-4 text-sm font-semibold transition ${
+                        employeeAssignmentTab === 'assigned'
+                          ? 'text-blue-700'
+                          : 'text-gray-500 hover:text-gray-800'
+                      }`}
+                    >
+                      <Users size={17} />
+                      Assigned Employees
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                          employeeAssignmentTab === 'assigned'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-600'
+                        }`}
+                      >
+                        {assignedEmployees.length}
+                      </span>
+
+                      {employeeAssignmentTab === 'assigned' && (
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* BODY */}
+                <div className="flex-1 overflow-y-auto bg-white p-6">
+
+                  {/* ===================================================== */}
+                  {/* UNASSIGNED EMPLOYEES */}
+                  {/* ===================================================== */}
+                  {employeeAssignmentTab === 'unassigned' && (
                     <div>
-                      <h3 className="text-lg font-semibold mb-4 text-green-600">
-                        Available Employees ({availableEmployees.length})
-                      </h3>
-                      <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {availableEmployees.map(employee => (
-                          <div key={employee.id} className="flex justify-between items-center p-3 border border-gray-200 rounded-lg">
-                            <div>
-                              <div className="font-medium">{employee.firstName} {employee.lastName}</div>
-                              <div className="text-sm text-gray-500">{employee.jobPosition} • {employee.employeeId}</div>
+                      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">
+                            Unassigned Employees
+                          </h3>
+                          <p className="mt-1 text-sm text-gray-500">
+                            Search and assign employees to this project.
+                          </p>
+                        </div>
+
+                        <span className="inline-flex w-fit items-center rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-700">
+                          {filteredAvailableEmployees.length}
+                          {normalizedEmployeeSearch ? ` of ${availableEmployees.length}` : ''} shown
+                        </span>
+                      </div>
+
+                      {/* Search */}
+                      <div className="relative mb-5">
+                        <Search
+                          size={18}
+                          aria-hidden="true"
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        />
+                        <input
+                          id="employee-assignment-search"
+                          type="search"
+                          value={employeeAssignmentSearch}
+                          onChange={event => setEmployeeAssignmentSearch(event.target.value)}
+                          placeholder="Search by name, employee ID, or position"
+                          className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        />
+                      </div>
+
+                      {/* Unassigned list */}
+                      <div className="grid max-h-[560px] grid-cols-1 gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
+                        {filteredAvailableEmployees.map(employee => (
+                          <div
+                            key={employee.id}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50"
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gray-100 text-sm font-bold text-gray-700">
+                                {`${employee.firstName?.[0] || ''}${employee.lastName?.[0] || ''}`.toUpperCase() || (
+                                  <User size={18} />
+                                )}
+                              </div>
+
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-gray-900">
+                                  {employee.firstName} {employee.lastName}
+                                </div>
+                                <div className="mt-1 truncate text-sm text-gray-500">
+                                  {employee.employeeId || 'No Employee ID'}
+                                  {' • '}
+                                  {employee.jobPosition || 'No Position'}
+                                </div>
+                              </div>
                             </div>
+
                             <button
+                              type="button"
                               onClick={() => assignEmployee(employee)}
-                              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                              className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
                             >
                               Assign
                             </button>
                           </div>
                         ))}
-                        {availableEmployees.length === 0 && (
-                          <div className="text-center text-gray-500 py-4">
-                            No available employees
-                          </div>
-                        )}
-                      </div>
-                    </div>
 
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 text-blue-600">
-                        Assigned Employees ({assignedEmployees.length})
-                      </h3>
-                      <div className="space-y-4 max-h-96 overflow-y-auto">
-                        {assignedEmployees.map(employee => {
-                          const rates = jobEmployeeRates[employee.id] || { normalRate: 0, overtimeRate: 0 };
-                          return (
-                            <div key={employee.id} className={`flex flex-col p-3 border rounded-lg bg-blue-50 border-gray-200`}>
-                              <div className="flex justify-between items-center">
-                                <div className="font-medium flex items-center gap-2">
-                                  {employee.firstName} {employee.lastName}
-                                  {employee.isSupervisor && (
-                                    <span className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
-                                      <Crown size={12} />
-                                      Supervisor
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex gap-2">
-                                  {!employee.isSupervisor && (
-                                    <button
-                                      onClick={() => assignAsSupervisor(employee)}
-                                      className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-                                    >
-                                      Make Supervisor
-                                    </button>
-                                  )}
-                                  {employee.isSupervisor && (
-                                    <button
-                                      onClick={() => unassignSupervisor(employee)}
-                                      className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm"
-                                    >
-                                      Remove as Supervisor
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => unassignEmployee(employee)}
-                                    className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="text-sm text-gray-500 mb-2">{employee.jobPosition} • {employee.employeeId}</div>
-                              <div className="flex gap-4 items-end">
-                                <div>
-                                  <label className="text-xs font-medium text-gray-700">NH Rate</label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={rates.normalRate}
-                                    onChange={(e) => {
-                                      const newVal = parseFloat(e.target.value) || 0;
-                                      setJobEmployeeRates(prev => ({
-                                        ...prev,
-                                        [employee.id]: { ...prev[employee.id], normalRate: newVal }
-                                      }));
-                                    }}
-                                    className="w-24 p-1 border border-gray-300 rounded text-sm"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-xs font-medium text-gray-700">OT Rate</label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={rates.overtimeRate}
-                                    onChange={(e) => {
-                                      const newVal = parseFloat(e.target.value) || 0;
-                                      setJobEmployeeRates(prev => ({
-                                        ...prev,
-                                        [employee.id]: { ...prev[employee.id], overtimeRate: newVal }
-                                      }));
-                                    }}
-                                    className="w-24 p-1 border border-gray-300 rounded text-sm"
-                                  />
-                                </div>
-                              </div>
+                        {filteredAvailableEmployees.length === 0 && (
+                          <div className="col-span-full flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 px-6 py-14 text-center">
+                            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+                              <Users size={26} />
                             </div>
-                          );
-                        })}
-                        {assignedEmployees.length === 0 && (
-                          <div className="text-center text-gray-500 py-4">
-                            No employees assigned
+                            <p className="font-semibold text-gray-700">
+                              {availableEmployees.length === 0
+                                ? 'All employees are already assigned'
+                                : 'No employees match your search'}
+                            </p>
+                            <p className="mt-1 text-sm text-gray-500">
+                              {availableEmployees.length === 0
+                                ? 'Use the Assigned Employees tab to manage the current project team.'
+                                : 'Try a different name, employee ID, or position.'}
+                            </p>
                           </div>
                         )}
                       </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* ===================================================== */}
+                  {/* ASSIGNED EMPLOYEES */}
+                  {/* ===================================================== */}
+                  {employeeAssignmentTab === 'assigned' && (
+                    <div>
+                      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">
+                            Assigned Employees
+                          </h3>
+                          <p className="mt-1 text-sm text-gray-500">
+                            Manage project billing rates, payroll rates, and employee roles.
+                          </p>
+                        </div>
+
+                        <span className="inline-flex w-fit items-center rounded-full bg-blue-600 px-3 py-1 text-sm font-bold text-white">
+                          {assignedEmployees.length} Assigned
+                        </span>
+                      </div>
+
+                      {assignedEmployees.length > 0 ? (
+                        <>
+                          <div className="max-h-[500px] overflow-auto rounded-xl border border-gray-200">
+                            <table className="min-w-[1520px] w-full border-collapse text-left text-sm">
+                              <thead className="sticky top-0 z-10 bg-slate-900 text-white">
+                                <tr>
+                                  <th className="border-r border-slate-700 px-4 py-3">Employee</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Employee ID</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Position</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Billing NH</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Billing OT</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Normal Payroll Rate</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Effective Payroll Rate</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Effective From</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Effective To</th>
+                                  <th className="border-r border-slate-700 px-4 py-3">Role</th>
+                                  <th className="px-4 py-3">Actions</th>
+                                </tr>
+                              </thead>
+
+                              <tbody className="divide-y divide-gray-200 bg-white">
+                                {assignedEmployees.map((employee, index) => {
+                                  const rates = jobEmployeeRates[employee.id] || {};
+
+                                  return (
+                                    <tr
+                                      key={employee.id}
+                                      className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} transition hover:bg-blue-50`}
+                                    >
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <div className="flex min-w-[210px] items-center gap-3">
+                                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
+                                            {`${employee.firstName?.[0] || ''}${employee.lastName?.[0] || ''}`.toUpperCase() || (
+                                              <User size={18} />
+                                            )}
+                                          </div>
+                                          <div>
+                                            <div className="font-bold text-gray-900">
+                                              {employee.firstName} {employee.lastName}
+                                            </div>
+                                            <div className="mt-0.5 text-xs text-gray-500">
+                                              DB ID: {employee.id}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <span className="rounded-md bg-gray-100 px-2.5 py-1 font-semibold text-gray-800">
+                                          {employee.employeeId || '—'}
+                                        </span>
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4 font-medium text-gray-800">
+                                        {employee.jobPosition || '—'}
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <input
+                                          aria-label="Timesheet Billing NH"
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={rates.normalRate ?? 0}
+                                          onChange={e =>
+                                            setJobEmployeeRates(prev => ({
+                                              ...prev,
+                                              [employee.id]: {
+                                                ...prev[employee.id],
+                                                normalRate: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          className="w-28 rounded-lg border-2 border-blue-200 bg-blue-50 px-3 py-2 font-semibold text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                        />
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <input
+                                          aria-label="Timesheet Billing OT"
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={rates.overtimeRate ?? 0}
+                                          onChange={e =>
+                                            setJobEmployeeRates(prev => ({
+                                              ...prev,
+                                              [employee.id]: {
+                                                ...prev[employee.id],
+                                                overtimeRate: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          className="w-28 rounded-lg border-2 border-indigo-200 bg-indigo-50 px-3 py-2 font-semibold text-gray-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                        />
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <div className="min-w-[145px] rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                                          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            Current Rate
+                                          </div>
+                                          <div className="mt-0.5 text-base font-bold text-gray-900">
+                                            GHS {currentEmployeeRate(employee).toFixed(2)}
+                                            <span className="ml-1 text-xs font-normal text-gray-500">/hr</span>
+                                          </div>
+                                        </div>
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <input
+                                          aria-label="Effective Payroll Rate"
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={rates.effectivePayrollRate ?? ''}
+                                          placeholder="Not set"
+                                          onChange={e =>
+                                            setJobEmployeeRates(prev => ({
+                                              ...prev,
+                                              [employee.id]: {
+                                                ...prev[employee.id],
+                                                effectivePayrollRate: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          className="w-36 rounded-lg border-2 border-green-200 bg-green-50 px-3 py-2 font-semibold text-gray-900 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                                        />
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <input
+                                          aria-label="Effective From"
+                                          type="date"
+                                          value={rates.effectivePayrollRateFrom ?? ''}
+                                          onChange={e =>
+                                            setJobEmployeeRates(prev => ({
+                                              ...prev,
+                                              [employee.id]: {
+                                                ...prev[employee.id],
+                                                effectivePayrollRateFrom: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          className="w-36 rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                                        />
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        <input
+                                          aria-label="Effective To"
+                                          type="date"
+                                          value={rates.effectivePayrollRateTo ?? ''}
+                                          onChange={e =>
+                                            setJobEmployeeRates(prev => ({
+                                              ...prev,
+                                              [employee.id]: {
+                                                ...prev[employee.id],
+                                                effectivePayrollRateTo: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          className="w-36 rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-100"
+                                        />
+                                      </td>
+
+                                      <td className="border-r border-gray-200 px-4 py-4">
+                                        {employee.isSupervisor ? (
+                                          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-800 ring-1 ring-amber-200">
+                                            <Crown size={14} />
+                                            Supervisor
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                                            <User size={14} />
+                                            Employee
+                                          </span>
+                                        )}
+                                      </td>
+
+                                      <td className="px-4 py-4">
+                                        <div className="flex min-w-[170px] flex-col gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              employee.isSupervisor
+                                                ? unassignSupervisor(employee)
+                                                : assignAsSupervisor(employee)
+                                            }
+                                            className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                                              employee.isSupervisor
+                                                ? 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                                : 'bg-green-600 text-white hover:bg-green-700'
+                                            }`}
+                                          >
+                                            {employee.isSupervisor ? 'Remove Supervisor' : 'Make Supervisor'}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => unassignEmployee(employee)}
+                                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                                          >
+                                            Unassign
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Bulk Billing Rates */}
+                          <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                            <h4 className="mb-3 flex items-center gap-2 text-sm font-bold text-blue-900">
+                              <Settings size={16} />
+                              Bulk Apply Timesheet Billing Rates
+                            </h4>
+
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  Timesheet Billing NH (GHS)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  placeholder="e.g. 50"
+                                  value={bulkNormalRate}
+                                  onChange={e => setBulkNormalRate(e.target.value)}
+                                  className="w-28 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  Timesheet Billing OT (GHS)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  placeholder="e.g. 75"
+                                  value={bulkOvertimeRate}
+                                  onChange={e => setBulkOvertimeRate(e.target.value)}
+                                  className="w-28 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={applyBulkRates}
+                                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                              >
+                                Apply to {assignedEmployees.length} Employees
+                              </button>
+                            </div>
+
+                            <p className="mt-2 text-xs text-blue-700">
+                              Billing NH and OT are used for timesheet/client billing only.
+                            </p>
+                          </div>
+
+                          {/* Bulk Effective Payroll Rate */}
+                          <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
+                            <h4 className="mb-3 text-sm font-bold text-green-900">
+                              Bulk Apply Effective Payroll Rate
+                            </h4>
+
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  Effective Payroll Rate (GHS/hour)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={bulkPayroll.effectivePayrollRate}
+                                  onChange={e =>
+                                    setBulkPayroll(prev => ({
+                                      ...prev,
+                                      effectivePayrollRate: e.target.value
+                                    }))
+                                  }
+                                  className="w-40 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  Effective From
+                                </label>
+                                <input
+                                  type="date"
+                                  value={bulkPayroll.effectivePayrollRateFrom}
+                                  onChange={e =>
+                                    setBulkPayroll(prev => ({
+                                      ...prev,
+                                      effectivePayrollRateFrom: e.target.value
+                                    }))
+                                  }
+                                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-600">
+                                  Effective To (optional)
+                                </label>
+                                <input
+                                  type="date"
+                                  value={bulkPayroll.effectivePayrollRateTo}
+                                  onChange={e =>
+                                    setBulkPayroll(prev => ({
+                                      ...prev,
+                                      effectivePayrollRateTo: e.target.value
+                                    }))
+                                  }
+                                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={applyBulkPayroll}
+                                className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800"
+                              >
+                                Apply to {assignedEmployees.length} Employees
+                              </button>
+                            </div>
+
+                            <p className="mt-2 text-xs text-green-800">
+                              Effective payroll rate is separate from timesheet billing rates.
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-200 px-6 py-14 text-center">
+                          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+                            <Users size={26} />
+                          </div>
+                          <p className="font-semibold text-gray-700">
+                            No employees assigned to this project.
+                          </p>
+                          <p className="mt-1 text-sm text-gray-500">
+                            Switch to the Unassigned Employees tab to add employees.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="mb-4 p-4 border border-blue-200 rounded-lg bg-blue-50">
-                  <h4 className="font-semibold text-blue-800 text-sm mb-2 flex items-center gap-2">
-                    <Settings size={16} />
-                    Bulk Apply Rates to All Assigned Employees
-                  </h4>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600">NH Rate (₵)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="e.g. 50"
-                        value={bulkNormalRate}
-                        onChange={(e) => setBulkNormalRate(e.target.value)}
-                        className="w-24 p-1 border border-gray-300 rounded text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600">OT Rate (₵)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="e.g. 75"
-                        value={bulkOvertimeRate}
-                        onChange={(e) => setBulkOvertimeRate(e.target.value)}
-                        className="w-24 p-1 border border-gray-300 rounded text-sm"
-                      />
-                    </div>
+                {/* FOOTER */}
+                <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-6 py-4">
+                  <div className="text-sm text-gray-500">
+                    {employeeAssignmentTab === 'assigned'
+                      ? `${assignedEmployees.length} employee(s) assigned to this project`
+                      : `${availableEmployees.length} employee(s) available to assign`}
+                  </div>
+
+                  <div className="flex gap-3">
+                    {employeeAssignmentTab === 'assigned' && assignedEmployees.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={saveEmployeeRates}
+                        className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                      >
+                        Save Rates
+                      </button>
+                    )}
+
                     <button
-                      onClick={applyBulkRates}
-                      className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                      type="button"
+                      onClick={handleEmployeeAssignmentClose}
+                      className="rounded-lg border border-gray-300 bg-white px-5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
                     >
-                      Apply to {assignedEmployees.length} Employees
+                      Close
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    This will override the rates for all currently assigned employees. You can still edit individual rates below.
-                  </p>
-                </div>
-
-                <div className="p-4 border-t border-gray-200 flex justify-between items-center">
-                  <button
-                    onClick={saveEmployeeRates}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    Save Rates
-                  </button>
-                  <button
-                    onClick={handleEmployeeAssignmentClose}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                  >
-                    Close
-                  </button>
                 </div>
               </div>
             </div>
@@ -3252,8 +3927,23 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
                         </div>
                         <div className="flex items-center gap-2">
                           <Clock size={16} />
+                          <span className="font-medium">Work Start:</span>
+                          <span>{job.workStartTime?.slice(0, 5) || 'Not set'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock size={16} />
                           <span className="font-medium">Standard Hours:</span>
                           <span>{job.standardWorkHours || 8}h/day</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-emerald-700">
+                          <Clock size={16} />
+                          <span className="font-medium">Billing Hours:</span>
+                          <span>{job.billingHours ?? job.standardWorkHours ?? 8}h/day</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-orange-700">
+                          <Clock size={16} />
+                          <span className="font-medium">Expected OT:</span>
+                          <span>{job.expectedOvertimeHours ?? 0}h → {(Number(job.expectedOvertimeHours ?? 0) * Number(job.overtimeMultiplier ?? 1.5)).toFixed(1)}h adjusted</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <Clock size={16} />
@@ -3377,11 +4067,11 @@ function JobsManagement({ initialJobId = null, initialJobData = null }) {
 
           {!loading && filteredJobs.length === 0 && (
             <div className="text-center py-12">
-              <div className="text-gray-500 text-lg">No jobs found</div>
+              <div className="text-gray-500 text-lg">No projects found</div>
               <p className="text-sm text-gray-400 mt-2">
                 {searchTerm || statusFilter !== 'ALL' 
                   ? 'Try adjusting your search or filter criteria' 
-                  : 'Create your first job to get started'
+                  : 'Create your first project to get started'
                 }
               </p>
             </div>

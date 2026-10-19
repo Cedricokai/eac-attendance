@@ -1,3 +1,4 @@
+import InventoryFulfilment from '../../../components/InventoryFulfilment';
 // InventoryRequestStatusTracker.jsx
 import { useState, useEffect } from 'react';
 import { 
@@ -55,9 +56,10 @@ const InventoryRequestStatusTracker = ({ employeeId }) => {
   // Status mapping based on your service class
   const STATUS_CONFIG = {
     'PENDING': { label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
-    'PENDING_PLANNER': { label: 'With Planner', color: 'bg-blue-100 text-blue-800', icon: FileText },
+    'PENDING_PLANNER': { label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
     'APPROVED_BY_PLANNER': { label: 'Planner Approved', color: 'bg-green-100 text-green-800', icon: CheckCircle },
-    'PROCUREMENT_PENDING': { label: 'With Procurement', color: 'bg-purple-100 text-purple-800', icon: ShoppingCart },
+    'PROCUREMENT_PENDING': { label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
+    'PENDING_STORE': { label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
     'PROCURED': { label: 'Procured', color: 'bg-indigo-100 text-indigo-800', icon: Truck },
     'STORE_REVIEW': { label: 'Store Review', color: 'bg-orange-100 text-orange-800', icon: Warehouse },
     'APPROVED_BY_STORE': { label: 'Store Approved', color: 'bg-teal-100 text-teal-800', icon: CheckCircle },
@@ -97,11 +99,11 @@ const InventoryRequestStatusTracker = ({ employeeId }) => {
         // Calculate stats
         const stats = {
           total: data.length,
-          pending: data.filter(r => r.status === 'PENDING' || r.status === 'PENDING_PLANNER').length,
+          pending: data.filter(r => ['PENDING', 'PENDING_PLANNER', 'PROCUREMENT_PENDING', 'PENDING_STORE'].includes(r.status)).length,
           approved: data.filter(r => r.status === 'APPROVED_BY_STORE' || r.status === 'APPROVED_BY_PLANNER').length,
           issued: data.filter(r => r.status === 'ISSUED').length,
           rejected: data.filter(r => r.status?.includes('REJECTED')).length,
-          inProcurement: data.filter(r => r.status === 'PROCUREMENT_PENDING' || r.status === 'PROCURED' || r.status === 'STORE_REVIEW').length
+          inProcurement: data.filter(r => r.status === 'PROCURED' || r.status === 'STORE_REVIEW').length
         };
         setStats(stats);
       }
@@ -119,8 +121,8 @@ const InventoryRequestStatusTracker = ({ employeeId }) => {
   // Filter requests based on status
   const filteredRequests = requests.filter(request => {
     if (statusFilter === 'All') return true;
-    if (statusFilter === 'Pending') return request.status === 'PENDING' || request.status === 'PENDING_PLANNER';
-    if (statusFilter === 'In Progress') return ['PROCUREMENT_PENDING', 'PROCURED', 'STORE_REVIEW'].includes(request.status);
+    if (statusFilter === 'Pending') return ['PENDING', 'PENDING_PLANNER', 'PROCUREMENT_PENDING', 'PENDING_STORE'].includes(request.status);
+    if (statusFilter === 'In Progress') return ['PROCURED', 'STORE_REVIEW'].includes(request.status);
     if (statusFilter === 'Approved') return request.status === 'APPROVED_BY_STORE' || request.status === 'APPROVED_BY_PLANNER';
     if (statusFilter === 'Issued') return request.status === 'ISSUED';
     if (statusFilter === 'Rejected') return request.status?.includes('REJECTED');
@@ -271,6 +273,7 @@ const InventoryRequestStatusTracker = ({ employeeId }) => {
         </div>
       </div>
 
+      <InventoryFulfilment apiBase={API_BASE_URL} employeeRequests={requests} />
       {/* Requests Table */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
@@ -319,7 +322,7 @@ const InventoryRequestStatusTracker = ({ employeeId }) => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Request #</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Items</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Job/Project</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Project/Project</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Workflow</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</th>

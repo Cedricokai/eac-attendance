@@ -177,7 +177,7 @@ const CostCenterManagement = () => {
                     return;
                 }
             } catch (err) {
-                console.log("No existing cost center for this job");
+                console.log("No existing cost center for this project");
             }
         }
         
@@ -219,7 +219,7 @@ const CostCenterManagement = () => {
       const jobsData = await apiRequest('/api/jobs');
       setAllJobs(jobsData || []);
     } catch (err) {
-      console.error("Error fetching jobs:", err);
+      console.error("Error fetching projects:", err);
       setAllJobs([]);
     }
   };
@@ -239,7 +239,7 @@ const CostCenterManagement = () => {
       const productsData = await apiRequest(`/api/cost-center-products/job/${selectedJobId}`);
       setJobProducts(productsData || []);
     } catch (err) {
-      console.error("Error fetching job products:", err);
+      console.error("Error fetching project products:", err);
       setJobProducts([]);
     }
   };
@@ -253,7 +253,7 @@ const CostCenterManagement = () => {
         setShowCreateCostCenterModal(true);
       }
     } catch (err) {
-      console.error("Error fetching job details:", err);
+      console.error("Error fetching project details:", err);
     }
   };
 
@@ -265,7 +265,7 @@ const CostCenterManagement = () => {
         jobId: job.id,
         name: `${job.name} - Cost Center`,
         code: `CC-${job.id}-${Date.now().toString().slice(-4)}`,
-        description: `Cost center for job: ${job.name}`,
+        description: `Cost center for project: ${job.name}`,
         type: 'PROJECT',
         status: 'ACTIVE',
         budget: job.budget || 100000,
@@ -278,14 +278,14 @@ const CostCenterManagement = () => {
         body: JSON.stringify(costCenterData)
       });
       
-      toast.success('Cost center created successfully for this job!');
+      toast.success('Cost center created successfully for this project!');
       await fetchCostCenters();
       setShowCreateCostCenterModal(false);
       
       return response;
     } catch (err) {
-      console.error('Error creating cost center for job:', err);
-      toast.error('Failed to create cost center for job');
+      console.error('Error creating cost center for project:', err);
+      toast.error('Failed to create cost center for project');
       throw err;
     } finally {
       setIsSubmitting(false);
@@ -294,7 +294,7 @@ const CostCenterManagement = () => {
 
   const handleCreateCostCenterFromJob = async () => {
     if (!selectedJobDetails) {
-      toast.error('No job selected');
+      toast.error('No project selected');
       return;
     }
     
@@ -845,7 +845,7 @@ const viewRequestDetails = async (costCenterId) => {
       
       const reportData = {
         generatedDate: new Date().toLocaleString(),
-        selectedJob: selectedJobId ? selectedJobDetails?.name : 'All Jobs',
+        selectedJob: selectedJobId ? selectedJobDetails?.name : 'All Projects',
         summary: {
           totalCostCenters,
           totalBudget: formatCurrency(totalBudget),
@@ -910,7 +910,7 @@ const viewRequestDetails = async (costCenterId) => {
         <div class="header">
           <h1>Cost Center Management Summary Report</h1>
           <div class="subtitle">Generated on ${reportData.generatedDate}</div>
-          <div class="subtitle">Job Filter: ${reportData.selectedJob}</div>
+          <div class="subtitle">Project Filter: ${reportData.selectedJob}</div>
         </div>
         
         <div class="section">
@@ -1044,7 +1044,7 @@ const viewRequestDetails = async (costCenterId) => {
         'Usage %',
         'Product Count',
         'Request Count',
-        'Job Name',
+        'Project Name',
         'Start Date',
         'End Date'
       ].join(','));
@@ -1264,7 +1264,7 @@ const viewRequestDetails = async (costCenterId) => {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
         <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold">Select Job</h3>
+          <h3 className="text-lg font-semibold">Select Project</h3>
         </div>
         <div className="p-6 max-h-96 overflow-y-auto">
           <div className="space-y-2">
@@ -1277,8 +1277,8 @@ const viewRequestDetails = async (costCenterId) => {
                 setShowJobSelector(false);
               }}
             >
-              <div className="font-medium text-blue-600">All Jobs</div>
-              <div className="text-sm text-gray-600">Show cost centers for all jobs</div>
+              <div className="font-medium text-blue-600">All Projects</div>
+              <div className="text-sm text-gray-600">Show cost centers for all projects</div>
             </div>
             
             {allJobs.map(job => (
@@ -1330,7 +1330,7 @@ const viewRequestDetails = async (costCenterId) => {
             <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h2 className="text-xl font-semibold text-gray-900">Create Cost Center for Job</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Create Cost Center for Project</h2>
           </div>
         </div>
 
@@ -1338,10 +1338,10 @@ const viewRequestDetails = async (costCenterId) => {
           {selectedJobDetails ? (
             <div className="space-y-4">
               <div className="bg-blue-50 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-blue-800 mb-2">Job Details</h3>
+                <h3 className="text-lg font-semibold text-blue-800 mb-2">Project Details</h3>
                 <div className="space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Job Name:</span>
+                    <span className="text-gray-600">Project Name:</span>
                     <span className="font-semibold">{selectedJobDetails.name}</span>
                   </div>
                   <div className="flex justify-between">
@@ -1383,14 +1383,14 @@ const viewRequestDetails = async (costCenterId) => {
                     />
                   </div>
                   <p className="text-sm text-gray-600">
-                    A cost center will be automatically created with the job's budget and details.
+                    A cost center will be automatically created with the project's budget and details.
                   </p>
                 </div>
               </div>
             </div>
           ) : (
             <div className="text-center py-8">
-              <div className="text-gray-500">No job selected</div>
+              <div className="text-gray-500">No project selected</div>
             </div>
           )}
         </div>
@@ -1474,10 +1474,10 @@ const viewRequestDetails = async (costCenterId) => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-900 mb-2">Job Information</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Project Information</h3>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Job:</span>
+                    <span className="text-gray-600">Project:</span>
                     <span className="font-medium">{selectedRequestDetails.jobName || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
@@ -1668,7 +1668,7 @@ const viewRequestDetails = async (costCenterId) => {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              {selectedJobId ? 'Change Job' : 'Select Job'}
+              {selectedJobId ? 'Change Project' : 'Select Project'}
             </button>
             
             <div className="relative">
@@ -1745,7 +1745,7 @@ const viewRequestDetails = async (costCenterId) => {
           <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-sm text-blue-700 font-medium">Selected Job:</span>
+                <span className="text-sm text-blue-700 font-medium">Selected Project:</span>
                 <span className="ml-2 font-semibold">{selectedJobDetails.name}</span>
                 <div className="text-sm text-gray-600 mt-1">
                   Client: {selectedJobDetails.client} • Budget: ${selectedJobDetails.budget ? parseFloat(selectedJobDetails.budget).toLocaleString() : '0.00'}
@@ -1756,7 +1756,7 @@ const viewRequestDetails = async (costCenterId) => {
                       onClick={() => setShowCreateCostCenterModal(true)}
                       className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
                     >
-                      Create Cost Center for this Job
+                      Create Cost Center for this Project
                     </button>
                   </div>
                 )}
@@ -1766,7 +1766,7 @@ const viewRequestDetails = async (costCenterId) => {
                   onClick={() => navigate(`/jobs-management`)}
                   className="text-sm text-blue-600 hover:text-blue-800"
                 >
-                  View Job
+                  View Project
                 </button>
                 <button
                   onClick={() => {
@@ -1886,7 +1886,7 @@ const viewRequestDetails = async (costCenterId) => {
                     <td colSpan="12" className="px-6 py-8 text-center">
                       {selectedJobId ? (
                         <div className="space-y-4">
-                          <div className="text-gray-500">No cost center found for this job</div>
+                          <div className="text-gray-500">No cost center found for this project</div>
                           {selectedJobDetails && (
                             <button
                               onClick={() => setShowCreateCostCenterModal(true)}
@@ -1933,7 +1933,7 @@ const viewRequestDetails = async (costCenterId) => {
                               <div className="text-sm text-gray-500">{center.description}</div>
                               {center.job && (
                                 <div className="text-xs text-blue-600 mt-1">
-                                  Job: {center.job.name}
+                                  Project: {center.job.name}
                                 </div>
                               )}
                             </div>
@@ -2122,13 +2122,13 @@ const viewRequestDetails = async (costCenterId) => {
       {activeTab === 'products' && (
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Product Requests for Selected Job</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Product Requests for Selected Project</h2>
             
             {selectedJobId && selectedJobDetails ? (
               <div className="mb-6 p-4 bg-blue-50 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-blue-800">Job: {selectedJobDetails.name}</h3>
+                    <h3 className="font-semibold text-blue-800">Project: {selectedJobDetails.name}</h3>
                     <p className="text-sm text-blue-600">Client: {selectedJobDetails.client}</p>
                   </div>
                   <div className="flex gap-2">
@@ -2150,13 +2150,13 @@ const viewRequestDetails = async (costCenterId) => {
             ) : (
               <div className="mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                 <p className="text-yellow-700">
-                  <strong>Note:</strong> Please select a job to see product requests for that specific job.
+                  <strong>Note:</strong> Please select a project to see product requests for that specific project.
                 </p>
                 <button
                   onClick={() => setShowJobSelector(true)}
                   className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
                 >
-                  Select Job
+                  Select Project
                 </button>
               </div>
             )}
@@ -2202,7 +2202,7 @@ const viewRequestDetails = async (costCenterId) => {
                           <svg className="w-12 h-12 text-gray-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
                           </svg>
-                          <p className="text-gray-500">No products found for this job</p>
+                          <p className="text-gray-500">No products found for this project</p>
                           {selectedJobId && costCenters.length > 0 && (
                             <button
                               onClick={() => handleOpenProductModal(costCenters[0], selectedJobId)}
@@ -2326,14 +2326,14 @@ const viewRequestDetails = async (costCenterId) => {
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Product Request Tracking</h2>
-            <p className="text-gray-600 mb-6">Track the progress of all product requests across cost centers and jobs</p>
+            <p className="text-gray-600 mb-6">Track the progress of all product requests across cost centers and projects</p>
             
             {selectedJobId && selectedJobDetails ? (
               <div className="mb-6 p-4 bg-blue-50 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-blue-800">Filtered by Job: {selectedJobDetails.name}</h3>
-                    <p className="text-sm text-blue-600">Showing requests for this job only</p>
+                    <h3 className="font-semibold text-blue-800">Filtered by Project: {selectedJobDetails.name}</h3>
+                    <p className="text-sm text-blue-600">Showing requests for this project only</p>
                   </div>
                   <button
                     onClick={() => {
@@ -2395,7 +2395,7 @@ const viewRequestDetails = async (costCenterId) => {
                       <tr className="bg-gray-50">
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Request ID</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost Center</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estimated Cost</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>

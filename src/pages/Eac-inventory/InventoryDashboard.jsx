@@ -8,7 +8,6 @@ import {
 } from '@material-tailwind/react';
 import {
   CubeIcon,
-  ServerIcon,
   TruckIcon,
   MagnifyingGlassIcon,
   InboxIcon,
@@ -17,6 +16,7 @@ import {
   ExclamationTriangleIcon,
   ArrowTrendingUpIcon,
   ShieldCheckIcon
+  ,DocumentArrowUpIcon
 } from '@heroicons/react/24/outline';
 
 const InventoryDashboard = () => {
@@ -89,14 +89,6 @@ const InventoryDashboard = () => {
       color: "from-blue-500 to-blue-600"
     },
     { 
-      icon: <ServerIcon className="h-6 w-6" />, 
-      title: "Assets", 
-      path: "/assets",
-      description: "Track company assets",
-      color: "from-green-500 to-green-600"
-    },
-
-    { 
       icon: <TruckIcon className="h-6 w-6" />, 
       title: "Outgoing", 
       path: "/outgoing",
@@ -118,6 +110,13 @@ const InventoryDashboard = () => {
       color: "from-indigo-500 to-indigo-600"
     },
     { 
+      icon: <DocumentArrowUpIcon className="h-6 w-6" />,
+      title: "Waybills & Documents",
+      path: "/inventory-documents",
+      description: "Upload and organize paperwork",
+      color: "from-emerald-500 to-teal-600"
+    },
+    {
       icon: <ChartBarIcon className="h-6 w-6" />, 
       title: "Reports", 
       path: "/ReportsDashboard",

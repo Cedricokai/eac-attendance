@@ -764,6 +764,7 @@ function AttendanceDashboard() {
                   <Users size={18} />
                   <span className="text-sm font-medium">Add Employee</span>
                 </Link>
+
               </div>
             </div>
           </div>

@@ -25,6 +25,7 @@ const LunchSidebar = ({ isCollapsed }) => {
     { path: '/lunch/daily-serving', label: 'Daily Serving', icon: ClipboardDocumentCheckIcon },
     { path: '/lunch/attendance-verification', label: 'Attendance Verification', icon: CheckCircleIcon },
     { path: '/lunch/kitchen-report', label: 'Kitchen Report', icon: FireIcon },
+    { path: '/lunch/meal-planning', label: 'Next-day Meals', icon: ClipboardDocumentListIcon },
     { path: '/lunch/reports', label: 'Reports', icon: ChartBarIcon },
     { path: '/lunch/meals', label: 'Meals', icon: ShoppingBagIcon },
     { path: '/lunch/settings', label: 'Settings', icon: Cog6ToothIcon },

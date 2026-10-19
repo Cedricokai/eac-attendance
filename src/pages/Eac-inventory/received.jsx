@@ -1,5 +1,6 @@
+import InventoryFulfilment from '../../components/InventoryFulfilment';
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   TruckIcon,
   UserCircleIcon,
@@ -68,7 +69,21 @@ const STORE_TYPES = {
 };
 
 const Received = () => {
-    const [activeTab, setActiveTab] = useState('transfer');
+    const [searchParams] = useSearchParams();
+    const requestedTab = searchParams.get('tab');
+    const [activeTab, setActiveTab] = useState(
+        ['transfer', 'requests', 'receipts'].includes(requestedTab)
+            ? requestedTab
+            : 'transfer'
+    );
+
+    // Keep deep links and sidebar navigation in sync even when this page is
+    // already mounted and only the query string changes.
+    useEffect(() => {
+        if (['transfer', 'requests', 'receipts'].includes(requestedTab)) {
+            setActiveTab(requestedTab);
+        }
+    }, [requestedTab]);
     const [products, setProducts] = useState([]);
     const [filteredTransferProducts, setFilteredTransferProducts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -290,7 +305,10 @@ const Received = () => {
             originalStatus: request.status,
             created_at: request.requestDate || new Date().toISOString(),
             location: request.location || 'Main Store',
-            job: request.jobDescription || request.projectName || 'General Request',
+            jobId: request.job?.id || request.items?.find(item => item.jobId)?.jobId || null,
+            jobName: request.jobName || request.job?.name || request.projectName || 'General Request',
+            jobDescription: request.jobDescription || request.projectName || 'General Request',
+            job: request.jobName || request.job?.name || request.jobDescription || request.projectName || 'General Request',
             urgency: request.urgency || 'normal',
             items: request.items || [],
             planner_notes: request.plannerNotes,
@@ -358,6 +376,10 @@ const Received = () => {
             originalStatus: request.status,
             created_at: request.requestDate || new Date().toISOString(),
             location: request.location || 'Safety Store',
+            jobId: request.job?.id || request.items?.find(item => item.jobId)?.jobId || null,
+            jobName: request.jobName || request.job?.name || request.projectName || 'General Request',
+            jobDescription: request.jobDescription || request.projectName || 'General Request',
+            job: request.jobName || request.job?.name || request.jobDescription || request.projectName || 'General Request',
             urgency: request.urgency || 'normal',
             is_ppe: true,
             size_requirements: '',
@@ -1358,6 +1380,33 @@ const Received = () => {
         return requestType === 'inventory' ? selectedInventoryRequests : selectedPpeRequests;
     };
 
+    const openIssueModal = () => {
+        const linked = filteredRequests.find(r => getSelectedRequests().includes(r.id) && r.financeFulfilment);
+        if (linked) {
+            window.location.hash = `/received?tab=requests&requestId=${linked.id}`;
+            document.getElementById('inventory-fulfilment')?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+
+        const selectedIds = getSelectedRequests();
+        const selectedRequests = filteredRequests.filter(request => selectedIds.includes(request.id));
+        const requestedLocations = [...new Set(
+            selectedRequests.map(request => request.location).filter(Boolean)
+        )];
+
+        const matchedIssueLocation = requestedLocations.length === 1
+            ? locations.find(location =>
+                location.replace(/_/g, ' ').toUpperCase() ===
+                requestedLocations[0].replace(/_/g, ' ').toUpperCase()
+            )
+            : null;
+
+        // Prefill only an exact configured Store location. Otherwise the Store
+        // officer must choose the issuing store independently of destination.
+        setIssueLocation(matchedIssueLocation || '');
+        setIsIssueModalOpen(true);
+    };
+
     const issueItemsToEmployees = async () => {
       setMoveLoading(true);
       setMoveError(null);
@@ -1512,7 +1561,10 @@ const Received = () => {
               let jobId = null;
               let jobName = null;
               
-              if (request.job && request.job.id) {
+              if (request.jobId) {
+                jobId = request.jobId;
+                jobName = request.jobName || request.job;
+              } else if (request.job && request.job.id) {
                 jobId = request.job.id;
                 jobName = request.job.name;
               } else if (request.job) {
@@ -1532,7 +1584,7 @@ const Received = () => {
                     }
                   }
                 } catch (err) {
-                  console.error('Error finding job:', err);
+                  console.error('Error finding project:', err);
                 }
               }
               
@@ -1595,8 +1647,8 @@ const Received = () => {
         setIssueLocation('');
         
         const costSummary = successfulIssuances.filter(s => s.request.job).length > 0
-          ? 'Costs have been recorded to respective job cost centers.'
-          : 'Note: Some requests had no job association - costs were not recorded.';
+          ? 'Costs have been recorded to respective project cost centers.'
+          : 'Note: Some requests had no project association - costs were not recorded.';
         
         setSuccessMessage(`Successfully issued ${successfulIssuances.length} ${requestType} request(s) to employees! ${costSummary}`);
         setTimeout(() => setSuccessMessage(""), 5000);
@@ -1807,9 +1859,9 @@ const Received = () => {
     };
 
     const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('en-US', {
+        return new Intl.NumberFormat('en-GH', {
             style: 'currency',
-            currency: 'USD'
+            currency: 'GHS'
         }).format(amount);
     };
 
@@ -2342,7 +2394,7 @@ const Received = () => {
                     
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Cost Range ($)
+                            Cost Range (GH₵)
                         </label>
                         <div className="flex gap-2">
                             <input
@@ -2420,7 +2472,7 @@ const Received = () => {
                         )}
                         {(costFilter.min || costFilter.max) && (
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-red-100 text-red-800">
-                                Cost: ${costFilter.min || '0'} - ${costFilter.max || '∞'}
+                                Cost: GH₵ {costFilter.min || '0'} - GH₵ {costFilter.max || '∞'}
                                 <button onClick={() => setCostFilter({ min: '', max: '' })} className="ml-1">
                                     <XMarkIcon className="h-3 w-3" />
                                 </button>
@@ -3166,6 +3218,7 @@ const Received = () => {
 
             <div className="flex-1 mt-16">
                 <div className="p-6 overflow-auto">
+                    {activeTab === "requests" && <InventoryFulfilment apiBase={API_BASE_URL} />}
                     {successMessage && (
                         <div className="mb-6 p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
                             <div className="text-green-600 flex items-center gap-2">
@@ -3399,7 +3452,7 @@ const Received = () => {
                         <div className="fixed bottom-8 right-8 z-10">
                             <button
                                 className="rounded-full px-6 py-5 shadow-lg hover:shadow-xl transition-all flex items-center gap-2 bg-green-500 text-white hover:bg-green-600 text-lg font-semibold"
-                                onClick={() => setIsIssueModalOpen(true)}
+                                onClick={openIssueModal}
                             >
                                 <TruckIcon className="h-5 w-5" />
                                 <span>Issue {getSelectedRequests().length} Request{getSelectedRequests().length !== 1 ? 's' : ''}</span>
@@ -3610,6 +3663,16 @@ const Received = () => {
                                                                 <div className="text-sm text-gray-600 mb-2">
                                                                     Employee: {request.employee_name} • Department: {request.department}
                                                                 </div>
+                                                                <div className="grid grid-cols-1 gap-1 text-sm text-gray-600 sm:grid-cols-2">
+                                                                    <div>
+                                                                        <span className="font-medium text-gray-700">Project:</span>{' '}
+                                                                        {request.jobName || request.jobDescription || request.job || 'Not specified'}
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="font-medium text-gray-700">Requested destination:</span>{' '}
+                                                                        {request.location || 'Not specified'}
+                                                                    </div>
+                                                                </div>
                                                                 
                                                                 {Array.isArray(request.items) && request.items.length > 0 && (
                                                                     <div className="mt-3 space-y-2">
@@ -3738,7 +3801,7 @@ const Received = () => {
                                             ))}
                                         </select>
                                         <p className="text-sm text-gray-500 mt-1">
-                                            Select where these items are being issued from
+                                            Select where these items are being issued from. This is kept separate from each request's destination.
                                         </p>
                                     </div>
 
@@ -3918,7 +3981,7 @@ const Received = () => {
                                                         <span className="text-sm font-semibold">{currentReceipt.quantity_issued} units</span>
                                                     </div>
                                                     <div className="flex justify-between">
-                                                        <span className="text-sm text-gray-600">Job/Project:</span>
+                                                        <span className="text-sm text-gray-600">Project/Project:</span>
                                                         <span className="text-sm font-semibold">{currentReceipt.job_project}</span>
                                                     </div>
                                                     <div className="flex justify-between">

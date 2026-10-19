@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { attendanceReportContactNote } from "./reportContact";
 import {
   Download,
   Filter,
@@ -40,9 +41,21 @@ import {
   PieChart
 } from "lucide-react";
 import MainSidebar from "../mainSidebar";
+import RawBiometricModal from "./RawBiometricModal";
+import { approvedReportRows, reportPreviewRange } from '../../../utils/approvedReportPreview';
 
 function Report() {
-  const navigate = useNavigate();
+  const scheduleStatusValues = (value) => ({
+  morningIncludePresent: value.morningIncludePresent === true,
+  morningIncludeLate: value.morningIncludeLate !== false,
+  morningIncludeAbsent: value.morningIncludeAbsent !== false,
+  eveningIncludePresent: value.eveningIncludePresent !== false,
+  eveningIncludeLate: value.eveningIncludeLate !== false,
+  eveningIncludeAbsent: value.eveningIncludeAbsent !== false,
+});
+const includedReportStatuses = (value, period) => ['Present', 'Late', 'Absent'].filter(status => scheduleStatusValues(value)[period + 'Include' + status]);
+
+const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState(null);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -78,13 +91,18 @@ function Report() {
   });
 
   const [scheduleSettings, setScheduleSettings] = useState({
+    ...scheduleStatusValues({}),
     enabled: false,
     sendTime: "18:00",
+    morningReportEnabled: false,
+    morningReportTime: "",
+    eveningReportEnabled: true,
     recipientEmails: "",
     sendOnlyExceptions: true,
     attachExcel: true
   });
 
+  const [savedReportSchedule, setSavedReportSchedule] = useState(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -100,28 +118,6 @@ function Report() {
   
   const [expandedRows, setExpandedRows] = useState([]);
   const [showRawBiometric, setShowRawBiometric] = useState(false);
-  const [rawEvents, setRawEvents] = useState([]);
-  const [rawLoading, setRawLoading] = useState(false);
-  const [rawPage, setRawPage] = useState(0);
-  const [rawTotalPages, setRawTotalPages] = useState(1);
-  const [selectedRawEvent, setSelectedRawEvent] = useState(null);
-  const [rawFilters, setRawFilters] = useState({ employeeId: "", startDate: "", endDate: "", source: "", status: "" });
-
-  const employeeNamesById = useMemo(() => {
-    return new Map(employees.map((employee) => [
-      String(employee.id),
-      [employee.firstName, employee.lastName].filter(Boolean).join(" ") || employee.employeeId || `Employee ${employee.id}`
-    ]));
-  }, [employees]);
-
-  const getRawEventEmployeeName = (event) => {
-    if (event.employeeId != null) {
-      const linkedEmployeeName = employeeNamesById.get(String(event.employeeId));
-      if (linkedEmployeeName) return linkedEmployeeName;
-    }
-    return event.rawEmployeeName || event.deviceUserId || "Unmatched";
-  };
-
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
   };
@@ -141,38 +137,6 @@ function Report() {
   };
 
   const API_BASE_URL = getApiBaseUrl();
-
-  const fetchRawEvents = async (page = rawPage) => {
-    setRawLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), size: "100" });
-      Object.entries(rawFilters).forEach(([key, value]) => value && params.set(key, value));
-      const response = await fetch(`${API_BASE_URL}/api/biometric/raw-events?${params}`, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      });
-      if (!response.ok) {
-        const message = await response.text();
-        if (response.status === 401) throw new Error("Your session has expired. Please sign in again.");
-        if (response.status === 403) throw new Error("Only HR and administrators can view raw biometric events.");
-        throw new Error(message || `Failed to load raw biometric events (${response.status})`);
-      }
-      const data = await response.json();
-      setRawEvents(data.content || []);
-      setRawPage(data.number || 0);
-      setRawTotalPages(Math.max(data.totalPages || 1, 1));
-    } catch (e) { setError(e.message); } finally { setRawLoading(false); }
-  };
-
-  const exportRawEvents = () => {
-    const rows = rawEvents.map(({ employeeId, rawPayload, ...event }) => ({
-      ...event,
-      employeeName: getRawEventEmployeeName({ ...event, employeeId }),
-      rawPayload
-    }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Raw Biometric Events");
-    XLSX.writeFile(workbook, `raw_biometric_events_${rawFilters.startDate || "all"}_${rawFilters.endDate || "all"}.xlsx`);
-  };
 
   const getToken = () => {
     return localStorage.getItem('jwtToken');
@@ -249,11 +213,23 @@ function Report() {
 
       const attendance = await attendanceRes.json();
       const employeesData = await employeesRes.json();
+      const range = reportPreviewRange(attendance, filters);
+      let previewData = { approvedOnly: true, rows: [] };
+      if (range) {
+        const params = new URLSearchParams({ ...range, approvedOnly: 'true' });
+        const previewRes = await fetch(`${API_BASE_URL}/api/reports/attendance/preview?${params}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!previewRes.ok) throw new Error('Could not load approved report hours. Please retry.');
+        previewData = await previewRes.json();
+      }
 
-      const enrichedData = attendance.map(record => {
+      const enrichedData = approvedReportRows(attendance, previewData, employeesData).map(record => {
         const employee = employeesData.find(emp => emp.id === record.employee?.id);
+        const reportDetail = record.reportDetail;
         return {
           ...record,
+          reportDetail,
           employeeDetails: employee || {},
           fullName: employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown',
           department: employee?.department || 'N/A',
@@ -269,6 +245,7 @@ function Report() {
       setEmployees(employeesData);
       setError("");
     } catch (err) {
+      setAttendanceData([]);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -363,13 +340,44 @@ function Report() {
     return calculateOverallSummary(filteredData);
   }, [filteredData]);
 
+  function getNormalHours(record) {
+    return Number(record?.reportDetail?.normalHours ?? 0);
+  }
+
+  function getRawOvertimeHours(record) {
+    return Number(record?.reportDetail?.rawOvertimeHours ?? 0);
+  }
+
+  function getFinalOvertimeHours(record) {
+    return Number(record?.reportDetail?.overtimeHours ?? 0);
+  }
+
+  function getTotalHoursDone(record) {
+    // Report hours include normal attendance hours and approved raw overtime only.
+    return getNormalHours(record) + getRawOvertimeHours(record);
+  }
+
+  function getOvertimeMultiplier(record) {
+    const value = record?.reportDetail?.overtimeMultiplier;
+    return value === null || value === undefined ? null : Number(value);
+  }
+
+  function getOvertimeTreatment(record) {
+    return record?.reportDetail?.overtimeExplanation || (
+      getRawOvertimeHours(record) > 0
+        ? 'Overtime generated from worked hours.'
+        : 'No overtime generated.'
+    );
+  }
+
   function calculateDateSummary(records) {
     const present = records.filter(r => r.status?.includes('Present')).length;
     const absent = records.filter(r => r.status === 'Absent').length;
     const late = records.filter(r => r.status === 'Late').length;
     const leave = records.filter(r => r.status === 'On Leave').length;
-    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
-    return { present, absent, late, leave, totalHours, totalEmployees: records.length };
+    const totalNormalHours = records.reduce((sum, r) => sum + getNormalHours(r), 0);
+    const totalHoursDone = records.reduce((sum, r) => sum + getTotalHoursDone(r), 0);
+    return { present, absent, late, leave, totalNormalHours, totalHoursDone, totalEmployees: records.length };
   }
 
   function calculateEmployeeSummary(records) {
@@ -377,9 +385,12 @@ function Report() {
     const absentDays = records.filter(r => r.status === 'Absent').length;
     const lateDays = records.filter(r => r.status === 'Late').length;
     const leaveDays = records.filter(r => r.status === 'On Leave').length;
-    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
-    const avgHours = records.length > 0 ? totalHours / records.length : 0;
-    return { presentDays, absentDays, lateDays, leaveDays, totalHours, avgHours, totalDays: records.length };
+    const totalNormalHours = records.reduce((sum, r) => sum + getNormalHours(r), 0);
+    const totalRawOvertimeHours = records.reduce((sum, r) => sum + getRawOvertimeHours(r), 0);
+    const totalFinalOvertimeHours = records.reduce((sum, r) => sum + getFinalOvertimeHours(r), 0);
+    const totalHoursDone = records.reduce((sum, r) => sum + getTotalHoursDone(r), 0);
+    const avgHours = records.length > 0 ? totalHoursDone / records.length : 0;
+    return { presentDays, absentDays, lateDays, leaveDays, totalNormalHours, totalRawOvertimeHours, totalFinalOvertimeHours, totalHoursDone, avgHours, totalDays: records.length };
   }
 
   function calculateDepartmentSummary(records) {
@@ -387,13 +398,16 @@ function Report() {
     const present = records.filter(r => r.status?.includes('Present')).length;
     const absent = records.filter(r => r.status === 'Absent').length;
     const late = records.filter(r => r.status === 'Late').length;
-    const totalHours = records.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
-    const attendanceRate = records.length > 0 ? (present / records.length) * 100 : 0;
-    return { employees, present, absent, late, totalHours, attendanceRate, totalRecords: records.length };
+    const totalNormalHours = records.reduce((sum, r) => sum + getNormalHours(r), 0);
+    const totalHoursDone = records.reduce((sum, r) => sum + getTotalHoursDone(r), 0);
+    const scheduledRecords = records.filter(r => r.status !== 'Off Day').length;
+    const attendanceRate = scheduledRecords > 0 ? (present / scheduledRecords) * 100 : 0;
+    return { employees, present, absent, late, totalNormalHours, totalHoursDone, attendanceRate, totalRecords: records.length };
   }
 
   function calculateOverallSummary(allRecords) {
     const totalRecords = allRecords.length;
+    const scheduledRecords = allRecords.filter(r => r.status !== 'Off Day').length;
     const totalEmployees = [...new Set(allRecords.map(r => r.employee?.id))].length;
     const totalDepartments = [...new Set(allRecords.map(r => r.department))].length;
     
@@ -401,25 +415,44 @@ function Report() {
       Present: allRecords.filter(r => r.status?.includes('Present')).length,
       Absent: allRecords.filter(r => r.status === 'Absent').length,
       Late: allRecords.filter(r => r.status === 'Late').length,
+      'Off Day': allRecords.filter(r => r.status === 'Off Day').length,
       'On Leave': allRecords.filter(r => r.status === 'On Leave').length
     };
     
-    const totalHours = allRecords.reduce((sum, r) => sum + (r.minimumHour || 0), 0);
-    const avgHours = totalRecords > 0 ? totalHours / totalRecords : 0;
-    const attendanceRate = totalRecords > 0 ? (statusCounts.Present / totalRecords) * 100 : 0;
+    const totalNormalHours = allRecords.reduce((sum, r) => sum + getNormalHours(r), 0);
+    const totalHoursDone = allRecords.reduce((sum, r) => sum + getTotalHoursDone(r), 0);
+    const avgHours = totalRecords > 0 ? totalHoursDone / totalRecords : 0;
+    const attendanceRate = scheduledRecords > 0 ? (statusCounts.Present / scheduledRecords) * 100 : 0;
     
     const deptBreakdown = {};
     allRecords.forEach(record => {
       if (!deptBreakdown[record.department]) {
-        deptBreakdown[record.department] = { present: 0, total: 0 };
+        deptBreakdown[record.department] = {
+          present: 0,
+          total: 0,
+          normalHours: 0,
+          totalHoursDone: 0
+        };
       }
-      deptBreakdown[record.department].total++;
+      if (record.status !== 'Off Day') deptBreakdown[record.department].total++;
+      deptBreakdown[record.department].normalHours += getNormalHours(record);
+      deptBreakdown[record.department].totalHoursDone += getTotalHoursDone(record);
       if (record.status?.includes('Present')) {
         deptBreakdown[record.department].present++;
       }
     });
     
-    return { totalRecords, totalEmployees, totalDepartments, statusCounts, totalHours, avgHours, attendanceRate, deptBreakdown };
+    return {
+      totalRecords,
+      totalEmployees,
+      totalDepartments,
+      statusCounts,
+      totalNormalHours,
+      totalHoursDone,
+      avgHours,
+      attendanceRate,
+      deptBreakdown
+    };
   }
 
   const toggleRow = (key) => {
@@ -454,33 +487,41 @@ function Report() {
       ['Overall Summary', '', ''],
       ['Total Records', overallSummary.totalRecords],
       ['Total Employees', overallSummary.totalEmployees],
-      ['Total Hours', overallSummary.totalHours.toFixed(2)],
-      ['Average Hours per Day', overallSummary.avgHours.toFixed(2)],
+      ['Normal Hours', overallSummary.totalNormalHours.toFixed(2)],
+      ['Total Hours Done', overallSummary.totalHoursDone.toFixed(2)],
+      ['Average Total Hours per Day', overallSummary.avgHours.toFixed(2)],
       ['Attendance Rate', `${overallSummary.attendanceRate.toFixed(1)}%`],
       [''],
       ['Status Breakdown', '', ''],
       ['Present', overallSummary.statusCounts.Present],
       ['Absent', overallSummary.statusCounts.Absent],
+      ['OFF', overallSummary.statusCounts['Off Day']],
       ['Late', overallSummary.statusCounts.Late],
       ['On Leave', overallSummary.statusCounts['On Leave']],
       [''],
       ['Department Breakdown', '', '', ''],
-      ['Department', 'Employees', 'Attendance Rate', 'Total Hours']
+      ['Department', 'Employees', 'Attendance Rate', 'Normal Hours', 'Total Hours Done']
     ];
 
     Object.entries(overallSummary.deptBreakdown).forEach(([dept, data]) => {
       const rate = data.total > 0 ? (data.present / data.total) * 100 : 0;
-      wsData.push([dept, data.total, `${rate.toFixed(1)}%`, '']);
+      wsData.push([
+        dept,
+        data.total,
+        `${rate.toFixed(1)}%`,
+        data.normalHours.toFixed(2),
+        data.totalHoursDone.toFixed(2)
+      ]);
     });
 
-    wsData.push(['', '', '', '']);
-    wsData.push(['Date', 'Employee ID', 'Employee Name', 'Department', 'Category', 'Check In', 'Check Out', 'Hours', 'Status', 'Shift']);
+    wsData.push(['', '', '', '', '']);
+    wsData.push(['Date', 'Employee ID', 'Employee Name', 'Department', 'Category', 'Check In', 'Check Out', 'Normal Hours', 'Total Hours Done', 'Status', 'Shift']);
 
     filteredData.forEach(record => {
       wsData.push([
         record.date, record.employeeId, record.fullName, record.department,
         record.category, record.checkIn || '--:--', record.checkOut || '--:--',
-        record.minimumHour || 0, record.status, record.shift
+        getNormalHours(record).toFixed(2), getTotalHoursDone(record).toFixed(2), record.status, record.shift
       ]);
     });
 
@@ -514,7 +555,7 @@ function Report() {
   const uniqueCategories = [...new Set(employees.map(e => e.category))].filter(Boolean);
   const uniqueDepartments = [...new Set(employees.map(e => e.department))].filter(Boolean);
   const uniqueWorkTypes = [...new Set(employees.map(e => e.workType))].filter(Boolean);
-  const uniqueStatuses = ['Present', 'Absent', 'Late', 'On Leave', 'Weekend Present', 'Holiday Present'];
+  const uniqueStatuses = ['Off Day', 'Present', 'Absent', 'Late', 'On Leave', 'Weekend Present', 'Holiday', 'Holiday Present'];
 
   const parseEmails = (raw) => {
     if (!raw) return [];
@@ -602,7 +643,7 @@ function Report() {
         startDate: filters.startDate,
         endDate: filters.endDate,
         subject: `Attendance Report for ${selectedEmployeeForReport.label} (${filters.startDate} to ${filters.endDate})`,
-        message: `Please find the attendance report for ${selectedEmployeeForReport.label} attached.`
+        message: `Please find the attendance report for ${selectedEmployeeForReport.label} attached.\n\n${attendanceReportContactNote}`
       };
 
       const res = await fetch(`${API_BASE_URL}/api/reports/attendance/employee/email`, {
@@ -634,8 +675,13 @@ function Report() {
       });
       if (!res.ok) throw new Error("Failed to load report schedule settings");
       const data = await res.json();
+      setSavedReportSchedule(data);
       setScheduleSettings({
+        ...scheduleStatusValues(data),
         enabled: !!data.enabled,
+        morningReportEnabled: Boolean(data.morningReportEnabled),
+        morningReportTime: data.morningReportTime?.slice(0, 5) || "",
+        eveningReportEnabled: data.eveningReportEnabled !== false,
         sendTime: data.sendTime ? data.sendTime.slice(0, 5) : "18:00",
         recipientEmails: data.recipientEmails || "",
         sendOnlyExceptions: data.sendOnlyExceptions !== false,
@@ -660,8 +706,13 @@ function Report() {
       }
 
       if (scheduleSettings.enabled) {
-        if (!scheduleSettings.sendTime) {
-          setError("Please select a send time.");
+        if ((scheduleSettings.morningReportEnabled && !includedReportStatuses(scheduleSettings, 'morning').length) ||
+            (scheduleSettings.eveningReportEnabled && !includedReportStatuses(scheduleSettings, 'evening').length)) {
+          setError('Select at least one status for each enabled report.');
+          return;
+        }
+        if ((scheduleSettings.eveningReportEnabled && !scheduleSettings.sendTime) || (scheduleSettings.morningReportEnabled && !scheduleSettings.morningReportTime)) {
+          setError("Please select a time for each enabled report.");
           return;
         }
         if (!scheduleSettings.recipientEmails?.trim()) {
@@ -673,7 +724,11 @@ function Report() {
       setScheduleSaving(true);
 
       const payload = {
+        ...scheduleStatusValues(scheduleSettings),
         enabled: scheduleSettings.enabled,
+        morningReportEnabled: scheduleSettings.morningReportEnabled,
+        morningReportTime: scheduleSettings.morningReportTime || null,
+        eveningReportEnabled: scheduleSettings.eveningReportEnabled,
         sendTime: scheduleSettings.sendTime,
         recipientEmails: scheduleSettings.recipientEmails,
         sendOnlyExceptions: scheduleSettings.sendOnlyExceptions,
@@ -692,15 +747,20 @@ function Report() {
       }
 
       const saved = await res.json();
+      setSavedReportSchedule(saved);
       setScheduleSettings({
+        ...scheduleStatusValues(saved),
         enabled: !!saved.enabled,
+        morningReportEnabled: Boolean(saved.morningReportEnabled),
+        morningReportTime: saved.morningReportTime?.slice(0, 5) || "",
+        eveningReportEnabled: saved.eveningReportEnabled !== false,
         sendTime: saved.sendTime ? saved.sendTime.slice(0, 5) : scheduleSettings.sendTime,
         recipientEmails: saved.recipientEmails || scheduleSettings.recipientEmails,
         sendOnlyExceptions: saved.sendOnlyExceptions !== false,
         attachExcel: saved.attachExcel !== false
       });
 
-      setSuccess("Daily auto-report schedule saved successfully!");
+      setSuccess("Morning and evening report schedules saved successfully!");
       setShowScheduleModal(false);
       setTimeout(() => setSuccess(""), 4000);
     } catch (e) {
@@ -711,11 +771,18 @@ function Report() {
   };
 
   const openEmployeeReportModal = (group) => {
+    const weekendOvertimeRecords = group.records.filter(record =>
+      getRawOvertimeHours(record) > 0 &&
+      String(record?.reportDetail?.dayType || '').toLowerCase().includes('weekend')
+    ).length;
+
     setSelectedEmployeeForReport({
       key: group.key,
       label: group.label,
       employeeEmail: group.employeeEmail,
-      employeeId: group.employeeId
+      employeeId: group.employeeId,
+      summary: group.summary,
+      weekendOvertimeRecords
     });
     setShowEmployeeReportModal(true);
   };
@@ -758,7 +825,7 @@ function Report() {
             </div>
             
             <div className="flex items-center gap-2">
-              <button onClick={() => { setShowRawBiometric(true); setRawPage(0); setTimeout(() => fetchRawEvents(0), 0); }} className="flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-white transition hover:bg-slate-800">
+              <button onClick={() => setShowRawBiometric(true)} className="flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-white transition hover:bg-slate-800">
                 <FileText size={18} />
                 <span className="hidden sm:inline">Raw Biometric</span>
               </button>
@@ -821,7 +888,7 @@ function Report() {
           )}
 
           {/* Stats Cards - No Payroll */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
             <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-gray-500">Total Records</p>
@@ -838,10 +905,17 @@ function Report() {
             </div>
             <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500">Total Hours</p>
+                <p className="text-xs text-gray-500">Normal Hours</p>
                 <Clock size={16} className="text-blue-400" />
               </div>
-              <p className="text-2xl font-bold text-blue-600">{overallSummary.totalHours.toFixed(1)}</p>
+              <p className="text-2xl font-bold text-blue-600">{overallSummary.totalNormalHours.toFixed(1)}</p>
+            </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">Total Hours Done</p>
+                <Clock size={16} className="text-indigo-400" />
+              </div>
+              <p className="text-2xl font-bold text-indigo-600">{overallSummary.totalHoursDone.toFixed(1)}</p>
             </div>
             <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
               <div className="flex items-center justify-between">
@@ -909,12 +983,24 @@ function Report() {
                   <Mail size={16} />
                   Email Report
                 </button>
+                <button onClick={() => navigate('/weekly-attendance-email')} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition shadow-sm">
+                  <Send size={16} />
+                  Individual Reports
+                </button>
                 <button onClick={() => setShowScheduleModal(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition shadow-sm">
                   <ClockIcon size={16} />
                   Schedule
                 </button>
               </div>
             </div>
+
+            <section className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4" aria-label="Scheduled attendance reports">
+              <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-gray-900">Scheduled attendance reports</h3><p className="text-xs text-gray-500">Saved schedules · Ghana time · Last send dates update after successful sending.</p></div><button onClick={fetchScheduleSettings} disabled={scheduleLoading || scheduleSaving} className="text-sm font-medium text-indigo-700 disabled:opacity-50">{scheduleLoading ? 'Refreshing…' : 'Refresh status'}</button></div>
+              {!savedReportSchedule ? <p className="text-sm text-gray-500">{scheduleLoading ? 'Loading report schedules…' : 'Schedule status unavailable. Refresh to try again.'}</p> : <div className="grid gap-3 md:grid-cols-2">{[
+                { title: 'Morning report', description: 'Includes: ' + (includedReportStatuses(savedReportSchedule, 'morning').join(', ') || 'No statuses selected'), enabled: savedReportSchedule.morningReportEnabled === true, time: savedReportSchedule.morningReportTime, sent: savedReportSchedule.lastMorningReportDate },
+                { title: 'Evening report', description: 'Includes: ' + (includedReportStatuses(savedReportSchedule, 'evening').join(', ') || 'No statuses selected'), enabled: savedReportSchedule.eveningReportEnabled !== false, time: savedReportSchedule.sendTime, sent: savedReportSchedule.lastSentDate }
+              ].map((report) => <div key={report.title} className="rounded-lg border border-gray-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-semibold text-gray-900">{report.title}</h4><span className={"rounded-full px-2 py-1 text-xs font-medium " + (savedReportSchedule.enabled && report.enabled && report.time ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600')}>{!savedReportSchedule.enabled ? 'All reports paused' : !report.enabled ? 'Off' : !report.time ? 'Time not set' : 'Enabled'}</span></div><p className="mt-2 text-xs text-gray-500">{report.description}</p><dl className="mt-3 grid grid-cols-2 gap-2 text-sm"><div><dt className="text-xs text-gray-500">Send time</dt><dd className="font-medium">{report.time?.slice(0, 5) || 'Not set'}{report.time ? ' GMT' : ''}</dd></div><div><dt className="text-xs text-gray-500">Last sent report date</dt><dd className="font-medium">{report.sent || 'No send recorded'}</dd></div></dl></div>)}</div>}
+            </section>
 
             <div className="mt-4 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4">
               <div className="mb-3 flex flex-col justify-between gap-1 sm:flex-row sm:items-center">
@@ -992,30 +1078,7 @@ function Report() {
             )}
           </div>
 
-          {showRawBiometric && (
-            <div className="fixed inset-0 z-50 bg-slate-950/60 p-4 backdrop-blur-sm">
-              <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-                <div className="flex items-center justify-between border-b bg-slate-950 px-6 py-4 text-white">
-                  <div><h2 className="text-lg font-bold">Raw Biometric Events</h2><p className="text-xs text-slate-400">Original device punches for reporting and verification</p></div>
-                  <div className="flex gap-2"><button onClick={exportRawEvents} disabled={!rawEvents.length} className="rounded-lg bg-green-600 px-3 py-2 text-sm disabled:opacity-50"><Download size={16} className="inline mr-1" />Export</button><button onClick={() => setShowRawBiometric(false)} className="rounded-lg bg-white/10 p-2"><X size={18} /></button></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 border-b bg-slate-50 p-4 md:grid-cols-6">
-                  <select value={rawFilters.employeeId} onChange={e => setRawFilters({...rawFilters, employeeId:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All employees</option>{employees.map(e=><option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
-                  <input type="date" value={rawFilters.startDate} onChange={e=>setRawFilters({...rawFilters,startDate:e.target.value})} className="rounded-lg border px-3 py-2 text-sm" />
-                  <input type="date" value={rawFilters.endDate} onChange={e=>setRawFilters({...rawFilters,endDate:e.target.value})} className="rounded-lg border px-3 py-2 text-sm" />
-                  <select value={rawFilters.source} onChange={e=>setRawFilters({...rawFilters,source:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All sources</option><option value="ONEPASS">ONEPASS</option><option value="EXCEL_IMPORT">Excel import</option></select>
-                  <select value={rawFilters.status} onChange={e=>setRawFilters({...rawFilters,status:e.target.value})} className="rounded-lg border px-3 py-2 text-sm"><option value="">All statuses</option><option value="RECEIVED">Received</option><option value="PROCESSED">Processed</option><option value="FAILED">Failed</option></select>
-                  <button onClick={()=>fetchRawEvents(0)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Apply filters</button>
-                </div>
-                <div className="flex-1 overflow-auto">
-                  <table className="min-w-full divide-y"><thead className="sticky top-0 bg-white"><tr>{["Time","Employee","Source","Punch","Method","Status","Attendance",""].map(h=><th key={h} className="px-4 py-3 text-left text-xs uppercase text-slate-500">{h}</th>)}</tr></thead><tbody className="divide-y">{rawEvents.map(event=><tr key={event.id} className="hover:bg-slate-50"><td className="px-4 py-3 text-sm">{event.eventTimestamp || event.receivedAt}</td><td className="px-4 py-3 text-sm">{getRawEventEmployeeName(event)}</td><td className="px-4 py-3 text-xs">{event.sourceType}</td><td className="px-4 py-3 text-sm">{event.punchType || "-"}</td><td className="px-4 py-3 text-sm">{event.verificationMethod || "-"}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-xs ${event.processingStatus==="PROCESSED"?"bg-green-100 text-green-700":event.processingStatus==="FAILED"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{event.processingStatus}</span></td><td className="px-4 py-3 text-xs">{event.attendanceId || "-"}</td><td className="px-4 py-3"><button onClick={()=>setSelectedRawEvent(event)} className="text-sm font-semibold text-blue-600">Payload</button></td></tr>)}</tbody></table>
-                  {!rawLoading && !rawEvents.length && <div className="p-12 text-center text-slate-500">No raw biometric events found.</div>}
-                </div>
-                <div className="flex items-center justify-between border-t px-5 py-3 text-sm"><span>Page {rawPage+1} of {rawTotalPages}</span><div className="flex gap-2"><button disabled={rawPage===0} onClick={()=>fetchRawEvents(rawPage-1)} className="rounded border px-3 py-1.5 disabled:opacity-40">Previous</button><button disabled={rawPage+1>=rawTotalPages} onClick={()=>fetchRawEvents(rawPage+1)} className="rounded border px-3 py-1.5 disabled:opacity-40">Next</button></div></div>
-              </div>
-              {selectedRawEvent && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={()=>setSelectedRawEvent(null)}><div className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-xl bg-slate-950 p-5 text-slate-100" onClick={e=>e.stopPropagation()}><div className="mb-3 flex justify-between"><h3 className="font-bold">Raw payload #{selectedRawEvent.id}</h3><button onClick={()=>setSelectedRawEvent(null)}><X size={18}/></button></div><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(typeof selectedRawEvent.rawPayload === "string" ? (()=>{try{return JSON.parse(selectedRawEvent.rawPayload)}catch{return selectedRawEvent.rawPayload}})() : selectedRawEvent.rawPayload, null, 2)}</pre></div></div>}
-            </div>
-          )}
+          {showRawBiometric && <RawBiometricModal apiBaseUrl={API_BASE_URL} employees={employees} onClose={() => setShowRawBiometric(false)} onConverted={fetchData} />}
 
           {/* Filter Modal */}
           {showFilterModal && (
@@ -1086,7 +1149,7 @@ function Report() {
           {/* Email Report Modal */}
           {showEmailModal && (
             <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
                   <div>
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -1140,7 +1203,7 @@ function Report() {
                       <ClockIcon size={20} className="text-indigo-500" />
                       Auto Report Schedule
                     </h2>
-                    <p className="text-sm text-gray-500 mt-1">Configure daily automated reports</p>
+                    <p className="text-sm text-gray-500 mt-1">Choose send times and attendance statuses for each report</p>
                   </div>
                   <button onClick={() => setShowScheduleModal(false)} className="p-2 hover:bg-white rounded-full transition-colors">
                     <X size={20} className="text-gray-500" />
@@ -1153,20 +1216,26 @@ function Report() {
                     <label htmlFor="autoEnabled" className="text-sm font-medium text-gray-700">Enable daily auto email</label>
                   </div>
                   
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Send Time</label>
-                    <input type="time" value={scheduleSettings.sendTime} onChange={(e) => setScheduleSettings({...scheduleSettings, sendTime: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                  <div className="rounded-lg border p-3 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={scheduleSettings.morningReportEnabled} onChange={(e) => setScheduleSettings({...scheduleSettings, morningReportEnabled: e.target.checked})}/>Morning report</label>
+                    <label className="block text-sm">Morning send time (Ghana)<input type="time" disabled={!scheduleSettings.morningReportEnabled} value={scheduleSettings.morningReportTime} onChange={(e) => setScheduleSettings({...scheduleSettings, morningReportTime: e.target.value})} className="mt-1 w-full rounded-lg border px-3 py-2"/></label>
+                    <fieldset disabled={!scheduleSettings.morningReportEnabled} className="space-y-2"><legend className="text-sm font-medium">Statuses to send</legend><div className="flex flex-wrap gap-4">{['Present', 'Late', 'Absent'].map(status => <label key={status} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={scheduleSettings['morningInclude' + status]} onChange={(e) => setScheduleSettings({...scheduleSettings, ['morningInclude' + status]: e.target.checked})}/>{status}</label>)}</div></fieldset>
+
+                    <p className="text-xs text-gray-500">Choose a time after the absence cutoff. Late arrivals are included as soon as they check in; checkout is not required.</p>
                   </div>
-                  
+                  <div className="rounded-lg border p-3 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={scheduleSettings.eveningReportEnabled} onChange={(e) => setScheduleSettings({...scheduleSettings, eveningReportEnabled: e.target.checked})}/>Evening report</label>
+                    <label className="block text-sm">Evening send time (Ghana)<input type="time" disabled={!scheduleSettings.eveningReportEnabled} value={scheduleSettings.sendTime} onChange={(e) => setScheduleSettings({...scheduleSettings, sendTime: e.target.value})} className="mt-1 w-full rounded-lg border px-3 py-2"/></label>
+                    <fieldset disabled={!scheduleSettings.eveningReportEnabled} className="space-y-2"><legend className="text-sm font-medium">Statuses to send</legend><div className="flex flex-wrap gap-4">{['Present', 'Late', 'Absent'].map(status => <label key={status} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={scheduleSettings['eveningInclude' + status]} onChange={(e) => setScheduleSettings({...scheduleSettings, ['eveningInclude' + status]: e.target.checked})}/>{status}</label>)}</div></fieldset>
+
+                    <p className="text-xs text-gray-500">Only checked statuses are included. Missing checkouts appear as Checkout pending.</p>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Recipient Emails</label>
                     <input type="text" value={scheduleSettings.recipientEmails} onChange={(e) => setScheduleSettings({...scheduleSettings, recipientEmails: e.target.value})} placeholder="hr@company.com, manager@company.com" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
                   </div>
                   
-                  <div className="flex items-center gap-3">
-                    <input type="checkbox" id="exceptionsOnly" checked={scheduleSettings.sendOnlyExceptions} onChange={(e) => setScheduleSettings({...scheduleSettings, sendOnlyExceptions: e.target.checked})} className="h-4 w-4 text-indigo-600 rounded" />
-                    <label htmlFor="exceptionsOnly" className="text-sm text-gray-700">Send only Late & Absent employees</label>
-                  </div>
+
                   
                   <div className="flex items-center gap-3">
                     <input type="checkbox" id="attachExcel" checked={scheduleSettings.attachExcel} onChange={(e) => setScheduleSettings({...scheduleSettings, attachExcel: e.target.checked})} className="h-4 w-4 text-indigo-600 rounded" />
@@ -1208,12 +1277,34 @@ function Report() {
                     <p className="text-sm text-gray-600 mt-1">Email: <span className="font-semibold">{selectedEmployeeForReport.employeeEmail || "No email on file"}</span></p>
                     <p className="text-sm text-gray-600 mt-1">Employee ID: <span className="font-semibold">{selectedEmployeeForReport.employeeId}</span></p>
                   </div>
+                  <p className="text-sm text-gray-600">{attendanceReportContactNote}</p>
                   <div className="bg-blue-50 p-3 rounded-lg">
                     <p className="text-xs text-blue-600">📅 Date range: {filters.startDate || "Not set"} to {filters.endDate || "Not set"}</p>
                     {(!filters.startDate || !filters.endDate) && (
                       <p className="text-xs text-amber-600 mt-1">⚠️ Please set date range in filters before sending</p>
                     )}
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Normal Hours</p>
+                      <p className="text-lg font-bold text-slate-800">{selectedEmployeeForReport.summary?.totalNormalHours?.toFixed(2) || '0.00'}</p>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 p-3">
+                      <p className="text-xs text-amber-600">Raw Overtime</p>
+                      <p className="text-lg font-bold text-amber-800">{selectedEmployeeForReport.summary?.totalRawOvertimeHours?.toFixed(2) || '0.00'}</p>
+                    </div>
+                    <div className="rounded-lg bg-purple-50 p-3">
+                      <p className="text-xs text-purple-600">Final Overtime</p>
+                      <p className="text-lg font-bold text-purple-800">{selectedEmployeeForReport.summary?.totalFinalOvertimeHours?.toFixed(2) || '0.00'}</p>
+                    </div>
+                    <div className="rounded-lg bg-green-50 p-3">
+                      <p className="text-xs text-green-600">Weekend OT Records</p>
+                      <p className="text-lg font-bold text-green-800">{selectedEmployeeForReport.weekendOvertimeRecords || 0}</p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-gray-500">The emailed Excel report will show each weekend/off-day record, raw overtime, the backend multiplier, whether it was applied to hours or rate/pay, final overtime, and the calculation reason.</p>
                 </div>
                 
                 <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
@@ -1235,7 +1326,7 @@ function Report() {
                 Attendance Summary
               </h3>
               
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                 <div className="bg-green-50 p-4 rounded-lg">
                   <p className="text-sm text-green-600 flex items-center gap-1"><UserCheck size={14} /> Present</p>
                   <p className="text-2xl font-bold text-gray-900">{overallSummary.statusCounts.Present}</p>
@@ -1255,6 +1346,11 @@ function Report() {
                   <p className="text-sm text-blue-600 flex items-center gap-1"><Briefcase size={14} /> On Leave</p>
                   <p className="text-2xl font-bold text-gray-900">{overallSummary.statusCounts['On Leave']}</p>
                   <p className="text-xs text-blue-500">{overallSummary.totalRecords > 0 ? ((overallSummary.statusCounts['On Leave'] / overallSummary.totalRecords) * 100).toFixed(1) : 0}% of total</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">OFF</p>
+                  <p className="text-2xl font-bold text-gray-900">{overallSummary.statusCounts['Off Day']}</p>
+                  <p className="text-xs text-gray-500">Excluded from attendance rate</p>
                 </div>
               </div>
 
@@ -1298,7 +1394,8 @@ function Report() {
                         {viewOptions.groupBy === 'date' ? 'Date' : viewOptions.groupBy === 'employee' ? 'Employee' : 'Department'}
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Summary</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Hours</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Normal Hours</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Hours Done</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
@@ -1319,6 +1416,9 @@ function Report() {
                            </td>
                           <td className="px-6 py-4">
                             <div className="flex flex-wrap gap-1">
+                              {group.records.some(record => record.status === 'Off Day') && (
+                                <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">{group.records.filter(record => record.status === 'Off Day').length} OFF</span>
+                              )}
                               {viewOptions.groupBy === 'date' && (
                                 <>
                                   <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">{group.summary.present} Present</span>
@@ -1330,6 +1430,8 @@ function Report() {
                                 <>
                                   <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">{group.summary.presentDays} Present</span>
                                   <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">{group.summary.avgHours.toFixed(1)} avg hrs</span>
+                                  <span className="px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded-full">{group.summary.totalRawOvertimeHours?.toFixed(1) || '0.0'} raw OT</span>
+                                  <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">{group.summary.totalFinalOvertimeHours?.toFixed(1) || '0.0'} final OT</span>
                                 </>
                               )}
                               {viewOptions.groupBy === 'department' && (
@@ -1341,7 +1443,10 @@ function Report() {
                             </div>
                            </td>
                           <td className="px-6 py-4">
-                            <div className="font-medium text-blue-600">{group.summary.totalHours?.toFixed(1) || 0} hrs</div>
+                            <div className="font-medium text-blue-600">{group.summary.totalNormalHours?.toFixed(1) || 0} hrs</div>
+                           </td>
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-indigo-600">{group.summary.totalHoursDone?.toFixed(1) || 0} hrs</div>
                            </td>
                           <td className="px-6 py-4">
                             <div className="flex gap-2">
@@ -1359,7 +1464,7 @@ function Report() {
                         
                         {expandedRows.includes(group.key) && viewOptions.showDetails && (
                           <tr>
-                            <td colSpan="4" className="px-6 py-4 bg-gray-50">
+                            <td colSpan="5" className="px-6 py-4 bg-gray-50">
                               <div className="overflow-x-auto">
                                 <table className="min-w-full">
                                   <thead>
@@ -1367,7 +1472,13 @@ function Report() {
                                       <th className="px-4 py-2 text-left text-xs text-gray-500">Date</th>
                                       <th className="px-4 py-2 text-left text-xs text-gray-500">Employee</th>
                                       <th className="px-4 py-2 text-left text-xs text-gray-500">Check In/Out</th>
-                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Hours</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Normal Hours</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Raw OT</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Multiplier</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Multiplier Applied To</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Final OT</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Hours Worked</th>
+                                      <th className="px-4 py-2 text-left text-xs text-gray-500">Treatment / Reason</th>
                                       <th className="px-4 py-2 text-left text-xs text-gray-500">Status</th>
                                     </tr>
                                   </thead>
@@ -1381,14 +1492,31 @@ function Report() {
                                         </td>
                                         <td className="px-4 py-2 text-sm">{record.checkIn || '--:--'} → {record.checkOut || '--:--'}</td>
                                         <td className="px-4 py-2 text-sm">
-                                          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">{record.minimumHour || 0} hrs</span>
+                                          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">{getNormalHours(record).toFixed(2)} hrs</span>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <span className="px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded-full">{getRawOvertimeHours(record).toFixed(2)} hrs</span>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          {getOvertimeMultiplier(record) !== null ? `${getOvertimeMultiplier(record).toFixed(2)}×` : '—'}
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">{record.reportDetail?.multiplierApplication || '—'}</td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">{getFinalOvertimeHours(record).toFixed(2)} hrs</span>
+                                        </td>
+                                        <td className="px-4 py-2 text-sm">
+                                          <span className="px-2 py-1 text-xs bg-indigo-100 text-indigo-800 rounded-full">{getTotalHoursDone(record).toFixed(2)} hrs</span>
+                                        </td>
+                                        <td className="px-4 py-2 text-xs text-gray-600 max-w-sm whitespace-normal">
+                                          <div className="font-medium text-gray-700">{record.reportDetail?.dayType || 'Regular Work Day'}</div>
+                                          <div>{getOvertimeTreatment(record)}</div>
                                         </td>
                                         <td className="px-4 py-2 text-sm">
                                           <span className={`px-2 py-1 text-xs rounded-full ${
                                             record.status?.includes('Present') ? 'bg-green-100 text-green-800' :
                                             record.status === 'Absent' ? 'bg-red-100 text-red-800' :
                                             record.status === 'Late' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
-                                          }`}>{record.status}</span>
+                                          }`}>{record.status === 'Off Day' ? 'OFF' : record.status}</span>
                                         </td>
                                       </tr>
                                     ))}

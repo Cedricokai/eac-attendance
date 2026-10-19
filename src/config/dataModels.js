@@ -57,6 +57,11 @@ export const ProductRequestModel = {
 // ============================================================================
 export const REQUEST_STATUS = {
   PENDING: 'PENDING',
+  PENDING_PLANNER: 'PENDING_PLANNER',
+  PROCUREMENT_PENDING: 'PROCUREMENT_PENDING',
+  APPROVED_BY_PLANNER: 'APPROVED_BY_PLANNER',
+  PROCURED: 'PROCURED',
+  STORE_REVIEW: 'STORE_REVIEW',
   APPROVED_BY_PROCUREMENT: 'APPROVED_BY_PROCUREMENT',
   REJECTED_BY_PROCUREMENT: 'REJECTED_BY_PROCUREMENT',
   APPROVED_BY_STORE: 'APPROVED_BY_STORE',
@@ -66,7 +71,14 @@ export const REQUEST_STATUS = {
 };
 
 export const STATUS_LABELS = {
-  PENDING: 'Pending Review',
+  PENDING: 'Pending',
+  PENDING_PLANNER: 'Pending',
+  PROCUREMENT_PENDING: 'Pending',
+  PENDING_STORE: 'Pending',
+  AWAITING_ACCOUNTS: 'Awaiting Accounts Review',
+  APPROVED_BY_PLANNER: 'Approved by Planner',
+  PROCURED: 'Procured',
+  STORE_REVIEW: 'Pending Store Review',
   APPROVED_BY_PROCUREMENT: 'Approved by Procurement',
   REJECTED_BY_PROCUREMENT: 'Rejected by Procurement',
   APPROVED_BY_STORE: 'Approved by Store',
@@ -77,6 +89,11 @@ export const STATUS_LABELS = {
 
 export const STATUS_COLORS = {
   PENDING: 'blue',
+  PENDING_PLANNER: 'blue',
+  PROCUREMENT_PENDING: 'orange',
+  APPROVED_BY_PLANNER: 'orange',
+  PROCURED: 'cyan',
+  STORE_REVIEW: 'cyan',
   APPROVED_BY_PROCUREMENT: 'orange',
   REJECTED_BY_PROCUREMENT: 'red',
   APPROVED_BY_STORE: 'cyan',

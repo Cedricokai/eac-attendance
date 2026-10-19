@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   HomeIcon,
@@ -25,6 +25,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-toastify';
 
+const PETTY_CASH_FEATURE_PERMISSIONS = [
+  { name: 'View Petty Cash Financial Summary', path: '/pettyCash/features/view-summary', description: 'Shows the configured float, approved/used amount, and remaining petty-cash balance.', iconName: 'WalletCards' },
+  { name: 'Review Petty Cash Requests', path: '/pettyCash/actions/review-requests', description: 'Allows approval or rejection of pending petty-cash requests.', iconName: 'DocumentCheck' },
+  { name: 'View Petty Cash Vouchers', path: '/pettyCash/features/view-vouchers', description: 'Provides access to the Petty Cash Voucher tab and voucher details.', iconName: 'Eye' },
+  { name: 'Complete Petty Cash Vouchers', path: '/pettyCash/actions/complete-vouchers', description: 'Allows final payment, evidence, and actual expenditure to be recorded on approved vouchers.', iconName: 'CheckCircle' },
+  { name: 'Reimburse Petty Cash Float', path: '/pettyCash/actions/reimburse-float', description: 'Allows reimbursement of an exhausted petty-cash float.', iconName: 'RotateCcw' }
+];
+
 const PagePermissionManagement = () => {
   const navigate = useNavigate();
   const [pages, setPages] = useState([]);
@@ -42,6 +50,7 @@ const PagePermissionManagement = () => {
   const [filterVisibility, setFilterVisibility] = useState('ALL');
   const [filterQuickAction, setFilterQuickAction] = useState('ALL');
   const [pageUserAssignments, setPageUserAssignments] = useState({});
+  const featurePermissionSeedAttempted = useRef(false);
   
   // Modules from backend
   const modules = [
@@ -124,6 +133,42 @@ const PagePermissionManagement = () => {
       
       if (response.ok) {
         const data = await response.json();
+
+        const missingPettyCashPermissions = PETTY_CASH_FEATURE_PERMISSIONS.filter(
+          permission => !data.some(page => page.path === permission.path)
+        );
+        if (!featurePermissionSeedAttempted.current && missingPettyCashPermissions.length > 0) {
+          featurePermissionSeedAttempted.current = true;
+          let createdCount = 0;
+          for (const permission of missingPettyCashPermissions) {
+            const createResponse = await fetch(`${API_BASE_URL}/api/pages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                ...permission,
+                displayOrder: 0,
+                isPublic: false,
+                module: 'GENERAL',
+                requiresAuth: true,
+                roleNames: []
+              })
+            });
+            if (createResponse.ok) createdCount += 1;
+            else {
+              const errorText = await createResponse.text().catch(() => '');
+              toast.error(errorText || `Could not create permission: ${permission.name}`);
+            }
+          }
+          if (createdCount > 0) {
+            toast.success(`${createdCount} petty cash permission${createdCount === 1 ? '' : 's'} created`);
+            await fetchPages();
+            return;
+          }
+        }
+
         setPages(data);
         setFilteredPages(data);
         
