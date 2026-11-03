@@ -1,15 +1,28 @@
+import { getApiBaseUrl } from "./api";
+
 export const issuedItemsApi = () => {
-  const host = window.location.hostname;
-  const base = host === "localhost" || host === "127.0.0.1" ? "http://localhost:8080" : host.startsWith("192.168.") ? import.meta.env.VITE_API_BASE_URL_LOCAL : import.meta.env.VITE_API_BASE_URL_PUBLIC;
-  return `${base}/api/employee-issued-items`;
+  return `${getApiBaseUrl()}/api/employee-issued-items`;
 };
+
 export async function issuedItemsRequest(path = "", method = "GET", body) {
+  const token = localStorage.getItem("jwtToken") || localStorage.getItem("authToken");
+  const headers = { "Content-Type": "application/json" };
+  if (token && token !== "null" && token !== "undefined") {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${issuedItemsApi()}${path}`, {
-    method, headers: { Authorization: `Bearer ${localStorage.getItem("jwtToken")}`, "Content-Type": "application/json" },
+    method,
+    headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.message || data?.detail || `Could not ${method === "GET" ? "load" : "save"} issued-item records (${response.status}).`);
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Your session has expired or you are unauthorized (401). Please log in again.");
+    }
+    throw new Error(data?.message || data?.detail || `Could not ${method === "GET" ? "load" : "save"} issued-item records (${response.status}).`);
+  }
   return data;
 }
 export const ghanaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Accra", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());

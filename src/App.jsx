@@ -58,6 +58,8 @@ import InventoryRequest from "./pages/Eac-inventory/InventoryRequest";
 import StorekeeperRequests from "./pages/Eac-inventory/storekeeperRequests";
 import History from "./pages/Eac-inventory/history";
 import PPES from "./pages/Eac-inventory/ppe";
+import AssetManagementPage from "./pages/Eac-inventory/AssetManagementPage";
+import MyAssetsPage from "./pages/Eac-inventory/MyAssetsPage";
 import EmployeeIssuedItems from "./pages/Eac-attendance/employee/EmployeeIssuedItems";
 import ProcurementManagerReview from "./pages/Eac-inventory/procurementManagerReview";
 import ProductRequestForm from "./pages/Eac-inventory/ProductRequestForm";
@@ -98,6 +100,9 @@ import MedicalVisitReview from "./pages/Eac-attendance/hospital/MedicalVisitRevi
 import MedicalVisitDetails from "./pages/Eac-attendance/hospital/MedicalVisitDetails.jsx";
 import EmployeeMedicalHistory from "./pages/Eac-attendance/hospital/EmployeeMedicalHistory.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
+import FileManagerPage from "./pages/FileManager/FileManagerPage";
+import ChatHubPage from "./pages/Chat/ChatHubPage";
+import AdminChatAuditPage from "./pages/Chat/AdminChatAuditPage";
 import AccountsFundingReview from "./pages/AccountsFundingReview";
 import DirectPurchase from "./pages/Eac-inventory/DirectPurchase.jsx";
 import DirectPurchaseDetail from "./pages/Eac-inventory/DirectPurchaseDetail.jsx";
@@ -253,6 +258,24 @@ function App() {
           <Route path="/centralizedDashboard" element={
             <ProtectedRoute>
               <CentralizedDashboard />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/fileManager" element={
+            <ProtectedRoute>
+              <FileManagerPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/chat" element={
+            <ProtectedRoute>
+              <ChatHubPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/admin/chat-audit" element={
+            <ProtectedRoute>
+              <AdminChatAuditPage />
             </ProtectedRoute>
           } />
           
@@ -569,6 +592,30 @@ function App() {
               <PPES />
             </ProtectedRoute>
           } />
+
+          <Route path="/assetManagement" element={
+            <ProtectedRoute>
+              <AssetManagementPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/asset-management" element={
+            <ProtectedRoute>
+              <AssetManagementPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/my-assets" element={
+            <ProtectedRoute>
+              <MyAssetsPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/my-devices" element={
+            <ProtectedRoute>
+              <MyAssetsPage />
+            </ProtectedRoute>
+          } />
           
           <Route path="/procurementManagerReview" element={
             <ProtectedRoute>
@@ -696,6 +743,18 @@ function App() {
           <Route path="/Sidebar" element={
             <ProtectedRoute>
               <Sidebar />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/chat" element={
+            <ProtectedRoute>
+              <ChatHubPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/admin/chat-audit" element={
+            <ProtectedRoute>
+              <AdminChatAuditPage />
             </ProtectedRoute>
           } />
           

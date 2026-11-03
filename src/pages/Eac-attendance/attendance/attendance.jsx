@@ -3979,7 +3979,7 @@ const fetchAttendance = async (
 
           savedCount: saveResult?.length || saveResult?.count || attendanceRecords.length,
 
-          unmappedRows: unmappedRows
+          unmappedList: unmappedRows
 
         },
 

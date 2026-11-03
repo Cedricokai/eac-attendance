@@ -30,7 +30,9 @@ const PETTY_CASH_FEATURE_PERMISSIONS = [
   { name: 'Review Petty Cash Requests', path: '/pettyCash/actions/review-requests', description: 'Allows approval or rejection of pending petty-cash requests.', iconName: 'DocumentCheck' },
   { name: 'View Petty Cash Vouchers', path: '/pettyCash/features/view-vouchers', description: 'Provides access to the Petty Cash Voucher tab and voucher details.', iconName: 'Eye' },
   { name: 'Complete Petty Cash Vouchers', path: '/pettyCash/actions/complete-vouchers', description: 'Allows final payment, evidence, and actual expenditure to be recorded on approved vouchers.', iconName: 'CheckCircle' },
-  { name: 'Reimburse Petty Cash Float', path: '/pettyCash/actions/reimburse-float', description: 'Allows reimbursement of an exhausted petty-cash float.', iconName: 'RotateCcw' }
+  { name: 'Reimburse Petty Cash Float', path: '/pettyCash/actions/reimburse-float', description: 'Allows reimbursement of an exhausted petty-cash float.', iconName: 'RotateCcw' },
+  { name: 'Asset Management', path: '/assetManagement', description: 'Tracks company IT devices (laptops, monitors, printers, etc.), employee holdings, specifications, and return status.', iconName: 'Laptop', module: 'INVENTORY', roleNames: ['ROLE_ADMIN'] },
+  { name: 'My Assets', path: '/my-assets', description: 'Enables all employees to view company devices and items issued to them and their return status.', iconName: 'Laptop', module: 'GENERAL', roleNames: ['ROLE_EMPLOYEE', 'ROLE_SUPERVISOR', 'ROLE_PLANNER', 'ROLE_HR', 'ROLE_ADMIN', 'ROLE_INVENTORY', 'ROLE_TRANSPORT', 'ROLE_CUSTOMER', 'ROLE_USER'] }
 ];
 
 const PagePermissionManagement = () => {
@@ -149,11 +151,11 @@ const PagePermissionManagement = () => {
               },
               body: JSON.stringify({
                 ...permission,
-                displayOrder: 0,
+                displayOrder: permission.displayOrder ?? 0,
                 isPublic: false,
-                module: 'GENERAL',
+                module: permission.module || 'GENERAL',
                 requiresAuth: true,
-                roleNames: []
+                roleNames: permission.roleNames || []
               })
             });
             if (createResponse.ok) createdCount += 1;
