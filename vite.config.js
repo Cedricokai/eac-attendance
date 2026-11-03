@@ -21,10 +21,10 @@ export default defineConfig(({ mode }) => {
       extensions: ['.js', '.jsx', '.ts', '.tsx'],
     },
 
-    // Only keep if you really need it
-    // define: {
-    //   global: 'window',
-    // },
+    define: {
+      'process.env': {},
+      global: 'window',
+    },
 
     server: {
       host: '0.0.0.0',

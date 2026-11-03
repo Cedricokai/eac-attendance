@@ -31,6 +31,8 @@ import {
   UserCircleIcon,
   PowerIcon,
   UserGroupIcon,
+  ChatBubbleLeftRightIcon,
+  ShieldCheckIcon,
 } from "@heroicons/react/24/solid";
 
 const CentralSidebar = ({
@@ -176,6 +178,20 @@ const CentralSidebar = ({
       icon: <Cog6ToothIcon className="h-5 w-5" />, 
       roles: ["admin"],
       path: "/JobsManagement"
+    },
+    { 
+      id: "chat", 
+      name: "Team Chat", 
+      icon: <ChatBubbleLeftRightIcon className="h-5 w-5" />, 
+      roles: ["admin", "manager", "hr", "planner", "supervisor", "employee"],
+      path: "/chat"
+    },
+    { 
+      id: "chat-audit", 
+      name: "Chat Audit & Monitor", 
+      icon: <ShieldCheckIcon className="h-5 w-5" />, 
+      roles: ["admin"],
+      path: "/admin/chat-audit"
     },
   ];
 

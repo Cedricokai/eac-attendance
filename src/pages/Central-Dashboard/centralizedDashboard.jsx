@@ -37,13 +37,18 @@ import {
   Download,
   Link2,
   Coins,
-  Shield
-  ,LifeBuoy
+  Shield,
+  LifeBuoy,
+  FolderOpen,
+  Laptop
 } from 'lucide-react';
 import AttendanceDashboard from '../Eac-attendance/attendanceDashboard';
 import InventoryDashboard from '../Eac-inventory/InventoryDashboard';
+import AssetManagementPage from '../Eac-inventory/AssetManagementPage';
+import MyAssetsPage from '../Eac-inventory/MyAssetsPage';
 import Userpage from '../Userpage';
 import JobsManagement from '../Eac-attendance/attendance/JobsManagement';
+import FileManagerPage from '../FileManager/FileManagerPage';
 import companyLogo from "../../assets/companyLogo.jpg";
 import './centralizedDashboard.css';
 
@@ -73,6 +78,10 @@ const dashboardComponents = {
   adminDashboard: () => <PlaceholderDashboard title="Transport Admin Dashboard" icon={Truck} />,
   employeeDashboard: () => <PlaceholderDashboard title="Employee Dashboard" icon={UserCheck} />,
   loanManagementDashboard: () => <PlaceholderDashboard title="Loan Management Dashboard" icon={HandCoins} />,
+  fileManager: FileManagerPage,
+  assetManagement: AssetManagementPage,
+  myAssets: MyAssetsPage,
+  'my-assets': MyAssetsPage,
 };
 
 const CentralizedDashboard = () => {
@@ -279,10 +288,13 @@ const CentralizedDashboard = () => {
     { id: 'quotationMaster', name: 'Quotation Master', icon: <FileText size={18} />, color: 'bg-purple-100 text-purple-800', hover: 'hover:bg-purple-50', statKey: 'totalQuotes', statLabel: 'Total Quotes', roles: ['admin', 'hr'] },
     { id: 'payroll', name: 'Payroll', icon: <DollarSign size={18} />, color: 'bg-green-100 text-green-800', hover: 'hover:bg-green-50', statKey: 'totalPayroll', statLabel: 'Payroll (₵)', roles: ['admin', 'hr', 'accountant'] },
     { id: 'InventoryDashboard', name: 'Inventory', icon: <Package size={18} />, color: 'bg-amber-100 text-amber-800', hover: 'hover:bg-amber-50', statKey: 'products', statLabel: 'Total Products', roles: ['admin', 'inventory'] },
+    { id: 'assetManagement', name: 'Asset Management', icon: <Laptop size={18} />, color: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-50', statKey: null, statLabel: 'IT Devices & Holdings', roles: ['admin', 'hr', 'inventory', 'supervisor'] },
+    { id: 'my-assets', name: 'My Devices & Assets', icon: <Laptop size={18} />, color: 'bg-indigo-100 text-indigo-800', hover: 'hover:bg-indigo-50', statKey: null, statLabel: 'My Assigned Equipment', roles: ['admin', 'hr', 'accountant', 'supervisor', 'planner', 'inventory', 'transport', 'employee', 'user', 'customer'] },
     { id: 'reports', name: 'Reports', icon: <PieChart size={18} />, color: 'bg-cyan-100 text-cyan-800', hover: 'hover:bg-cyan-50', statKey: 'totalReports', statLabel: 'Reports', roles: ['admin', 'manager', 'hr'] },
     { id: 'userpage', name: 'User Management', icon: <Users size={18} />, color: 'bg-indigo-100 text-indigo-800', hover: 'hover:bg-indigo-50', statKey: 'totalUsers', statLabel: 'Total Users', roles: ['admin'] },
     { id: 'portalRequests', name: 'Portal Requests', icon: <LifeBuoy size={18} />, color: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-50', statKey: null, statLabel: 'Accounts & IT support', roles: ['admin'] },
     { id: 'pettyCash', name: 'Petty Cash', icon: <Coins size={18} />, color: 'bg-emerald-100 text-emerald-800', hover: 'hover:bg-emerald-50', statKey: null, statLabel: 'Requests & vouchers', roles: ['admin', 'accountant', 'hr', 'supervisor', 'user', 'customer'] },
+    { id: 'fileManager', name: 'File Management', icon: <FolderOpen size={18} />, color: 'bg-indigo-100 text-indigo-800', hover: 'hover:bg-indigo-50', statKey: null, statLabel: 'Documents & Revisions', roles: ['admin', 'hr', 'supervisor', 'planner', 'inventory', 'transport', 'employee', 'accountant', 'user'] },
     { id: 'pagePermissionManagement', name: 'System Permissions', icon: <Shield size={18} />, color: 'bg-gray-100 text-gray-800', hover: 'hover:bg-gray-50', statKey: 'totalPermissions', statLabel: 'Permissions', roles: ['admin'] },
     { id: 'settingspage', name: 'Settings', icon: <Settings size={18} />, color: 'bg-gray-100 text-gray-800', hover: 'hover:bg-gray-50', statKey: null, statLabel: '⚙️ Configure', roles: ['admin'] },
     { id: 'JobsManagement', name: 'Project Management', icon: <Briefcase size={18} />, color: 'bg-teal-100 text-teal-800', hover: 'hover:bg-teal-50', statKey: 'jobs', statLabel: 'Total Projects', roles: ['admin'] },

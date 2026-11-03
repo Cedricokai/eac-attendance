@@ -58,8 +58,9 @@ import {
   Lock,
   Home as HomeIcon,
   UserCircle,
-  PieChart
-  ,Stethoscope
+  PieChart,
+  Stethoscope,
+  Laptop
 } from "lucide-react";
 
 function MainSidebar({ isCollapsed = false }) {
@@ -109,7 +110,7 @@ function MainSidebar({ isCollapsed = false }) {
       attendance: location.pathname.startsWith("/attendance") || location.pathname === "/attendance" || location.pathname === "/timesheets" || location.pathname === "/overtime" || location.pathname === "/overview",
       payroll: location.pathname.startsWith("/payroll") || location.pathname === "/payroll" || location.pathname === "/payslip" || location.pathname === "/PayrollReports",
       departments: location.pathname.startsWith("/departments"),
-      inventory: location.pathname.startsWith("/inventory") || location.pathname === "/inventoryRequest" || location.pathname === "/inventoryRequestStatus",
+      inventory: location.pathname.startsWith("/inventory") || location.pathname === "/inventoryRequest" || location.pathname === "/inventoryRequestStatus" || location.pathname === "/assetManagement" || location.pathname === "/asset-management" || location.pathname === "/my-assets" || location.pathname === "/my-devices",
       procurement: location.pathname.startsWith("/procurement"),
       transport: location.pathname.startsWith("/transport"),
       hr: location.pathname.startsWith("/hr") || location.pathname === "/leave" || location.pathname === "/leaveRequestForm",
@@ -228,6 +229,7 @@ function MainSidebar({ isCollapsed = false }) {
     if (path === "/attendanceDashboard" || path === "/attendanceDashboard" || name.includes("dashboard")) return <Home size={16} />;
     if (path === "/loanManagementDashboard" || name.includes("loan")) return <DollarSign size={16} />;
     if (path === "/pettyCash" || name.includes("petty cash")) return <CreditCard size={16} />;
+    if (path === "/assetManagement" || path === "/asset-management" || name.includes("asset")) return <Laptop size={16} />;
     if (path.includes("medical") || path === "/hospitals" || name.includes("hospital")) return <Stethoscope size={16} />;
     
     return <FileText size={16} />;
@@ -248,6 +250,14 @@ function MainSidebar({ isCollapsed = false }) {
         label: "Dashboard"
       });
     }
+
+    // My Assigned IT Assets - directly under Dashboard for all employees
+    menuItems.push({
+      type: "link",
+      to: "/my-assets",
+      icon: <Laptop size={18} />,
+      label: "My Assigned IT Assets"
+    });
     
     if (hasPageAccess("/JobsManagement")) {
       menuItems.push({
@@ -393,6 +403,16 @@ function MainSidebar({ isCollapsed = false }) {
         label: "Inventory"
       });
     }
+
+    // IT Asset Management (Admin / Manager)
+    if (hasPageAccess("/assetManagement") || hasPageAccess("/asset-management") || userRole === "admin") {
+      menuItems.push({
+        type: "link",
+        to: "/assetManagement",
+        icon: <Laptop size={18} />,
+        label: "Asset Management"
+      });
+    }
     
     // Loan Management
     if (hasPageAccess("/loanManagementDashboard") || userRole === "admin") {
@@ -416,6 +436,22 @@ function MainSidebar({ isCollapsed = false }) {
         label: "Petty Cash"
       });
     }
+
+    // File Management Suite
+    menuItems.push({
+      type: "link",
+      to: "/fileManager",
+      icon: <FolderOpen size={18} />,
+      label: "File Management"
+    });
+
+    // Team Chat Suite
+    menuItems.push({
+      type: "link",
+      to: "/chat",
+      icon: <Mail size={18} />,
+      label: "Team Chat"
+    });
     
     // Admin Section - only for admin users
     if (userRole === "admin") {
@@ -427,6 +463,7 @@ function MainSidebar({ isCollapsed = false }) {
         items: [
           { to: "/userpage", icon: <UserCog size={16} />, label: "User Management" },
           { to: "/pagePermissionManagement", icon: <Shield size={16} />, label: "Page Permissions" },
+          { to: "/admin/chat-audit", icon: <Eye size={16} />, label: "Chat Monitoring & Audit" },
           { to: "/settingspage", icon: <Settings size={16} />, label: "Settings" }
         ]
       });
@@ -451,6 +488,13 @@ function MainSidebar({ isCollapsed = false }) {
     }
     
     return menuItems;
+  };
+
+  const isPathActive = (itemTo) => {
+    if (location.pathname === itemTo) return true;
+    if (itemTo === "/my-assets" && location.pathname === "/my-devices") return true;
+    if (itemTo === "/assetManagement" && location.pathname === "/asset-management") return true;
+    return false;
   };
 
   const menuItems = getMenuStructure();
@@ -487,7 +531,7 @@ function MainSidebar({ isCollapsed = false }) {
                 <Link 
                   key={index}
                   to={item.to}
-                  className={`flex items-center justify-center p-3 rounded-lg transition-colors ${location.pathname === item.to ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+                  className={`flex items-center justify-center p-3 rounded-lg transition-colors ${isPathActive(item.to) ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
                   title={item.label}
                 >
                   {item.icon}
@@ -544,7 +588,7 @@ function MainSidebar({ isCollapsed = false }) {
               <Link 
                 key={index}
                 to={item.to}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${location.pathname === item.to ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isPathActive(item.to) ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
               >
                 {item.icon}
                 {item.label}

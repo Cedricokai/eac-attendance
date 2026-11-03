@@ -88,7 +88,7 @@ function LoginPage() {
       if (process.env.NODE_ENV === 'development') {
         console.log("🏠 Using LAN API URL");
       }
-      return import.meta.env.VITE_API_BASE_URL_LOCAL;
+      return import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8080";
     }
 
     // Public / Tailscale / Cloudflare IP
@@ -96,14 +96,14 @@ function LoginPage() {
       if (process.env.NODE_ENV === 'development') {
         console.log("🌐 Using PUBLIC API URL");
       }
-      return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+      return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
     }
 
     // Default fallback
     if (process.env.NODE_ENV === 'development') {
       console.log("🌍 Using PUBLIC API URL (fallback)");
     }
-    return import.meta.env.VITE_API_BASE_URL_PUBLIC;
+    return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
   };
 
   const handleChange = (e) => {

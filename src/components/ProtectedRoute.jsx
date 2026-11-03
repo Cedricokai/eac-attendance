@@ -14,7 +14,7 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1") return "http://localhost:8080";
-    if (hostname.startsWith("192.168.")) return import.meta.env.VITE_API_BASE_URL_LOCAL;
+    if (hostname.startsWith("192.168.")) return import.meta.env.VITE_API_BASE_URL_LOCAL || "http://localhost:8080";
     return import.meta.env.VITE_API_BASE_URL_PUBLIC || "http://localhost:8080";
   };
 
@@ -85,7 +85,16 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
             setAttemptedPath(location.pathname);
             setShowPermissionModal(true);
           }
-        } else if (response.status === 401 || response.status === 403) {
+        } else if (response.status === 401) {
+          // Token expired or invalid - redirect to login instead of showing permission denied
+          localStorage.removeItem("jwtToken");
+          localStorage.removeItem("authToken");
+          const destination = `${location.pathname}${location.search}`;
+          sessionStorage.setItem("postLoginRedirect", destination);
+          setNeedsLogin(true);
+          setIsAuthorized(false);
+          return;
+        } else if (response.status === 403) {
           setIsAuthorized(false);
           setAttemptedPath(location.pathname);
           setShowPermissionModal(true);
