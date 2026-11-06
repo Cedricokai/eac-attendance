@@ -1,5 +1,12 @@
 // src/App.jsx
 import { Routes, Route } from "react-router-dom";
+import { lazy, Suspense } from 'react';
+import FileLoadingScreen from "./pages/Files/FileLoadingScreen";
+import CommunicationProvider from './pages/Communication/CommunicationProvider';
+const CommunicationPage = lazy(() => import('./pages/Communication/CommunicationPage'));
+const CommunicationAdminPage = lazy(() => import('./pages/Communication/CommunicationAdminPage'));
+const FileExplorer = lazy(() => import('./pages/Files/FileExplorer'));
+const FileGuestPage = lazy(() => import('./pages/Files/FileGuestPage'));
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -68,14 +75,31 @@ import PlannerProductsReview from "./pages/Eac-inventory/plannerProductsReview";
 import ProcurementPurchases from "./pages/Eac-inventory/procurementPurchases";
 import WaybillDocuments from "./pages/Eac-inventory/WaybillDocuments";
 
+// Transport pages load independently of the other application modules.
+import { TransportVisitObserver, TransportRoutePending } from "./pages/Transport/TransportVisitBoundary";
+const transportPage = load => {
+  const Page = lazy(load);
+  return function TransportPage() {
+    return <Suspense fallback={<TransportRoutePending />}><Page /></Suspense>;
+  };
+};
 // Transport Pages
-import AdminDashboard from "./pages/Transport/admindashboard";
-import Drivers from "./pages/Transport/drivers";
-import Fuel from "./pages/Transport/fuel";
-import Maintenance from "./pages/Transport/maintenance";
-import UsersManagement from "./pages/Transport/usersmanagement";
-import Vehicles from "./pages/Transport/vehicles";
-import TransportReports from "./pages/Transport/transportReports";
+const AdminDashboard = transportPage(() => import("./pages/Transport/TransportDashboard"));
+const Drivers = transportPage(() => import("./pages/Transport/TransportDrivers"));
+const Fuel = transportPage(() => import("./pages/Transport/TransportFuel"));
+const Maintenance = transportPage(() => import("./pages/Transport/TransportMaintenanceHistory"));
+const UsersManagement = transportPage(() => import("./pages/Transport/usersmanagement"));
+const Vehicles = transportPage(() => import("./pages/Transport/TransportVehicles"));
+const TransportReports = transportPage(() => import("./pages/Transport/TransportReportPage"));
+const TransportSettings = transportPage(() => import("./pages/Transport/TransportSettings"));
+const TransportNotifications = transportPage(() => import("./pages/Transport/TransportNotifications"));
+const TransportFaults = transportPage(() => import("./pages/Transport/TransportFaults"));
+const TransportMaintenanceDesk = transportPage(() => import("./pages/Transport/TransportMaintenanceDesk"));
+const TransportInspections = transportPage(() => import("./pages/Transport/TransportInspections"));
+const TransportProcurement = transportPage(() => import("./pages/Transport/TransportProcurement"));
+const TransportVehicleProfile = transportPage(() => import("./pages/Transport/TransportVehicleProfile"));
+const TransportDocuments = transportPage(() => import("./pages/Transport/TransportDocuments"));
+const TransportDriverPortal = transportPage(() => import("./pages/Transport/TransportDriverPortal"));
 
 // Other Pages
 import CentralizedDashboard from './pages/Central-Dashboard/centralizedDashboard';
@@ -86,7 +110,7 @@ import PortalRequestsPage from "./pages/PortalRequestsPage";
 import PettyCashPage from "./pages/PettyCashPage";
 import Search from "./components/search";
 import MainSidebar from './pages/Eac-attendance/mainSidebar';
-import Sidebar from "./pages/Transport/Sidebar";
+const Sidebar = transportPage(() => import("./pages/Transport/Sidebar"));
 import LeaveDetailsModal from "./pages/Eac-attendance/attendance/leaveDetailsModal";
 import QuickApprove from "./pages/Eac-attendance/attendance/QuickApprove";
 import QuickReject from "./pages/Eac-attendance/attendance/QuickReject";
@@ -124,6 +148,7 @@ function App() {
 
   return (
     <>
+      <TransportVisitObserver />
       <ToastContainer
         position="top-right"
         autoClose={3000}
@@ -137,9 +162,21 @@ function App() {
       />
       <ThemeToggle />
       
+      <CommunicationProvider>
       <Routes>
+        <Route path="/file-guest" element={<Suspense fallback={<div className="p-8">Loading secure invitation…</div>}><FileGuestPage /></Suspense>} />
+        <Route path="/files" element={<ProtectedRoute><Suspense fallback={<FileLoadingScreen />}><FileExplorer /></Suspense></ProtectedRoute>} />
+        <Route path="/communication" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationPage /></Suspense></ProtectedRoute>} />
+        <Route path="/communication/groups" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationPage /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communications" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communications" /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communication-settings" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communication-settings" /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communications/recovery" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communications/recovery" /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communications/backups" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communications/backups" /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communications/groups" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communications/groups" /></Suspense></ProtectedRoute>} />
+        <Route path="/admin/communications/audit" element={<ProtectedRoute><Suspense fallback={<div className="p-8" role="status">Loading communication…</div>}><CommunicationAdminPage key="/admin/communications/audit" /></Suspense></ProtectedRoute>} />
         {/* Public routes - no authentication required */}
         <Route path="/" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -649,6 +686,16 @@ function App() {
             </ProtectedRoute>
           } />
           
+          <Route path="/transport/settings" element={<ProtectedRoute><TransportSettings /></ProtectedRoute>} />
+          <Route path="/transport/notifications" element={<ProtectedRoute><TransportNotifications /></ProtectedRoute>} />
+          <Route path="/transport/faults" element={<ProtectedRoute><TransportFaults /></ProtectedRoute>} />
+          <Route path="/transport/components" element={<ProtectedRoute><TransportMaintenanceDesk /></ProtectedRoute>} />
+          <Route path="/transport/work-orders" element={<ProtectedRoute><TransportMaintenanceDesk /></ProtectedRoute>} />
+          <Route path="/transport/inspections" element={<ProtectedRoute><TransportInspections /></ProtectedRoute>} />
+          <Route path="/transport/procurement" element={<ProtectedRoute><TransportProcurement /></ProtectedRoute>} />
+          <Route path="/transport/vehicles/:id" element={<ProtectedRoute><TransportVehicleProfile /></ProtectedRoute>} />
+          <Route path="/transport/documents" element={<ProtectedRoute><TransportDocuments /></ProtectedRoute>} />
+          <Route path="/transport/driver" element={<ProtectedRoute><TransportDriverPortal /></ProtectedRoute>} />
           {/* Admin & Management Routes */}
           <Route path="/Userpage" element={
             <ProtectedRoute>
@@ -701,6 +748,7 @@ function App() {
           
         </Route>
       </Routes>
+      </CommunicationProvider>
     </>
   );
 }

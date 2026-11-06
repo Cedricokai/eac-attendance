@@ -45,6 +45,7 @@ import {
   X,
   UtensilsCrossed,
   LogOut,
+  MessageCircle,
 } from "lucide-react";
 
 const EmployeeDashboard = () => {
@@ -57,6 +58,7 @@ const EmployeeDashboard = () => {
   const [showApplicationsWorkspace, setShowApplicationsWorkspace] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState({ username: "", roles: [], email: "" });
+  const isSystemAdmin = userInfo.roles.includes("ROLE_ADMIN");
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [filteredRequests, setFilteredRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -1202,6 +1204,9 @@ const fetchEmployeeAttendance = async (range = attendanceRange) => {
 
           <p className="mb-2 mt-7 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Quick actions</p>
           <div className="space-y-1">
+            <Link to="/files" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-orange-500/10 hover:text-orange-300"><FolderOpen className="h-4 w-4" /> File Management</Link>
+            <Link to="/communication" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-orange-500/10 hover:text-orange-300"><MessageCircle className="h-4 w-4" /> Conversations</Link>
+            {isSystemAdmin && <Link to="/admin/communications" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-violet-500/10 hover:text-violet-300"><Shield className="h-4 w-4" /> Employee conversations</Link>}
             <Link to="/leaveRequestForm" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-blue-500/10 hover:text-blue-300">
               <CalendarCheck className="h-4 w-4" /> Apply for leave
             </Link>
@@ -1392,7 +1397,19 @@ const fetchEmployeeAttendance = async (range = attendanceRange) => {
             <p className="mt-0.5 text-sm text-slate-500">Your most frequently used employee services.</p>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <Link to="/files" className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-orange-200 hover:bg-orange-50/50 hover:shadow-sm">
+                <div className="mr-3 rounded-lg bg-orange-100 p-2"><FolderOpen className="h-5 w-5 text-orange-600" /></div>
+                <div><h3 className="font-medium text-gray-900">File Management</h3><p className="text-sm text-gray-600">Manage and share your files</p></div>
+              </Link>
+              <Link to="/communication" className="group flex items-center rounded-xl border border-slate-200 p-4 transition hover:border-orange-200 hover:bg-orange-50/50 hover:shadow-sm">
+                <div className="mr-3 rounded-lg bg-orange-100 p-2"><MessageCircle className="h-5 w-5 text-orange-600" /></div>
+                <div><h3 className="font-medium text-gray-900">Conversations</h3><p className="text-sm text-gray-600">Your private and group chats</p></div>
+              </Link>
+              {isSystemAdmin && <Link to="/admin/communications" className="group flex items-center rounded-xl border border-violet-200 bg-violet-50/40 p-4 transition hover:bg-violet-50 hover:shadow-sm">
+                <div className="mr-3 rounded-lg bg-violet-100 p-2"><Shield className="h-5 w-5 text-violet-600" /></div>
+                <div><h3 className="font-medium text-gray-900">Employee conversations</h3><p className="text-sm text-gray-600">Admin review of employee chats</p></div>
+              </Link>}
               <button
                 onClick={() => setShowMyInformation(true)}
                 className="group flex items-center rounded-xl border border-slate-200 p-4 text-left transition hover:border-sky-200 hover:bg-sky-50/50 hover:shadow-sm"

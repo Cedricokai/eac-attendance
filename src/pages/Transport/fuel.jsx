@@ -1,7 +1,11 @@
+import { nullableNumber } from "./transportValues";
+import TransportLoadingScreen from "./TransportLoadingScreen";
+import useTransportIntro from "./useTransportIntro";
 import React, { useState, useEffect } from "react";
 import Sidebar from './Sidebar';
 
 const Fuel = () => {
+  const introLoading = useTransportIntro();
   const [fuelEntries, setFuelEntries] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [drivers, setDrivers] = useState([]);
@@ -18,7 +22,7 @@ const Fuel = () => {
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
-  
+
   // Vehicle filter states
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [filteredEntries, setFilteredEntries] = useState([]);
@@ -33,7 +37,7 @@ const Fuel = () => {
 
   const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
-    
+
     console.log("🖥️ Current hostname:", hostname);
 
     if (hostname === "localhost" || hostname === "127.0.0.1") {
@@ -114,14 +118,14 @@ const Fuel = () => {
       }
 
       const response = await fetch(`${API_BASE_URL}/api/fuel`, getFetchConfig());
-      
+
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
         localStorage.removeItem('authToken');
         window.location.href = '/login';
         return;
       }
-      
+
       if (response.ok) {
         const data = await response.json();
         setFuelEntries(data);
@@ -147,14 +151,14 @@ const Fuel = () => {
       }
 
       const response = await fetch(`${API_BASE_URL}/api/vehicles`, getFetchConfig());
-      
+
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
         localStorage.removeItem('authToken');
         window.location.href = '/login';
         return;
       }
-      
+
       if (response.ok) {
         const data = await response.json();
         setVehicles(data);
@@ -179,11 +183,11 @@ const Fuel = () => {
 
       const endpoints = ['/api/drivers', '/api/users'];
       let driversData = [];
-      
+
       for (const endpoint of endpoints) {
         try {
           const response = await fetch(`${API_BASE_URL}${endpoint}`, getFetchConfig());
-          
+
           if (response.ok) {
             const data = await response.json();
             driversData = Array.isArray(data) ? data : [data];
@@ -193,7 +197,7 @@ const Fuel = () => {
           console.warn(`Failed to fetch from ${endpoint}:`, err);
         }
       }
-      
+
       setDrivers(driversData);
     } catch (error) {
       console.error("Error fetching drivers:", error);
@@ -203,7 +207,7 @@ const Fuel = () => {
 
   const handleVehicleChange = (vehicleName) => {
     const selectedVehicleObj = vehicles.find(vehicle => vehicle.name === vehicleName);
-    
+
     if (selectedVehicleObj && selectedVehicleObj.assignedDriver) {
       setFormData(prev => ({
         ...prev,
@@ -229,14 +233,14 @@ const Fuel = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
-    
-    if (!formData.vehicle || !formData.driver || !formData.date || !formData.litres || !formData.cost || !formData.odometer) {
+
+    if (!formData.vehicle || !formData.date || !formData.litres || !formData.cost) {
       setError('Please fill out all required fields.');
       return;
     }
 
-    if (parseFloat(formData.litres) <= 0 || parseFloat(formData.cost) <= 0 || parseInt(formData.odometer) <= 0) {
-      setError('Please enter valid positive values for litres, cost, and odometer.');
+    if (parseFloat(formData.litres) <= 0 || parseFloat(formData.cost) <= 0 || (formData.odometer !== "" && (!Number.isFinite(Number(formData.odometer)) || Number(formData.odometer) < 0))) {
+      setError('Please enter valid positive litres and cost, and a non-negative odometer or leave it blank.');
       return;
     }
 
@@ -253,12 +257,12 @@ const Fuel = () => {
         date: formData.date,
         litres: parseFloat(formData.litres),
         cost: parseFloat(formData.cost),
-        odometer: parseInt(formData.odometer)
+        odometer: nullableNumber(formData.odometer, "Odometer")
       };
 
       let url = `${API_BASE_URL}/api/fuel`;
       let method = 'POST';
-      
+
       if (editingId) {
         url = `${API_BASE_URL}/api/fuel/${editingId}`;
         method = 'PUT';
@@ -276,7 +280,7 @@ const Fuel = () => {
       if (response.ok) {
         const savedEntry = await response.json();
         if (editingId) {
-          setFuelEntries(fuelEntries.map(entry => 
+          setFuelEntries(fuelEntries.map(entry =>
             entry.id === editingId ? savedEntry : entry
           ));
           setSuccessMessage('Fuel entry updated successfully!');
@@ -298,7 +302,7 @@ const Fuel = () => {
 
   const handleEdit = (entry) => {
     const dateValue = entry.date ? entry.date.split('T')[0] : '';
-    
+
     setFormData({
       vehicle: entry.vehicle || "",
       driver: entry.driver || "",
@@ -375,12 +379,12 @@ const Fuel = () => {
       setVehicleSummary({ totalCost: 0, totalLitres: 0, entryCount: 0, avgCostPerLitre: 0 });
       return;
     }
-    
+
     const totalCost = entries.reduce((sum, e) => sum + parseFloat(e.cost || 0), 0);
     const totalLitres = entries.reduce((sum, e) => sum + parseFloat(e.litres || 0), 0);
     const entryCount = entries.length;
     const avgCostPerLitre = totalLitres > 0 ? totalCost / totalLitres : 0;
-    
+
     setVehicleSummary({ totalCost, totalLitres, entryCount, avgCostPerLitre });
   };
 
@@ -391,15 +395,15 @@ const Fuel = () => {
     const totalLitres = vehicleEntries.reduce((sum, e) => sum + parseFloat(e.litres || 0), 0);
     const entryCount = vehicleEntries.length;
     const avgCostPerLitre = totalLitres > 0 ? totalCost / totalLitres : 0;
-    
+
     // Get date range
     const dates = vehicleEntries.map(e => new Date(e.date)).filter(d => !isNaN(d));
     const earliestDate = dates.length > 0 ? new Date(Math.min(...dates)).toLocaleDateString() : 'N/A';
     const latestDate = dates.length > 0 ? new Date(Math.max(...dates)).toLocaleDateString() : 'N/A';
-    
+
     // Get recent entries
     const recentEntries = [...vehicleEntries].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
-    
+
     return {
       vehicleName,
       totalCost,
@@ -431,7 +435,7 @@ const Fuel = () => {
   // Get unique vehicles with their totals
   const getVehicleTotals = () => {
     const vehicleMap = new Map();
-    
+
     fuelEntries.forEach(entry => {
       if (!vehicleMap.has(entry.vehicle)) {
         vehicleMap.set(entry.vehicle, { totalCost: 0, totalLitres: 0, count: 0 });
@@ -442,7 +446,7 @@ const Fuel = () => {
       current.count += 1;
       vehicleMap.set(entry.vehicle, current);
     });
-    
+
     return Array.from(vehicleMap.entries()).map(([vehicle, data]) => ({
       vehicle,
       totalCost: data.totalCost,
@@ -479,36 +483,28 @@ const Fuel = () => {
   const totalLitres = fuelEntries.reduce((sum, r) => sum + parseFloat(r.litres || 0), 0);
   const vehicleTotals = getVehicleTotals();
 
-  if (isLoading) {
+  if (isLoading || introLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-white">
-        <Sidebar />
-        <div className="flex-1 p-6 flex justify-center items-center min-h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-100 border-t-blue-600"></div>
-            <p className="mt-4 text-gray-600 font-medium">Loading fuel records...</p>
-          </div>
-        </div>
-      </div>
+      <div className="tm-app"><Sidebar /><TransportLoadingScreen /></div>
     );
   }
 
   if (error && !isLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-white">
-        <Sidebar />
-        <div className="flex-1 p-6 flex flex-col items-center justify-center">
+      <div className="tm-app flex min-h-screen bg-gradient-to-br from-gray-50 to-white">
+      <Sidebar />
+      <div className="tm-content flex-1 p-6 flex flex-col items-center justify-center">
           <div className="max-w-md p-6 bg-red-50 border border-red-400 text-red-700 rounded-lg shadow-lg">
             <h2 className="text-lg font-semibold mb-2">Error Loading Fuel Records</h2>
             <p className="mb-4">{error}</p>
             <div className="flex space-x-4">
-              <button 
+              <button
                 onClick={() => window.location.reload()}
                 className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
               >
                 Retry
               </button>
-              <button 
+              <button
                 onClick={() => window.location.href = '/login'}
                 className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
               >
@@ -522,13 +518,12 @@ const Fuel = () => {
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-gray-50 to-white">
+    <div className="tm-app flex min-h-screen bg-gradient-to-br from-gray-50 to-white">
       <Sidebar />
-      
-      <div className="flex-1 overflow-y-auto">
+      <div className="tm-content flex-1 overflow-y-auto">
         <div className="p-4 md:p-6">
           <div className="max-w-7xl mx-auto space-y-8">
-            
+
             {error && (
               <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
                 <p>{error}</p>
@@ -554,7 +549,7 @@ const Fuel = () => {
 
             {/* Global Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-xl shadow-lg text-white">
+              <div className="tm-surface bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-xl shadow-lg text-white">
                 <p className="text-blue-100 text-sm">Total Cost (All Vehicles)</p>
                 <p className="text-2xl font-bold">₵{totalCost.toFixed(2)}</p>
               </div>
@@ -562,11 +557,11 @@ const Fuel = () => {
                 <p className="text-green-100 text-sm">Total Litres (All Vehicles)</p>
                 <p className="text-2xl font-bold">{totalLitres.toFixed(2)} L</p>
               </div>
-              <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 p-6 rounded-xl shadow-lg text-white">
+              <div className="tm-surface bg-gradient-to-br from-yellow-500 to-yellow-600 p-6 rounded-xl shadow-lg text-white">
                 <p className="text-yellow-100 text-sm">Total Entries</p>
                 <p className="text-2xl font-bold">{fuelEntries.length}</p>
               </div>
-              <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-xl shadow-lg text-white">
+              <div className="tm-surface bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-xl shadow-lg text-white">
                 <p className="text-purple-100 text-sm">Avg Cost/Litre (All)</p>
                 <p className="text-2xl font-bold">
                   {totalLitres > 0 ? `₵${(totalCost / totalLitres).toFixed(2)}` : "₵0.00"}
@@ -587,7 +582,7 @@ const Fuel = () => {
                   </button>
                 )}
               </div>
-              
+
               <div className="grid md:grid-cols-2 gap-6">
                 {/* Vehicle Selection Dropdown */}
                 <div>
@@ -607,10 +602,10 @@ const Fuel = () => {
                     ))}
                   </select>
                 </div>
-                
+
                 {/* Vehicle Summary Stats (shown when filter is active) */}
                 {selectedVehicle && vehicleSummary.entryCount > 0 && (
-                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl p-4 border border-indigo-200">
+                  <div className="tm-surface bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl p-4 border border-indigo-200">
                     <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
                       <span className="text-xl">📊</span>
                       Summary for: {selectedVehicle}
@@ -643,7 +638,7 @@ const Fuel = () => {
                     </div>
                   </div>
                 )}
-                
+
                 {/* No entries message */}
                 {selectedVehicle && vehicleSummary.entryCount === 0 && (
                   <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
@@ -752,11 +747,11 @@ const Fuel = () => {
                   Fuel Records {selectedVehicle ? `- ${selectedVehicle}` : ''}
                 </h3>
                 <p className="text-sm text-gray-600 mt-1">
-                  {(selectedVehicle ? filteredEntries : fuelEntries).length} 
+                  {(selectedVehicle ? filteredEntries : fuelEntries).length}
                   record{(selectedVehicle ? filteredEntries : fuelEntries).length !== 1 ? 's' : ''} found
                 </p>
               </div>
-              
+
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50">
@@ -808,7 +803,7 @@ const Fuel = () => {
                           <span className="text-green-600 font-bold">₵{entry.cost}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-gray-600">
-                          {entry.odometer}
+                          {entry.odometer ?? "Not Recorded"}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex gap-2 justify-center">
@@ -831,13 +826,13 @@ const Fuel = () => {
                   </tbody>
                 </table>
               </div>
-              
+
               {(selectedVehicle ? filteredEntries : fuelEntries).length === 0 && (
                 <div className="text-center py-12">
                   <div className="text-gray-400 text-6xl mb-4">⛽</div>
                   <p className="text-gray-500 text-lg">No fuel records found</p>
                   <p className="text-gray-400 text-sm mt-2">
-                    {selectedVehicle 
+                    {selectedVehicle
                       ? `No records for ${selectedVehicle}. Try selecting a different vehicle.`
                       : 'Add your first fuel entry to get started'}
                   </p>
@@ -866,7 +861,7 @@ const Fuel = () => {
 
       {/* Add/Edit Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div role="dialog" aria-modal="true" aria-label="Fuel dialog" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
               <div className="flex justify-between items-center">
@@ -881,14 +876,14 @@ const Fuel = () => {
                 </button>
               </div>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               {error && (
                 <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">
                   <p>{error}</p>
                 </div>
               )}
-              
+
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -914,7 +909,7 @@ const Fuel = () => {
                     </p>
                   )}
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Driver *
@@ -932,14 +927,14 @@ const Fuel = () => {
                       </option>
                     ))}
                   </select>
-                  {formData.driver && formData.vehicle && 
+                  {formData.driver && formData.vehicle &&
                   formData.driver === vehicles.find(v => v.name === formData.vehicle)?.assignedDriver && (
                     <p className="text-xs text-blue-600 mt-1">
                       ✓ Matches assigned driver for this vehicle
                     </p>
                   )}
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Date *
@@ -952,7 +947,7 @@ const Fuel = () => {
                     className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Litres (L) *
@@ -968,7 +963,7 @@ const Fuel = () => {
                     placeholder="0.00"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Cost (₵) *
@@ -984,23 +979,23 @@ const Fuel = () => {
                     placeholder="0.00"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Odometer *
+                    Odometer (optional)
                   </label>
                   <input
                     type="number"
                     value={formData.odometer}
                     onChange={(e) => setFormData({ ...formData, odometer: e.target.value })}
-                    required
+
                     min="0"
                     className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Enter odometer reading"
                   />
                 </div>
               </div>
-              
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
@@ -1023,9 +1018,9 @@ const Fuel = () => {
 
       {/* Vehicle Details Modal */}
       {showVehicleModal && selectedVehicleDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div role="dialog" aria-modal="true" aria-label="Fuel dialog" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+            <div className="tm-surface p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <span className="text-3xl">🚗</span>
@@ -1042,7 +1037,7 @@ const Fuel = () => {
                 </button>
               </div>
             </div>
-            
+
             <div className="p-6">
               {/* Summary Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -1071,7 +1066,7 @@ const Fuel = () => {
                   </p>
                 </div>
               </div>
-              
+
               {/* Date Range */}
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="grid grid-cols-2 gap-4">
@@ -1085,7 +1080,7 @@ const Fuel = () => {
                   </div>
                 </div>
               </div>
-              
+
               {/* Recent Entries */}
               {selectedVehicleDetails.recentEntries.length > 0 && (
                 <div>
@@ -1108,7 +1103,7 @@ const Fuel = () => {
                   </div>
                 </div>
               )}
-              
+
               <div className="flex gap-3 mt-6 pt-4 border-t border-gray-200">
                 <button
                   onClick={() => {

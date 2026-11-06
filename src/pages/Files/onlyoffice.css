@@ -1,0 +1,49 @@
+.fm-onlyoffice { display: flex; flex-direction: column; height: 100dvh; min-height: 500px; background: #f5f6f8; }
+.fm-onlyoffice .fm-onlyoffice-host { flex: 1; min-height: 350px; width: 100%; }
+.fm-onlyoffice-host > div, .fm-onlyoffice-host iframe { height: 100%; width: 100%; border: 0; }
+.fm-onlyoffice .fm-error { flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.fm-onlyoffice .fm-editor-bar { flex-wrap: wrap; flex-shrink: 0; }
+.fm-onlyoffice .fm-notice { margin: 0; border-radius: 0; flex-shrink: 0; font-size: 13px; }
+.fm-onlyoffice .fm-editor-status { flex-wrap: wrap; flex-shrink: 0; }
+.fm-onlyoffice-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:6px 16px; font-size:12px; border-bottom:1px solid #d9dfe3; background:var(--fm-panel,#fff); }
+.fm-onlyoffice-actions button { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:5px 10px; border:1px solid #d9dfe3; border-radius:8px; }
+.fm-office-templates { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; margin: 18px 0; }
+.fm-office-templates button { border: 1px solid #d5ddd8; border-radius: 14px; padding: 20px; min-height: 90px; overflow-wrap: anywhere; background: #f5f7f4; color: #24362c; text-align: left; }
+.fm-office-templates button[aria-pressed=true] { border: 2px solid #23724c; background: #e3f0e8; }
+@media(max-width:640px){.fm-onlyoffice .fm-editor-bar { gap: 8px; padding: 10px; }.fm-onlyoffice .fm-editor-bar h2{max-width:200px;overflow-wrap:anywhere;}.fm-onlyoffice .fm-editor-bar button{min-height:44px;}.fm-onlyoffice .fm-editor-bar>small{width:100%;}.fm-onlyoffice .fm-editor-status{font-size:11px;gap:5px;}}
+.fm-sheet-access { display: grid; gap: 14px; }
+.fm-sheet-admin,.fm-sheet-pending { display:flex; align-items:center; gap:8px; padding:12px; background:#edf7ef; color:#225837; border-radius:9px; font-size:13px; }
+.fm-sheet-access .fm-sheet-check { display:flex; flex-direction:row; align-items:center; gap:9px; }
+.fm-sheet-check input { width:18px; height:18px; }
+.fm-sheet-search { display:flex!important; flex-direction:row!important; align-items:center; gap:8px; }
+.fm-sheet-people { max-height:340px; overflow:auto; border:1px solid #dae7df; border-radius:10px; }
+.fm-sheet-access .fm-sheet-person { display:flex; flex-direction:row; align-items:center; justify-content:space-between; gap:12px; padding:12px; border-bottom:1px solid #e4ece6; }
+.fm-sheet-person span { display:grid; gap:4px; overflow-wrap:anywhere; }
+.fm-sheet-person small { color:#65746a; }
+.fm-sheet-person select { width:155px; flex-shrink:0; }
+.fm-sheet-tabs { display:flex; gap:6px; overflow:auto; padding:8px 12px; background:#eef4f0; flex-shrink:0; }
+.fm-sheet-tabs button { display:flex; align-items:center; gap:4px; white-space:nowrap; padding:9px 13px; border:1px solid #ccded1; border-radius:8px; background:white; color:#244c32; }
+.fm-sheet-tabs button.is-active { background:#226d43; color:white; }
+.fm-onlyoffice-host { position:relative; }
+.fm-sheet-denial { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; text-align:center; gap:12px; padding:24px; background:#f5f8f6; color:#294534; z-index:2; }
+.fm-sheet-denial h3 { font-size:20px; margin:0; }
+.fm-sheet-audit { border-top:1px solid #dde7df; padding-top:12px; font-size:12px; }
+@media(max-width:560px){.fm-sheet-access .fm-sheet-person{align-items:stretch;flex-direction:column}.fm-sheet-person select{width:100%}.fm-sheet-access footer{flex-wrap:wrap}.fm-sheet-denial h3{font-size:17px}}
+/* Keep document controls above the global message banner while editing. */
+.fm-editor.fm-onlyoffice { z-index: 1700; }
+/* Document colors scoped to the Office workspace header. */
+.fm-office-cell { --office-heading: #217346; }
+.fm-office-word { --office-heading: #185abd; }
+.fm-onlyoffice.fm-office-cell .fm-editor-bar,
+.fm-onlyoffice.fm-office-word .fm-editor-bar { background: var(--office-heading); color: #fff; border-bottom-color: transparent; }
+.fm-onlyoffice.fm-office-cell .fm-editor-bar h2,
+.fm-onlyoffice.fm-office-word .fm-editor-bar h2,
+.fm-onlyoffice.fm-office-cell .fm-editor-bar small,
+.fm-onlyoffice.fm-office-word .fm-editor-bar small { color: #fff; }
+.fm-onlyoffice.fm-office-cell .fm-editor-bar button,
+.fm-onlyoffice.fm-office-word .fm-editor-bar button { background: #fff; color: var(--office-heading); border: 1px solid #ffffffb3; }
+.fm-onlyoffice .fm-editor-bar button:disabled { opacity: .65; }
+.fm-sheet-access fieldset { border:1px solid #dae7df; border-radius:10px; padding:12px; display:flex; flex-wrap:wrap; gap:12px; } .fm-sheet-access fieldset legend { padding:0 5px; font-weight:600; } .fm-sheet-bulk { display:flex; flex-wrap:wrap; gap:10px; align-items:center; } .fm-sheet-bulk label { min-width:160px; }
+
+/* Password entry keeps a visible caret in light and dark modes. */
+.fm-modal input[type="password"]{cursor:text;caret-color:currentColor;}

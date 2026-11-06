@@ -79,6 +79,8 @@ const ProtectedRoute = ({ children, allowMustChangePageOnly = false }) => {
           }
           const allowed = data.allowed ?? true;
           setIsAuthorized(allowed);
+          // A denied previous route must not hide a later, authorized Files page.
+          setShowPermissionModal(!allowed);
           
           // Show modal if not authorized
           if (!allowed) {

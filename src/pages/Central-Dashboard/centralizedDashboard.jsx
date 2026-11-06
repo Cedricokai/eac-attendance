@@ -275,6 +275,8 @@ const CentralizedDashboard = () => {
 
   // ===== DASHBOARD DEFINITIONS WITH STAT MAPPING =====
   const getDashboards = () => [
+    { id: 'communication', name: 'Communication', icon: <Users size={18} />, color: 'bg-orange-100 text-orange-800', hover: 'hover:bg-orange-50', statKey: null, statLabel: 'Employee conversations', roles: ['admin', 'hr', 'user', 'supervisor', 'accountant', 'customer'] },
+    { id: 'files', name: 'File Management', icon: <FileText size={18} />, color: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-50', statKey: null, statLabel: 'Files & editors', roles: ['admin'] },
     { id: 'attendanceDashboard', name: 'Attendance', icon: <Users size={18} />, color: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-50', statKey: 'totalAttendance', statLabel: 'Today\'s Present', roles: ['admin', 'hr', 'supervisor'] },
     { id: 'quotationMaster', name: 'Quotation Master', icon: <FileText size={18} />, color: 'bg-purple-100 text-purple-800', hover: 'hover:bg-purple-50', statKey: 'totalQuotes', statLabel: 'Total Quotes', roles: ['admin', 'hr'] },
     { id: 'payroll', name: 'Payroll', icon: <DollarSign size={18} />, color: 'bg-green-100 text-green-800', hover: 'hover:bg-green-50', statKey: 'totalPayroll', statLabel: 'Payroll (₵)', roles: ['admin', 'hr', 'accountant'] },

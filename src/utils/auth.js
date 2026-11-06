@@ -23,7 +23,7 @@ export const handleSessionExpired = () => {
   localStorage.removeItem("jwtToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("userRole");
-  window.location.href = "/login";
+  window.location.hash = "/login";
 };
 
 export const setToken = (token) => {

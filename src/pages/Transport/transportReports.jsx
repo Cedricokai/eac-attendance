@@ -1,7 +1,11 @@
+import { getToken } from "../../utils/auth";
+import TransportLoadingScreen from "./TransportLoadingScreen";
+import useTransportIntro from "./useTransportIntro";
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 
 const TransportReports = () => {
+  const introLoading = useTransportIntro();
   const [fuelEntries, setFuelEntries] = useState([]);
   const [maintenanceRecords, setMaintenanceRecords] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -68,11 +72,11 @@ const TransportReports = () => {
     setIsLoading(true);
     try {
       const [fuelResponse, maintenanceResponse, vehiclesResponse, driversResponse, usersResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/fuel`),
-        fetch(`${API_BASE_URL}/maintenance`),
-        fetch(`${API_BASE_URL}/vehicles`),
-        fetch(`${API_BASE_URL}/drivers`),
-        fetch(`${API_BASE_URL}/users`)
+        fetch(`${API_BASE_URL}/api/fuel`, {headers:{Authorization:`Bearer ${getToken() || ""}`}}),
+        fetch(`${API_BASE_URL}/api/maintenance`, {headers:{Authorization:`Bearer ${getToken() || ""}`}}),
+        fetch(`${API_BASE_URL}/api/vehicles`, {headers:{Authorization:`Bearer ${getToken() || ""}`}}),
+        fetch(`${API_BASE_URL}/api/drivers`, {headers:{Authorization:`Bearer ${getToken() || ""}`}}),
+        fetch(`${API_BASE_URL}/api/users`, {headers:{Authorization:`Bearer ${getToken() || ""}`}})
       ]);
 
       const data = await Promise.all([
@@ -225,7 +229,7 @@ const TransportReports = () => {
   };
 
   const StatCard = ({ title, value, subtitle, icon, color }) => (
-    <div className={`bg-gradient-to-br ${color} p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1`}>
+    <div className={`tm-surface bg-gradient-to-br ${color} p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1`}>
       <div className="flex items-center justify-between mb-4">
         <div className="p-3 bg-white/20 rounded-xl backdrop-blur-sm">
           <span className="text-2xl">{icon}</span>
@@ -265,7 +269,7 @@ const TransportReports = () => {
         >
           <div className="flex items-center space-x-4">
             <div className="relative">
-              <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl group-hover:scale-110 transition-transform duration-300">
+              <div className="tm-surface p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl group-hover:scale-110 transition-transform duration-300">
                 <span className="text-xl text-white">{icon}</span>
               </div>
               <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
@@ -303,35 +307,21 @@ const TransportReports = () => {
     );
   };
 
-  if (isLoading) {
+  if (isLoading || introLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <Sidebar />
-        <div className="flex-1 p-6 flex items-center justify-center min-h-64">
-          <div className="text-center">
-            <div className="relative">
-              <div className="animate-spin rounded-full h-20 w-20 border-4 border-blue-100 border-t-blue-600"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-2xl">📊</div>
-              </div>
-            </div>
-            <p className="mt-6 text-gray-600 font-medium animate-pulse">Preparing your analytics dashboard...</p>
-          </div>
-        </div>
-      </div>
+      <div className="tm-app"><Sidebar /><TransportLoadingScreen /></div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <div className="tm-app flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar />
-      
-      <div className="flex-1 overflow-y-auto">
+      <div className="tm-content flex-1 overflow-y-auto">
         <div className="p-4 md:p-8">
           <div className="max-w-7xl mx-auto">
             {/* Enhanced Header */}
             <div className="mb-8">
-              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-8 mb-8 shadow-xl">
+              <div className="tm-surface bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-8 mb-8 shadow-xl">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between">
                   <div>
                     <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">Transport Analytics Dashboard</h1>
@@ -397,13 +387,13 @@ const TransportReports = () => {
                   <div>
                     <h4 className="text-lg font-semibold text-gray-800 mb-4">Performance Metrics</h4>
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl">
+                      <div className="tm-surface flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl">
                         <span className="font-medium text-gray-700">Vehicle Utilization</span>
                         <span className="text-2xl font-bold text-blue-600">
                           {((systemStats.activeVehicles / systemStats.totalVehicles) * 100).toFixed(0)}%
                         </span>
                       </div>
-                      <div className="flex justify-between items-center p-4 bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-xl">
+                      <div className="tm-surface flex justify-between items-center p-4 bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-xl">
                         <span className="font-medium text-gray-700">Driver Engagement</span>
                         <span className="text-2xl font-bold text-emerald-600">
                           {((systemStats.activeDrivers / systemStats.totalDrivers) * 100).toFixed(0)}%
@@ -438,7 +428,7 @@ const TransportReports = () => {
                 badge={vehicles.length}
               >
                 <div className="overflow-hidden rounded-2xl border border-gray-200">
-                  <div className="grid grid-cols-5 gap-4 p-6 bg-gradient-to-r from-gray-50 to-gray-100 border-b">
+                  <div className="tm-surface grid grid-cols-5 gap-4 p-6 bg-gradient-to-r from-gray-50 to-gray-100 border-b">
                     <div className="font-semibold text-gray-700">Vehicle Details</div>
                     <div className="font-semibold text-gray-700">Registration</div>
                     <div className="font-semibold text-gray-700">Driver</div>
@@ -492,19 +482,19 @@ const TransportReports = () => {
                     <div className="lg:col-span-2">
                       <h4 className="text-lg font-semibold text-gray-800 mb-6">Monthly Fuel Statistics</h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-5 rounded-2xl border border-blue-200">
+                        <div className="tm-surface bg-gradient-to-br from-blue-50 to-blue-100 p-5 rounded-2xl border border-blue-200">
                           <div className="text-sm text-blue-600 font-semibold mb-2">Total Cost</div>
                           <div className="text-2xl font-bold text-blue-800">{formatCurrency(fuelStats.totalCost)}</div>
                         </div>
-                        <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-5 rounded-2xl border border-emerald-200">
+                        <div className="tm-surface bg-gradient-to-br from-emerald-50 to-emerald-100 p-5 rounded-2xl border border-emerald-200">
                           <div className="text-sm text-emerald-600 font-semibold mb-2">Total Volume</div>
                           <div className="text-2xl font-bold text-emerald-800">{fuelStats.totalLitres.toFixed(1)} L</div>
                         </div>
-                        <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-5 rounded-2xl border border-purple-200">
+                        <div className="tm-surface bg-gradient-to-br from-purple-50 to-purple-100 p-5 rounded-2xl border border-purple-200">
                           <div className="text-sm text-purple-600 font-semibold mb-2">Total Entries</div>
                           <div className="text-2xl font-bold text-purple-800">{fuelStats.totalEntries}</div>
                         </div>
-                        <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-5 rounded-2xl border border-amber-200">
+                        <div className="tm-surface bg-gradient-to-br from-amber-50 to-amber-100 p-5 rounded-2xl border border-amber-200">
                           <div className="text-sm text-amber-600 font-semibold mb-2">Avg Cost/L</div>
                           <div className="text-2xl font-bold text-amber-800">{formatCurrency(fuelStats.avgCostPerLitre)}</div>
                         </div>
@@ -553,11 +543,11 @@ const TransportReports = () => {
                       <div className="text-3xl font-bold text-green-600">{maintenanceStats.completed}</div>
                       <div className="text-sm text-green-700 font-medium mt-2">Completed</div>
                     </div>
-                    <div className="text-center p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl">
+                    <div className="tm-surface text-center p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl">
                       <div className="text-3xl font-bold text-blue-600">{maintenanceStats.scheduled}</div>
                       <div className="text-sm text-blue-700 font-medium mt-2">Scheduled</div>
                     </div>
-                    <div className="text-center p-6 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-2xl">
+                    <div className="tm-surface text-center p-6 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-2xl">
                       <div className="text-3xl font-bold text-yellow-600">{maintenanceStats.inProgress}</div>
                       <div className="text-sm text-yellow-700 font-medium mt-2">In Progress</div>
                     </div>
@@ -619,7 +609,7 @@ const TransportReports = () => {
                         <tr key={driver} className="hover:bg-blue-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center">
-                              <div className="flex-shrink-0 h-10 w-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
+                              <div className="tm-surface flex-shrink-0 h-10 w-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
                                 <span className="text-white font-bold">{driver.charAt(0)}</span>
                               </div>
                               <div className="ml-4">
@@ -668,7 +658,7 @@ const TransportReports = () => {
                 badge="Analysis"
               >
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-8 rounded-2xl">
+                  <div className="tm-surface bg-gradient-to-br from-gray-50 to-gray-100 p-8 rounded-2xl">
                     <h4 className="text-lg font-semibold text-gray-800 mb-6">Expense Breakdown</h4>
                     <div className="space-y-6">
                       <div>
@@ -696,7 +686,7 @@ const TransportReports = () => {
                     </div>
                   </div>
                   
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-8 rounded-2xl flex flex-col justify-center">
+                  <div className="tm-surface bg-gradient-to-br from-blue-50 to-blue-100 p-8 rounded-2xl flex flex-col justify-center">
                     <div className="text-center">
                       <div className="text-5xl font-bold text-blue-800 mb-4">
                         {formatCurrency(financialSummary.totalExpenses)}

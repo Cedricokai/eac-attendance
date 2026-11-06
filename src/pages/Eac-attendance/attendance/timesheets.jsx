@@ -14,6 +14,7 @@ import ExcelTemplateViewer from './ExcelTemplateViewer';
 import TimesheetAttendanceSync from "../../../components/sync/TimesheetAttendanceSync";
 import TimesheetPayrollApproval from "../../../components/TimesheetPayrollApproval";
 import * as XLSX from 'xlsx';
+import './timesheet-ui.css';
 
 const AttendanceCodes = {
   PRESENT: 'P',
@@ -37,6 +38,7 @@ const TimesheetStatus = {
 };
 
 function Timesheet() {
+  const [focusedEmployeeId, setFocusedEmployeeId] = useState(null);
   const [timesheets, setTimesheets] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -3094,7 +3096,7 @@ function Timesheet() {
   }, [filteredEmployees, days, attendanceData, missingSourceEntries]);
 
   return (
-    <div className="relative min-h-screen bg-gray-50">
+    <div className="ts-workspace relative min-h-screen bg-gray-50">
       {showInvoiceExport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <form role="dialog" aria-modal="true" aria-labelledby="invoice-export-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onSubmit={(event) => { event.preventDefault(); handleExportInvoice(); }}>
@@ -3115,7 +3117,7 @@ function Timesheet() {
         </div>
       )}
       <div 
-        className={`fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 ${
+        className={`ts-sidebar fixed inset-y-0 left-0 bg-white shadow-md z-30 transition-all duration-300 ${
           sidebarOpen ? 'w-64' : 'w-16'
         }`}
       >
@@ -3199,7 +3201,7 @@ function Timesheet() {
                       role="dialog"
                       aria-modal="true"
                       aria-label="Timesheet controls"
-                      className="fixed right-4 top-20 z-[2147483647] w-[calc(100vw-2rem)] max-w-sm max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-2xl border border-gray-200"
+                      className="ts-controls-menu fixed right-4 top-20 z-[2147483647] w-[calc(100vw-2rem)] max-w-sm max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-2xl border border-gray-200"
                     >
                       <div className="px-4 py-3 border-b border-gray-100">
                         <p className="text-sm font-semibold text-gray-900">Timesheet controls</p>
@@ -3512,7 +3514,7 @@ function Timesheet() {
           )}
 
           {/* ===== FILTER / ACTION BAR – reduced height ===== */}
-          <div className="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow border border-gray-100">
+          <div className="ts-filter-bar flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow border border-gray-100">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
                 <button onClick={() => { userManuallyChangedRef.current = true; autoSyncPerformedRef.current = true; const newDate = new Date(currentDate); newDate.setDate(newDate.getDate() - 7); setCurrentDate(newDate); }} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
@@ -3786,9 +3788,18 @@ function Timesheet() {
               jobName={selectedJobData?.name || "SITE SERVICES"}
             />
           ) : (
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
+            <div className="ts-table-panel bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
+              <div className="ts-employee-context" role="status" aria-live="polite">
+                <UserCheck size={19} aria-hidden="true" />
+                <div><span className="ts-context-label">{pagedEmployees.some(employee => employee.id === focusedEmployeeId) ? 'CURRENT EMPLOYEE' : 'EMPLOYEE WORKSPACE'}</span>
+                  {pagedEmployees.some(employee => employee.id === focusedEmployeeId) ? pagedEmployees.filter(employee => employee.id === focusedEmployeeId).map(employee => (
+                    <strong key={employee.id}>{employee.firstName} {employee.lastName} <small>· ID: {employee.employeeId || 'N/A'}</small></strong>
+                  )) : <strong>Select a row to focus on an employee</strong>}
+                </div>
+                <span className="ts-context-hint">Confirm the employee before entering attendance or hours.</span>
+              </div>
               <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                <table className="min-w-full">
+                <table className="ts-attendance-grid min-w-full">
                   <thead className="sticky top-0 z-20 bg-gradient-to-r from-gray-50 to-gray-100">
                     <tr>
                       <th className="sticky left-0 z-30 bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 w-12">
@@ -3862,15 +3873,16 @@ function Timesheet() {
                         
                         return (
                           <React.Fragment key={employee.id}>
-                            <tr className="hover:bg-gray-50 transition-colors duration-150">
+                            <tr className="ts-employee-attendance hover:bg-gray-50 transition-colors duration-150" data-active={focusedEmployeeId === employee.id} onFocusCapture={() => setFocusedEmployeeId(employee.id)} onPointerDownCapture={() => setFocusedEmployeeId(employee.id)}>
                               <td className="sticky left-0 z-20 bg-white px-4 py-3 border-r border-gray-100 text-center align-top" rowSpan="2">
                                 <input type="checkbox" checked={selectedEmployeeIds.has(employee.id)} onChange={() => toggleSelectEmployee(employee.id)} className="h-4 w-4 text-indigo-600 rounded focus:ring-indigo-500" />
                               </td>
                               
-                              <td className="sticky left-12 z-20 bg-white px-3 py-3 border-r border-gray-100 w-[180px] align-top" rowSpan="2">
+                              <td className="ts-employee-identity sticky left-12 z-20 bg-white px-3 py-3 border-r border-gray-100 w-[180px] align-top" rowSpan="2">
                                 <div className="font-semibold text-gray-900 text-sm leading-tight">
                                   {employee.firstName} {employee.lastName}
                                 </div>
+                                {focusedEmployeeId === employee.id && <span className="ts-editing-badge">Editing this employee</span>}
 
                                 <div className="text-xs text-gray-600 space-y-1.5 mt-2">
                                   <div className="flex items-center">
@@ -3933,21 +3945,23 @@ function Timesheet() {
                                     <div className="flex items-center justify-center gap-1">
                                       <select 
                                         value={attendanceStatus} 
+                                        aria-label={`Attendance for ${employee.firstName} ${employee.lastName}, ${dateStr}`}
+                                        title={`${employee.firstName} ${employee.lastName} · ${dateStr}`}
                                         onChange={(e) => handleAttendanceStatusChange(employee.id, dateStr, e.target.value)} 
-                                        className="w-16 h-8 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1"
+                                        className="ts-status-select w-16 h-8 rounded-lg border-2 font-bold text-sm text-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1"
                                         style={getAttendanceCodeColor(attendanceStatus) ? { backgroundColor: 'white' } : {}}
                                       >
                                         <option value="">-</option>
-                                        <option value="P">P</option>
-                                        <option value="A">A</option>
-                                        <option value="L">L</option>
-                                        <option value="H">H</option>
-                                        <option value="S">S</option>
-                                        <option value="WP">WP</option>
-                                        <option value="HP">HP</option>
-                                        <option value="PL">PL</option>
-                                        <option value="ML">ML</option>
-                                        <option value="OFF">OFF</option>
+                                        <option value="P">{attendanceStatus === 'P' ? '✅ ' : ''}P</option>
+                                        <option value="A">{attendanceStatus === 'A' ? '✅ ' : ''}A</option>
+                                        <option value="L">{attendanceStatus === 'L' ? '✅ ' : ''}L</option>
+                                        <option value="H">{attendanceStatus === 'H' ? '✅ ' : ''}H</option>
+                                        <option value="S">{attendanceStatus === 'S' ? '✅ ' : ''}S</option>
+                                        <option value="WP">{attendanceStatus === 'WP' ? '✅ ' : ''}WP</option>
+                                        <option value="HP">{attendanceStatus === 'HP' ? '✅ ' : ''}HP</option>
+                                        <option value="PL">{attendanceStatus === 'PL' ? '✅ ' : ''}PL</option>
+                                        <option value="ML">{attendanceStatus === 'ML' ? '✅ ' : ''}ML</option>
+                                        <option value="OFF">{attendanceStatus === 'OFF' ? '✅ ' : ''}OFF</option>
                                       </select>
                                       
                                       <div className="relative group">
@@ -4010,7 +4024,7 @@ function Timesheet() {
                               </td>
                             </tr>
                             
-                            <tr className="hover:bg-gray-50 transition-colors duration-150 border-b border-gray-100">
+                            <tr className="ts-employee-hours hover:bg-gray-50 transition-colors duration-150 border-b border-gray-100" data-active={focusedEmployeeId === employee.id} onFocusCapture={() => setFocusedEmployeeId(employee.id)} onPointerDownCapture={() => setFocusedEmployeeId(employee.id)}>
                               {days.map((day, dayIndex) => {
                                 const dateStr = toYMD(day);
                                 const status = attendanceData[employee.id]?.[dateStr];
@@ -4894,14 +4908,14 @@ function Timesheet() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Attendance Code</label>
                       <select value={bulkAction.attendanceCode} onChange={(e) => setBulkAction(prev => ({ ...prev, attendanceCode: e.target.value }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500">
-                        <option value="P">Present (P)</option>
-                        <option value="A">Absent (A)</option>
-                        <option value="L">Leave (L)</option>
-                        <option value="H">Holiday (H)</option>
-                        <option value="S">Sick (S)</option>
-                        <option value="WP">Weekend Present (WP)</option>
-                        <option value="HP">Holiday Present (HP)</option>
-                        <option value="OFF">Off Day (OFF)</option>
+                        <option value="P">{bulkAction.attendanceCode === 'P' ? '✅ ' : ''}Present (P)</option>
+                        <option value="A">{bulkAction.attendanceCode === 'A' ? '✅ ' : ''}Absent (A)</option>
+                        <option value="L">{bulkAction.attendanceCode === 'L' ? '✅ ' : ''}Leave (L)</option>
+                        <option value="H">{bulkAction.attendanceCode === 'H' ? '✅ ' : ''}Holiday (H)</option>
+                        <option value="S">{bulkAction.attendanceCode === 'S' ? '✅ ' : ''}Sick (S)</option>
+                        <option value="WP">{bulkAction.attendanceCode === 'WP' ? '✅ ' : ''}Weekend Present (WP)</option>
+                        <option value="HP">{bulkAction.attendanceCode === 'HP' ? '✅ ' : ''}Holiday Present (HP)</option>
+                        <option value="OFF">{bulkAction.attendanceCode === 'OFF' ? '✅ ' : ''}Off Day (OFF)</option>
                       </select>
                     </div>
                     

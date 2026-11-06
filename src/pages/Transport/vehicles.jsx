@@ -1,7 +1,11 @@
+import { nullableNumber, daysUntil, expiryStatus } from "./transportValues";
+import TransportLoadingScreen from "./TransportLoadingScreen";
+import useTransportIntro from "./useTransportIntro";
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 
 const Vehicles = () => {
+  const introLoading = useTransportIntro();
   const [vehicles, setVehicles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -195,9 +199,9 @@ const getApiBaseUrl = () => {
     vehicles.forEach(vehicle => {
       if (vehicle.vehicleLicenseExpiry) {
         const expiryDate = new Date(vehicle.vehicleLicenseExpiry);
-        const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+        const daysUntilExpiry = daysUntil(vehicle.vehicleLicenseExpiry);
         
-        if (daysUntilExpiry <= 30 && daysUntilExpiry > 0) {
+        if (daysUntilExpiry <= 30 && daysUntilExpiry >= 0) {
           notifications.push({
             vehicle: vehicle.name,
             dvla: vehicle.dvla,
@@ -205,7 +209,7 @@ const getApiBaseUrl = () => {
             daysLeft: daysUntilExpiry,
             type: 'warning'
           });
-        } else if (daysUntilExpiry <= 0) {
+        } else if (daysUntilExpiry < 0) {
           notifications.push({
             vehicle: vehicle.name,
             dvla: vehicle.dvla,
@@ -220,18 +224,7 @@ const getApiBaseUrl = () => {
     setExpiryNotifications(notifications);
   };
 
-  const getExpiryStatus = (expiryDate) => {
-    if (!expiryDate) return 'unknown';
-    
-    const today = new Date();
-    const expiry = new Date(expiryDate);
-    const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-    
-    if (daysUntilExpiry < 0) return 'expired';
-    if (daysUntilExpiry <= 7) return 'critical';
-    if (daysUntilExpiry <= 30) return 'warning';
-    return 'valid';
-  };
+  const getExpiryStatus = expiryStatus;
 
   const getExpiryColor = (expiryDate) => {
     const status = getExpiryStatus(expiryDate);
@@ -245,11 +238,11 @@ const getApiBaseUrl = () => {
   };
 
   const getExpiryText = (expiryDate) => {
-    if (!expiryDate) return 'Not set';
+    if (!expiryDate) return 'Not Recorded';
     
     const today = new Date();
     const expiry = new Date(expiryDate);
-    const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+    const daysUntilExpiry = daysUntil(expiryDate);
     
     if (daysUntilExpiry < 0) {
       return `Expired ${Math.abs(daysUntilExpiry)}d ago`;
@@ -274,7 +267,7 @@ const getApiBaseUrl = () => {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/vehicles/${vehicleId}/attachments`, getFetchConfig());
+      const response = await fetch(`${API_BASE_URL}/api/attachments/vehicle/${vehicleId}`, getFetchConfig());
       
       if (response.ok) {
         const data = await response.json();
@@ -312,7 +305,7 @@ const getApiBaseUrl = () => {
       });
       formData.append('vehicleId', vehicleId);
 
-      const response = await fetch(`${API_BASE_URL}/api/vehicles/upload`, {
+      const response = await fetch(`${API_BASE_URL}/api/attachments/upload`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -357,7 +350,7 @@ const getApiBaseUrl = () => {
       const token = getAuthToken();
       const fileType = attachment.fileName.split('.').pop().toLowerCase();
       
-      const response = await fetch(`${API_BASE_URL}/api/vehicles/download/${attachment.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/attachments/download/${attachment.id}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -425,7 +418,7 @@ const getApiBaseUrl = () => {
     if (await window.appConfirm('Are you sure you want to delete this attachment?')) {
       try {
         const token = getAuthToken();
-        const response = await fetch(`${API_BASE_URL}/api/vehicles/attachments/${attachmentId}`, {
+        const response = await fetch(`${API_BASE_URL}/api/attachments/${attachmentId}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -450,7 +443,7 @@ const getApiBaseUrl = () => {
   const handleDownloadAttachment = async (attachment) => {
     try {
       const token = getAuthToken();
-      const response = await fetch(`${API_BASE_URL}/api/vehicles/download/${attachment.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/attachments/download/${attachment.id}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -507,7 +500,7 @@ const getApiBaseUrl = () => {
         method = 'PUT';
       }
 
-      const response = await fetch(url, getFetchConfig(method, vehicleForm));
+      const response = await fetch(url, getFetchConfig(method, { ...vehicleForm, currentMileage: nullableNumber(vehicleForm.currentMileage, "Current mileage"), nextServiceMileage: nullableNumber(vehicleForm.nextServiceMileage, "Next service mileage"), maxFuelCapacity: nullableNumber(vehicleForm.maxFuelCapacity, "Fuel capacity"), year: nullableNumber(vehicleForm.year, "Year"), vehicleLicenseExpiry: vehicleForm.vehicleLicenseExpiry || null, insuranceExpiry: vehicleForm.insuranceExpiry || null, lastService: vehicleForm.lastService || null, nextService: vehicleForm.nextService || null }));
 
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('jwtToken');
@@ -549,8 +542,8 @@ const getApiBaseUrl = () => {
       vin: vehicle.vin || '',
       year: vehicle.year || '',
       color: vehicle.color || '',
-      currentMileage: vehicle.currentMileage || '',
-      nextServiceMileage: vehicle.nextServiceMileage || '',
+      currentMileage: vehicle.currentMileage ?? '',
+      nextServiceMileage: vehicle.nextServiceMileage ?? '',
       notes: vehicle.notes || '',
       insuranceExpiry: vehicle.insuranceExpiry ? vehicle.insuranceExpiry.split('T')[0] : ''
     });
@@ -716,30 +709,17 @@ const getApiBaseUrl = () => {
 
   const driverNames = getDriverNames();
 
-  if (isLoading) {
+  if (isLoading || introLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <Sidebar />
-        <div className="flex-1 p-6 flex items-center justify-center min-h-64">
-          <div className="text-center">
-            <div className="relative">
-              <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-100 border-t-blue-600"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-blue-600 text-2xl">🚗</span>
-              </div>
-            </div>
-            <p className="mt-4 text-gray-600 font-medium">Loading vehicle fleet...</p>
-          </div>
-        </div>
-      </div>
+      <div className="tm-app"><Sidebar /><TransportLoadingScreen /></div>
     );
   }
 
   if (error && !isLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <Sidebar />
-        <div className="flex-1 p-6 flex flex-col items-center justify-center">
+      <div className="tm-app flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <Sidebar />
+      <div className="tm-content flex-1 p-6 flex flex-col items-center justify-center">
           <div className="max-w-md p-6 bg-red-50 border border-red-400 text-red-700 rounded-lg shadow-lg">
             <h2 className="text-lg font-semibold mb-2">Error Loading Vehicles</h2>
             <p className="mb-4">{error}</p>
@@ -764,10 +744,9 @@ const getApiBaseUrl = () => {
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <div className="tm-app flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar />
-      
-      <div className="flex-1 overflow-y-auto">
+      <div className="tm-content flex-1 overflow-y-auto">
         <div className="p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
             
@@ -787,7 +766,7 @@ const getApiBaseUrl = () => {
 
             {/* Header Section */}
             <div className="mb-8">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
+              <div className="tm-surface bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
                 <div className="flex flex-col md:flex-row md:items-center justify-between">
                   <div>
                     <h1 className="text-3xl md:text-4xl font-bold mb-3">Vehicle Fleet Management</h1>
@@ -986,7 +965,7 @@ const getApiBaseUrl = () => {
               {filteredVehicles.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="mb-6">
-                    <div className="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full">
+                    <div className="tm-surface inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full">
                       <span className="text-4xl">🚗</span>
                     </div>
                   </div>
@@ -1012,7 +991,7 @@ const getApiBaseUrl = () => {
                     <div key={vehicle.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center space-x-3">
-                          <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl">
+                          <div className="tm-surface p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl">
                             <span className="text-xl text-blue-600">🚗</span>
                           </div>
                           <div>
@@ -1088,11 +1067,11 @@ const getApiBaseUrl = () => {
 
         {/* File Viewer Modal */}
         {viewingFile && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div role="dialog" aria-modal="true" aria-label="Vehicle dialog" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
             <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden animate-slideUp">
               <div className="flex items-center justify-between p-6 border-b border-gray-200">
                 <h3 className="text-xl font-semibold text-gray-900">File Viewer</h3>
-                <button
+                <button aria-label="Close file preview"
                   onClick={closeFileViewer}
                   className="text-gray-500 hover:text-gray-700"
                 >
@@ -1149,7 +1128,7 @@ const getApiBaseUrl = () => {
 
         {/* Attachments Modal */}
         {showAttachments && selectedVehicle && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-40 animate-fadeIn">
+          <div role="dialog" aria-modal="true" aria-label="Vehicle dialog" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-40 animate-fadeIn">
             <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
               <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
                 <div className="flex items-center justify-between">
@@ -1281,7 +1260,7 @@ const getApiBaseUrl = () => {
 
         {/* Vehicle Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-30 animate-fadeIn">
+          <div role="dialog" aria-modal="true" aria-label="Vehicle dialog" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-30 animate-fadeIn">
             <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
               <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
                 <div className="flex items-center justify-between">
@@ -1291,7 +1270,7 @@ const getApiBaseUrl = () => {
                     </h2>
                     <p className="text-gray-600 mt-1">Manage vehicle details and specifications</p>
                   </div>
-                  <button
+                  <button aria-label="Cancel and close dialog"
                     onClick={cancelEdit}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
@@ -1583,7 +1562,7 @@ const getApiBaseUrl = () => {
                 </div>
                 
                 <div className="flex justify-end space-x-4">
-                  <button
+                  <button aria-label="Cancel and close dialog"
                     type="button"
                     onClick={cancelEdit}
                     className="px-6 py-3 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-all duration-200"

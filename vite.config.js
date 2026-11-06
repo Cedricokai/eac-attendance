@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
     },
 
     resolve: {
+      dedupe: ['react', 'react-dom'],
       extensions: ['.js', '.jsx', '.ts', '.tsx'],
     },
 

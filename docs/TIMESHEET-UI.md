@@ -1,0 +1,7 @@
+# Timesheet presentation update — 2026-10-22
+
+The Timesheet page alone uses the Files palette: charcoal navigation, orange accents, warm white content surfaces, and a wrapping filter bar. Shared sidebar source and other attendance pages are unchanged.
+
+A presentation-only focusedEmployeeId state follows pointer and keyboard focus within either row of an employee. Both attendance and hour rows are outlined together, the identity cell is highlighted, and an employee name/ID banner and editing badge identify the current employee. This state does not select employees for bulk operations or enter/save attendance. Existing status dropdowns show ✅ beside their current value, including the bulk configuration dropdown; all option values and existing handlers remain unchanged.
+
+Verification: the business-code prefix is identical to the pre-change snapshot after removing the new stylesheet import and presentation-state declaration. AST-based comparison confirmed all 127 existing UI event handlers are identical. Timesheet ESLint findings remain at the existing 51 errors, with zero new findings; the Files component lint passed. Production Vite build passed in 1m55s. Browser checks confirmed the highlight moves between employees and covers both rows; Present and Absent display ✅ P and ✅ A. These checks used temporary unsaved selections followed by reload, with no save operation. Files waits a minimum of two seconds before opening, and still waits longer if its initial data request requires it.

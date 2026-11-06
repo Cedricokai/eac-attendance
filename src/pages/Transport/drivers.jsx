@@ -1,7 +1,10 @@
+import TransportLoadingScreen from "./TransportLoadingScreen";
+import useTransportIntro from "./useTransportIntro";
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 
 const Drivers = () => {
+  const introLoading = useTransportIntro();
   const [drivers, setDrivers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -453,30 +456,17 @@ const getApiBaseUrl = () => {
 
   const employeeNames = getEmployeeNames();
 
-  if (isLoading) {
+  if (isLoading || introLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <Sidebar />
-        <div className="flex-1 p-6 flex flex-col items-center justify-center">
-          <div className="text-center">
-            <div className="relative">
-              <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-100 border-t-blue-600"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-blue-600 text-2xl">👨‍✈️</span>
-              </div>
-            </div>
-            <p className="mt-4 text-gray-600 font-medium">Loading driver information...</p>
-          </div>
-        </div>
-      </div>
+      <div className="tm-app"><Sidebar /><TransportLoadingScreen /></div>
     );
   }
 
   if (error && !isLoading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <Sidebar />
-        <div className="flex-1 p-6 flex flex-col items-center justify-center">
+      <div className="tm-app flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <Sidebar />
+      <div className="tm-content flex-1 p-6 flex flex-col items-center justify-center">
           <div className="max-w-md p-6 bg-red-50 border border-red-400 text-red-700 rounded-lg shadow-lg">
             <h2 className="text-lg font-semibold mb-2">Error Loading Drivers</h2>
             <p className="mb-4">{error}</p>
@@ -501,10 +491,9 @@ const getApiBaseUrl = () => {
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <div className="tm-app flex min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar />
-      
-      <div className="flex-1 overflow-y-auto">
+      <div className="tm-content flex-1 overflow-y-auto">
         <div className="p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
             
@@ -524,7 +513,7 @@ const getApiBaseUrl = () => {
 
             {/* Header Section */}
             <div className="mb-8">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
+              <div className="tm-surface bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
                 <div className="flex flex-col md:flex-row md:items-center justify-between">
                   <div>
                     <h1 className="text-3xl md:text-4xl font-bold mb-3">Driver Management</h1>
@@ -618,7 +607,7 @@ const getApiBaseUrl = () => {
 
             {/* Notifications */}
             {expiryNotifications.length > 0 && (
-              <div className="mb-6 bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-200 rounded-2xl p-6 shadow-sm">
+              <div className="tm-surface mb-6 bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-200 rounded-2xl p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center">
                     <div className="p-3 bg-amber-500/20 rounded-lg mr-4">
@@ -708,7 +697,7 @@ const getApiBaseUrl = () => {
               {filteredDrivers.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="mb-6">
-                    <div className="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full">
+                    <div className="tm-surface inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full">
                       <span className="text-4xl">👨‍✈️</span>
                     </div>
                   </div>
@@ -734,7 +723,7 @@ const getApiBaseUrl = () => {
                     <div key={driver.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center space-x-3">
-                          <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl">
+                          <div className="tm-surface p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl">
                             <span className="text-xl text-blue-600">👨‍✈️</span>
                           </div>
                           <div>
@@ -798,7 +787,7 @@ const getApiBaseUrl = () => {
             {/* License Status Overview */}
             {drivers.length > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6 shadow-lg">
+                <div className="tm-surface bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-6 shadow-lg">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">License Status Overview</h3>
                   <div className="space-y-3">
                     {['valid', 'warning', 'critical', 'expired', 'unknown'].map((status) => {
@@ -825,7 +814,7 @@ const getApiBaseUrl = () => {
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl p-6 shadow-lg">
+                <div className="tm-surface bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl p-6 shadow-lg">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Stats</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center p-4 bg-white/50 rounded-xl">
@@ -853,7 +842,7 @@ const getApiBaseUrl = () => {
 
         {/* Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div role="dialog" aria-modal="true" aria-label="Driver dialog" className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
               <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
                 <div className="flex items-center justify-between">
@@ -863,7 +852,7 @@ const getApiBaseUrl = () => {
                     </h2>
                     <p className="text-gray-600 mt-1">Manage driver details and information</p>
                   </div>
-                  <button
+                  <button aria-label="Cancel and close dialog"
                     onClick={cancelEdit}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
@@ -1012,7 +1001,7 @@ const getApiBaseUrl = () => {
                 )}
                 
                 <div className="flex justify-end space-x-4">
-                  <button
+                  <button aria-label="Cancel and close dialog"
                     type="button"
                     onClick={cancelEdit}
                     className="px-6 py-3 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-all duration-200"

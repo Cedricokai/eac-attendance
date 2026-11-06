@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useCommunication } from "../Communication/communicationContext";
 import { useSettings } from "./context/SettingsContext";
 import { Link, useLocation } from "react-router-dom";
 import { 
@@ -28,6 +29,7 @@ import {
   BookOpen,
   CreditCard,
   FolderOpen,
+  MessageCircle,
   Database,
   Upload,
   UserCog,
@@ -63,6 +65,7 @@ import {
 } from "lucide-react";
 
 function MainSidebar({ isCollapsed = false }) {
+  const communicationUnread = useCommunication()?.unread || 0;
   const { settings } = useSettings();
   const location = useLocation();
   const [accessiblePages, setAccessiblePages] = useState([]);
@@ -239,6 +242,12 @@ function MainSidebar({ isCollapsed = false }) {
   // Define menu structure based on accessible pages
   const getMenuStructure = () => {
     const menuItems = [];
+    if (hasPageAccess('/communication')) {
+      menuItems.push({ type: 'link', to: '/communication', icon: <MessageCircle size={18} />, label: 'Communication' });
+    }
+    if (hasPageAccess('/files')) {
+      menuItems.push({ type: 'link', to: '/files', icon: <FolderOpen size={18} />, label: 'File Management' });
+    }
 
 
     
@@ -493,7 +502,7 @@ function MainSidebar({ isCollapsed = false }) {
                   className={`flex items-center justify-center p-3 rounded-lg transition-colors ${location.pathname === item.to ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
                   title={item.label}
                 >
-                  {item.icon}
+                  <span className="ec-navigation-icon">{item.icon}{item.to === "/communication" && communicationUnread > 0 && <span className="ec-navigation-badge" aria-label={`${communicationUnread} unread messages`}>{communicationUnread > 99 ? "99+" : communicationUnread}</span>}</span>
                 </Link>
               );
             } else if (item.type === "dropdown") {
@@ -505,7 +514,7 @@ function MainSidebar({ isCollapsed = false }) {
                     className={`flex items-center justify-center w-full p-3 rounded-lg transition-colors ${hasActiveChild ? "bg-gray-700" : "hover:bg-gray-700"}`}
                     title={item.label}
                   >
-                    {item.icon}
+                    <span className="ec-navigation-icon">{item.icon}{item.to === "/communication" && communicationUnread > 0 && <span className="ec-navigation-badge" aria-label={`${communicationUnread} unread messages`}>{communicationUnread > 99 ? "99+" : communicationUnread}</span>}</span>
                   </button>
                 </div>
               );
@@ -549,7 +558,7 @@ function MainSidebar({ isCollapsed = false }) {
                 to={item.to}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${location.pathname === item.to ? "bg-blue-600 text-white" : "hover:bg-gray-700"}`}
               >
-                {item.icon}
+                <span className="ec-navigation-icon">{item.icon}{item.to === "/communication" && communicationUnread > 0 && <span className="ec-navigation-badge" aria-label={`${communicationUnread} unread messages`}>{communicationUnread > 99 ? "99+" : communicationUnread}</span>}</span>
                 {item.label}
               </Link>
             );
@@ -564,7 +573,7 @@ function MainSidebar({ isCollapsed = false }) {
                   className={`flex justify-between items-center w-full px-4 py-3 rounded-lg transition-colors ${hasActiveChild ? "bg-gray-700" : "hover:bg-gray-700"}`}
                 >
                   <div className="flex items-center gap-3">
-                    {item.icon}
+                    <span className="ec-navigation-icon">{item.icon}{item.to === "/communication" && communicationUnread > 0 && <span className="ec-navigation-badge" aria-label={`${communicationUnread} unread messages`}>{communicationUnread > 99 ? "99+" : communicationUnread}</span>}</span>
                     {item.label}
                   </div>
                   {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

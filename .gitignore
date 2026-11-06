@@ -31,5 +31,6 @@ dist-ssr
 .codex-tmp/
 outputs/
 config.inc.php
+.collaboration-data/
 .env.*
 !.env.example

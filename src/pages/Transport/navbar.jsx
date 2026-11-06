@@ -1,6 +1,7 @@
 // src/Navbar.jsx
-import React, { useEffect, useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import Link from "./TransportLink";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "./assets/logo.png";
 import { useSettings } from "../Eac-attendance/context/SettingsContext";

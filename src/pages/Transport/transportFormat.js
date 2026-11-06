@@ -1,0 +1,2 @@
+export const transportMoney = value => value === null || value === undefined ? "Not Recorded" : new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS" }).format(Number(value));
+export const transportDate = value => value ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Africa/Accra" }).format(new Date(String(value).length === 10 ? `${value}T00:00:00Z` : value)) : "Not Recorded";

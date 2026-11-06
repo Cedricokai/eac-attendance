@@ -1,225 +1,257 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
+import Link from "./TransportLink";
 
-const Sidebar = () => {
-  const [isOpen, setIsOpen] = useState(true);
-  const [isHovered, setIsHovered] = useState(false);
+import ThemeToggle from "../../components/ThemeToggle";
+import { apiFetch } from "../../utils/api";
+import { getToken } from "../../utils/auth";
+import { transportApi } from "./transportApi";
+import "./transport.css";
+import "./transport-bento.css";
+import { canSeeTransportPage } from "./transportNavigation";
+
+const menuItems = [
+  {
+    name: "Dashboard",
+    path: "/adminDashboard",
+    group: "WORKSPACE",
+  },
+  { name: "Vehicles", path: "/vehicles" },
+  { name: "Drivers", path: "/drivers" },
+  { name: "My driver workspace", path: "/transport/driver", transport: true, driver: true },
+  { name: "Fuel management", path: "/fuel", group: "OPERATIONS" },
+  { name: "Maintenance", path: "/maintenance" },
+  { name: "Component plans", path: "/transport/components", transport: true },
+  { name: "Work orders", path: "/transport/work-orders", transport: true },
+  { name: "Routine inspections", path: "/transport/inspections", transport: true },
+  { name: "Fault reports", path: "/transport/faults", transport: true },
+  { name: "Parts procurement", path: "/transport/procurement", transport: true },
+  { name: "Documents & expiry", path: "/transport/documents", transport: true },
+  {
+    name: "Reports & analytics",
+    path: "/transportReports",
+    group: "INSIGHTS",
+  },
+  { name: "Team directory", path: "/usersmanagement" },
+  { name: "Notifications", path: "/transport/notifications", transport: true },
+  { name: "Transport settings", path: "/transport/settings", grant: "TRANSPORT_SETTINGS", transport: true },
+];
+
+export default function Sidebar() {
   const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("eac-transport-sidebar") === "collapsed",
+  );
+  const [pages, setPages] = useState(null);
+  const [transportContext, setTransportContext] = useState(null);
+  const [navigationError, setNavigationError] = useState("");
+  const [navigationRetry, setNavigationRetry] = useState(0);
+  const [notifications, setNotifications] = useState(null);
+  const notificationMenu = useRef(null);
+  const closeButton = useRef(null);
+  const menuButton = useRef(null);
+  const drawer = useRef(null);
+  const current = menuItems.find(
+    (item) => item.path.toLowerCase() === location.pathname.toLowerCase(),
+  );
+  const title = current?.name || "Transport";
+  let user = {};
+  try {
+    user = JSON.parse(localStorage.getItem("userData") || "{}");
+  } catch {
+    /* Use account fallback. */
+  }
+  const name = user.name || user.username || "Your account";
+  const roleValue =
+    user.roles?.[0] ||
+    user.role?.name ||
+    user.role ||
+    localStorage.getItem("userRole") ||
+    "Employee";
+  const role =
+    typeof roleValue === "string"
+      ? roleValue.replace(/^ROLE_/i, "").replaceAll("_", " ")
+      : "Employee";
 
-  const menuItems = [
-    {
-      name: 'Admin Dashboard',
-      path: '/admindashboard',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-        </svg>
-      ),
-      gradient: 'from-purple-500 to-blue-500'
-    },
-  
-    {
-      name: 'Vehicle Management',
-      path: '/vehicles',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-        </svg>
-      ),
-      gradient: 'from-orange-500 to-red-500'
-    },
-    {
-      name: 'Drivers',
-      path: '/drivers',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
-        </svg>
-      ),
-      gradient: 'from-blue-500 to-indigo-500'
-    },
-    {
-      name: 'Fuel Management',
-      path: '/fuel',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-        </svg>
-      ),
-      gradient: 'from-yellow-500 to-orange-500'
-    },
-    {
-      name: 'Maintenance',
-      path: '/maintenance',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-      gradient: 'from-gray-600 to-gray-700'
-    },
-    {
-      name: 'Reports & Analytics',
-      path: '/transportReports',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-        </svg>
-      ),
-      gradient: 'from-purple-600 to-pink-600'
-    }
-  ];
-
-  const isActive = (path) => {
-    return location.pathname === path;
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => transportApi("/notification-history?size=5&unreadOnly=true", { signal: controller.signal }).then(setNotifications).catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 60000);
+    if (notificationMenu.current) notificationMenu.current.open = false;
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [location.pathname]);
+  const readNotification = id => {
+    transportApi(`/notifications/${id}/read`, { method: "POST" }).then(() => setNotifications(previous => previous ? { ...previous, unreadCount: Math.max(0, previous.unreadCount - 1), items: previous.items.filter(item => item.id !== id) } : previous)).catch(() => {});
   };
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const token = getToken();
+    setNavigationError("");
+    if (token) transportApi("/context", { signal: controller.signal }).then(setTransportContext).catch(error => { if (!controller.signal.aborted) setNavigationError(error.message); });
+    if (token)
+      apiFetch("/api/pages/my-pages", {
+        signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((result) => setPages(Array.isArray(result) ? result : []))
+        .catch((error) => {
+          if (error.name !== "AbortError") setPages([]);
+        });
+    return () => controller.abort();
+  }, [navigationRetry]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "eac-transport-sidebar",
+      collapsed ? "collapsed" : "expanded",
+    );
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!open) return;
+    closeButton.current?.focus();
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        menuButton.current?.focus();
+      }
+      if (event.key === "Tab") {
+        const controls = [
+          ...drawer.current.querySelectorAll("a[href], button:not([disabled])"),
+        ].filter((el) => el.getClientRects().length);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const allowed = (item) => {
+    if (transportContext) return canSeeTransportPage(item, transportContext);
+    return !item.transport && (item.path.toLowerCase() === location.pathname.toLowerCase() || pages?.some(page => page.path?.toLowerCase() === item.path.toLowerCase()));
+  };
   return (
     <>
-      {/* Mobile menu button */}
-      <div className="lg:hidden fixed top-6 left-6 z-50">
+      {open && (
         <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="p-3 rounded-2xl bg-gradient-to-br from-gray-800 to-gray-900 backdrop-blur-sm shadow-lg text-white hover:from-gray-700 hover:to-gray-800 transition-all duration-300 hover:shadow-xl"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Overlay for mobile */}
-      {isOpen && (
-        <div 
-          className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
-          onClick={() => setIsOpen(false)}
+          className="tm-drawer-shade"
+          aria-label="Close transport navigation"
+          onClick={() => {
+            setOpen(false);
+            menuButton.current?.focus();
+          }}
         />
       )}
-
-      {/* Sidebar */}
-      <div 
-        className={`
-          fixed lg:static inset-y-0 left-0 z-40
-          transform ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-          lg:translate-x-0 transition-all duration-500 ease-in-out
-          w-80
-        `}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+      <aside
+        ref={drawer}
+        className={`tm-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
+        aria-label="Transport sidebar"
       >
-        {/* Beautiful Gradient Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900" />
-        
-        {/* Animated Background Elements */}
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-0 left-0 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
-          <div className="absolute bottom-0 right-0 w-72 h-72 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse animation-delay-2000"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl animate-pulse animation-delay-4000"></div>
-        </div>
-        
-        {/* Content */}
-        <div className="relative z-10 h-full flex flex-col">
-          {/* Logo Section */}
-          <div className="flex items-center justify-between px-8 py-6 border-b border-white/10">
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl">
-                  <span className="text-white font-bold list-image-img">log</span>
-                </div>
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-gray-900 shadow-lg"></div>
+        <Link className="tm-brand" to="/centralizedDashboard">
+          <span className="tm-brand-mark">E</span>
+          <span className="tm-brand-name">
+            EAC Transport<small>YOUR FLEET, CONNECTED</small>
+          </span>
+        </Link>
+        <button
+          ref={closeButton}
+          className="tm-close-drawer"
+          aria-label="Close navigation"
+          onClick={() => {
+            setOpen(false);
+            menuButton.current?.focus();
+          }}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+        <div className="tm-workspace-label">TRANSPORT WORKSPACE</div>
+        <nav aria-label="Transport navigation">
+          {navigationError && <div className="tm-nav-error" role="alert"><p>Transport permissions could not be loaded. {navigationError}</p><button onClick={() => setNavigationRetry(value => value + 1)}>Retry navigation</button></div>}
+          {menuItems.filter(allowed).map((item) => {
+            const active =
+              item.path.toLowerCase() === location.pathname.toLowerCase();
+            return (
+              <div key={item.path}>
+                {item.group && (
+                  <span className="tm-nav-group">{item.group}</span>
+                )}
+                <Link
+                  to={item.path}
+                  title={collapsed ? item.name : undefined}
+                  aria-label={item.name}
+                  aria-current={active ? "page" : undefined}
+                  className={`tm-nav-link ${active ? "is-active" : ""}`}
+                  onClick={() => setOpen(false)}
+                >
+                  <b className="tm-nav-short" aria-hidden="true">{item.name.split(/\s+/).slice(0,2).map(word=>word[0]).join("")}</b>
+                  <span>{item.name}</span>
+                  {active && <i aria-hidden="true" />}
+                </Link>
               </div>
-              <div className={`transition-all duration-300 ${isHovered ? 'opacity-100' : 'lg:opacity-100 opacity-100'}`}>
-                <p className="text-xs text-gray-300 font-medium">Management System</p>
-              </div>
+            );
+          })}
+        </nav>
+        <div className="tm-sidebar-bottom">
+          <Link className="tm-back-link" to="/centralizedDashboard">
+            <span aria-hidden="true">←</span>
+            <span>Back to EAC</span>
+          </Link>
+          <button
+            className="tm-collapse"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <span aria-hidden="true">›</span> : <span aria-hidden="true">‹</span>}
+            <span>Collapse sidebar</span>
+          </button>
+          <div className="tm-account">
+            <span className="tm-account-avatar">
+              {name.charAt(0).toUpperCase()}
+            </span>
+            <div>
+              <strong>{name}</strong>
+              <small>{role}</small>
             </div>
-            
-            {/* Close button for mobile */}
-            <button
-              onClick={() => setIsOpen(false)}
-              className="lg:hidden p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-200"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
           </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 px-6 py-8">
-            <div className="space-y-2">
-              {menuItems.map((item) => {
-                const active = isActive(item.path);
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.path}
-                    onClick={() => window.innerWidth < 1024 && setIsOpen(false)}
-                    className={`
-                      group relative flex items-center px-4 py-4 text-sm font-semibold rounded-2xl transition-all duration-300
-                      ${active 
-                        ? 'text-white shadow-2xl transform scale-105' 
-                        : 'text-gray-300 hover:text-white hover:bg-white/10 hover:shadow-lg'
-                      }
-                      ${isHovered ? 'justify-start' : 'lg:justify-center justify-start'}
-                    `}
-                  >
-                    {/* Active background gradient */}
-                    {active && (
-                      <div className={`absolute inset-0 bg-gradient-to-r ${item.gradient} rounded-2xl shadow-2xl`} />
-                    )}
-                    
-                    {/* Hover effect */}
-                    {!active && (
-                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 rounded-2xl transition-all duration-300" />
-                    )}
-                    
-                    {/* Icon */}
-                    <div className={`relative z-10 transition-all duration-300 ${isHovered ? 'mr-4' : 'lg:mr-0 mr-4'}`}>
-                      <div className={`
-                        p-2 rounded-xl transition-all duration-300
-                        ${active 
-                          ? 'bg-white/20 text-white shadow-lg' 
-                          : 'bg-white/5 text-gray-400 group-hover:bg-white/10 group-hover:text-white group-hover:shadow-md'
-                        }
-                      `}>
-                        {item.icon}
-                      </div>
-                    </div>
-                    
-                    {/* Text */}
-                    <span className={`relative z-10 transition-all duration-300 ${
-                      isHovered ? 'opacity-100 translate-x-0' : 'lg:opacity-0 lg:translate-x-4 opacity-100 translate-x-0'
-                    } ${active ? 'text-white' : 'text-gray-300'}`}>
-                      {item.name}
-                    </span>
-                    
-                    {/* Active indicator */}
-                    {active && (
-                      <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
-                        <div className="w-2 h-2 bg-white rounded-full shadow-lg" />
-                      </div>
-                    )}
-                    
-                    {/* Glow effect for active items */}
-                    {active && (
-                      <div className="absolute inset-0 bg-white/10 rounded-2xl blur-sm" />
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
-          </nav>
-
-          {/* User Profile Section */}
-          
-
-          {/* System Status */}
-         
         </div>
-      </div>
+      </aside>
+      <header className="tm-topbar">
+        <div className="tm-topbar-left">
+          <button
+            ref={menuButton}
+            className="tm-open-drawer"
+            aria-label="Open transport navigation"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+          >
+            <span>Menu</span>
+          </button>
+          <span className="tm-topbar-module">
+             Transport
+          </span>
+          <span className="tm-breadcrumb-divider" aria-hidden="true">/</span>
+          <span className="tm-current-page">{title}</span>
+        </div>
+        <div className="tm-topbar-right">
+          <span className="tm-workspace-tag">EAC workspace</span>
+          {transportContext && <details className="tm-notification-menu" ref={notificationMenu}><summary aria-label={`Transport notifications, ${notifications?.unreadCount ?? 0} unread`}><span>Alerts</span>{notifications?.unreadCount > 0 && <span className="tm-notification-count">{notifications.unreadCount > 99 ? "99+" : notifications.unreadCount}</span>}</summary><div className="tm-notification-dropdown"><strong>Transport notifications</strong>{notifications?.items.length ? <ul>{notifications.items.map(item => <li key={item.id}><Link to={item.targetPath?.startsWith("/") && !item.targetPath.startsWith("//") ? item.targetPath : "/transport/notifications"} onClick={() => readNotification(item.id)}><b>{item.title}</b><span>{item.body}</span></Link></li>)}</ul> : <p>No unread notifications.</p>}<Link to="/transport/notifications">View notification history</Link></div></details>}
+          <ThemeToggle />
+          <span className="tm-topbar-avatar" title={name}>
+            {name.charAt(0).toUpperCase()}
+          </span>
+        </div>
+      </header>
     </>
   );
-};
-
-export default Sidebar;
+}

@@ -1,0 +1,26 @@
+# Existing Synology deployment
+
+The backend already has an `eac-system` service, an existing MySQL service, and a separate `eac-website` service. Keep those database volumes and the website service. The optional `docker-compose.files.override.yml` extends this stack with file storage and a collaboration sidecar; nothing has been deployed remotely by this work.
+
+1. Take an independent, restorable backup of the existing database and uploads. Schedule a maintenance window before changing storage mounts. Copy existing `uploads/file-suite` contents into the new file volume, retaining the opaque UUID filenames. Do not start with an empty directory against existing metadata.
+2. Place `Dockerfile.files` with the backend source in the existing stack's `eac-system` build directory. Place the frontend source on the NAS and set `EAC_FRONTEND_PATH` to that directory. This is a source build, rather than the older Dockerfile that expects an already copied JAR.
+3. Create protected NAS directories for files, backups, and collaboration state. The backend image preserves the existing backend's runtime identity and MySQL backup tools; the collaboration image uses UID/GID 1000. Give only the appropriate service accounts and administrators access. Review every legacy upload/backup mount before changing the backend UID. Use separate backup storage and an off-device copy; a second folder on the same disk does not protect against disk failure.
+4. In the stack's private environment, set `APP_FILES_COLLABORATION_KEY` to a random value of at least 48 bytes, `EAC_FRONTEND_URL` to the actual HTTPS frontend origin (no trailing slash), and `EAC_FRONTEND_PATH`. Optional paths are `EAC_FILES_ROOT`, `EAC_FILE_BACKUPS_ROOT`, and `EAC_COLLABORATION_ROOT`. Keep secrets out of source control and browser `VITE_` variables. Review existing Compose credentials separately; this override does not copy them.
+5. Review the merged configuration with `docker compose -f docker-compose-synology.yml -f docker-compose.files.override.yml config`. That command prints environment values, so keep its output private. Build and update only `eac-system` and `eac-collaboration` after reviewing the configuration. Do not use `down -v` or recreate MySQL.
+6. Configure the Synology reverse proxy to forward the frontend origin's `/collaboration` WebSocket route to `127.0.0.1:1234`. Preserve WebSocket upgrade headers and use HTTPS/WSS externally. The collaboration port is bound to loopback in the override. Its backend requests stay on the existing Docker network. Explicitly set `VITE_COLLABORATION_URL` at frontend build time if the proxy uses a different public URL.
+7. Set `VITE_API_BASE_URL` to the existing HTTPS backend origin before building the frontend. Existing local/public API fallbacks remain available when this variable is absent. Deploy the resulting `dist` through the existing frontend container; the original frontend Dockerfile remains unchanged.
+8. Confirm login, page permissions, upload/download checksum, saved versions, two-user collaboration, revoked access, and a backup restore into a new private folder. Restart only the application containers and confirm the same files and versions remain accessible.
+
+The existing backend uses Hibernate schema updates. New entities are additive `file_*` tables and use the existing users and employee accounts. Review schema changes against a database copy before production deployment; do not run schema recreation against the live database.
+
+# Backup boundaries
+
+The file-suite archive contains file-tree metadata and every immutable file version, including recycled content. Each object and archive has a SHA-256 checksum. Database mode stores the archive in 1 MB chunks and is capped at 256 MB; filesystem mode is configurable up to 10 GB. A snapshot holds the file-write coordination lock while copying content, so large backups temporarily delay saves. Recovery verifies the archive and every object before creating private recovered copies; original files and current permissions are preserved. Scheduled snapshot retention applies only to scheduled backups, while manual backups remain available.
+
+Accounts, attendance tables, page permissions, share grants, guest tokens, unsaved edits, and the full application database are not restored by this file-copy recovery flow. Keep matching database backups using the existing EAC database-backup facility or an administrator-managed MySQL snapshot. Do not replay old guest sessions or grants during file recovery.
+
+# Operational limits
+
+Synchronous snapshots support up to 50,000 items / 250,000 versions and recovery up to 5,000 items. Metadata analytics and quota target pickers are intended for this deployment size; large installations should replace the remaining metadata aggregation scans with grouped SQL and background jobs. Every native live document is limited to 20 MB. Multiple collaboration instances need explicit routing/shared persistence; this configuration intentionally runs one collaboration instance.
+
+SMTP must use the existing EAC email service with valid credentials before external invitations or verification codes can be delivered. External sharing is disabled by default. An email delivery failure is displayed instead of being reported as success.
