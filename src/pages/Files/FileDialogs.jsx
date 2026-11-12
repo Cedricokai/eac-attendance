@@ -231,14 +231,14 @@ export function ShareDialog({ item, onClose, refresh }) {
           >
             <option value="">Select an employee account</option>
             {people.map((p) => (
-              <option key={p.userId} value={p.userId}>
-                {p.name} · {p.employeeId || p.email}
+              <option key={p.userId ?? `employee-${p.employeeId}`} value={p.userId ?? ""} disabled={p.userId == null}>
+                {p.name} · {p.employeeId || p.email}{p.userId == null ? " · No active linked account" : ""}
               </option>
             ))}
           </select>
           {people.length === 0 && (
             <small>
-              No matching active employees with linked EAC accounts.
+              No matching employees.
             </small>
           )}
         </label>
@@ -516,7 +516,7 @@ export function DestinationDialog({ item, mode, onClose, refresh }) {
   );
 }
 
-export function CommentsDialog({ item, onClose }) {
+export function CommentsDialog({ item, onClose, inline = false }) {
   const [comments, setComments] = useState([]);
   const [body, setBody] = useState("");
   const [thread, setThread] = useState(null);
@@ -526,13 +526,24 @@ export function CommentsDialog({ item, onClose }) {
     item.access,
   );
   useEffect(() => {
-    fileApi(`/${item.id}/comments`)
-      .then(setComments)
-      .catch((e) => setError(e.message));
-  }, [item.id]);
+    const controller = new AbortController();
+    let running = false;
+    const refresh = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const rows = await fileApi(`/${item.id}/comments`, { signal: controller.signal });
+        if (!controller.signal.aborted) setComments(rows);
+      } catch (e) {
+        if (!controller.signal.aborted) { setComments([]); setError(e.message); }
+      } finally { running = false; }
+    };
+    refresh();
+    const interval = inline ? setInterval(refresh, 5000) : null;
+    return () => { controller.abort(); clearInterval(interval); };
+  }, [item.id, inline]);
   const reload = async () => setComments(await fileApi(`/${item.id}/comments`));
-  return (
-    <FileModal title={`Comments · ${item.name}`} onClose={onClose}>
+  const content = (<>
       {error && (
         <p className="fm-error" role="alert">
           {error}
@@ -648,8 +659,11 @@ export function CommentsDialog({ item, onClose }) {
           </footer>
         </form>
       )}
-    </FileModal>
-  );
+    </>);
+  return inline
+    ? <section className="fm-office-comments" aria-label="Comments box"><header><strong>Comments box</strong><button type="button" onClick={onClose}>Close</button></header>{content}</section>
+    : <FileModal title={`Comments · ${item.name}`} onClose={onClose}>{content}</FileModal>;
+
 }
 
 export function ExternalInvitationDialog({ item, onClose }) {

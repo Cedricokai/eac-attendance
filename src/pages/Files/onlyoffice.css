@@ -47,3 +47,18 @@
 
 /* Password entry keeps a visible caret in light and dark modes. */
 .fm-modal input[type="password"]{cursor:text;caret-color:currentColor;}
+
+.fm-sheet-access .fm-sheet-person { display:grid; grid-template-columns:minmax(0,1fr) minmax(100px,155px); align-items:center; }
+.fm-sheet-access .fm-sheet-person label { min-width:0; margin:0; }
+.fm-sheet-access .fm-sheet-person input[type="checkbox"] { width:18px; flex:0 0 18px; }
+.fm-sheet-access .fm-sheet-person select { width:100%; min-width:0; }
+.fm-sheet-person strong { overflow-wrap:break-word; }
+.fm-office-comments { max-height:420px; overflow:auto; background:white; border:1px solid #dce5df; padding:12px; margin:8px 0; border-radius:10px; color:#24312b; }
+.fm-office-comments header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.fm-office-comments textarea { display:block; width:100%; }
+.fm-office-editor-area { display:flex; position:relative; flex:1; min-height:350px; min-width:0; }
+.fm-office-editor-area .fm-onlyoffice-host { min-width:0; }
+.fm-office-editor-area .fm-office-comments { flex:0 0 min(330px,40%); max-height:none; min-height:0; margin:0; border-radius:0; }
+@media(max-width:640px) {
+  .fm-office-editor-area .fm-office-comments { position:absolute; z-index:4; top:0; right:0; bottom:0; width:min(330px,90%); box-shadow:0 4px 18px #0003; }
+}
